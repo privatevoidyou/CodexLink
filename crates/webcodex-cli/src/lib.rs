@@ -2444,6 +2444,9 @@ fn parse_cli_runner_init(args: &[String]) -> Result<RunnerInitOptions, String> {
         project_registry_dir: PathBuf::new(),
         output: PathBuf::new(),
         allowed_roots: Vec::new(),
+        // Explicit `webcodex runner init` keeps the upstream execution default.
+        // Product-managed CodexLink enrollment overrides this to false.
+        allow_raw_shell: true,
         allow_cwd_anywhere: false,
         overwrite: false,
     };

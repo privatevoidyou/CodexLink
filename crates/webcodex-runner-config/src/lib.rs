@@ -50,6 +50,9 @@ pub struct RunnerInitOptions {
     pub project_registry_dir: PathBuf,
     pub output: PathBuf,
     pub allowed_roots: Vec<PathBuf>,
+    /// Master gate for model-authored command/process/script execution.
+    /// CodexLink-managed Runners set this false until an OS sandbox is explicitly enabled.
+    pub allow_raw_shell: bool,
     pub allow_cwd_anywhere: bool,
     pub overwrite: bool,
 }
@@ -333,7 +336,7 @@ pub fn generated_runner_config_toml(opts: &RunnerInitOptions) -> Result<String, 
             runner_config_control: false,
         },
         policy: GeneratedRunnerPolicy {
-            allow_raw_shell: true,
+            allow_raw_shell: opts.allow_raw_shell,
             allow_cwd_anywhere: opts.allow_cwd_anywhere,
             allowed_roots: effective_roots,
             max_timeout_secs: DEFAULT_MAX_TIMEOUT_SECS,
@@ -463,6 +466,7 @@ mod tests {
             project_registry_dir: PathBuf::from("/etc/webcodex/project-registry"),
             output,
             allowed_roots: vec![PathBuf::from("/srv/projects")],
+            allow_raw_shell: true,
             allow_cwd_anywhere: false,
             overwrite: false,
         }
@@ -525,6 +529,15 @@ mod tests {
             assert!(!content.contains("structured_go_test_tool"));
             assert!(!content.contains("job_state_reconciliation"));
         }
+    }
+
+    #[test]
+    fn generated_config_preserves_explicit_execution_gate() {
+        let mut opts = init_opts(PathBuf::from("-"));
+        opts.allow_raw_shell = false;
+        let content = generated_runner_config_toml(&opts).unwrap();
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(parsed["policy"]["allow_raw_shell"].as_bool(), Some(false));
     }
 
     #[test]

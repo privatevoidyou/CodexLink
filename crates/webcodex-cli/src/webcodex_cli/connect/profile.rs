@@ -675,7 +675,8 @@ pub(super) fn render_runner_document(
         .or_insert_with(|| TomlValue::Table(Table::new()))
         .as_table_mut()
         .ok_or_else(|| format!("Runner config {} has a non-table policy", path.display()))?;
-    policy.insert("allow_raw_shell".to_string(), TomlValue::Boolean(true));
+    // Hosted/profile refreshes must not silently reopen model-authored command execution.
+    policy.insert("allow_raw_shell".to_string(), TomlValue::Boolean(false));
     policy.insert("allow_cwd_anywhere".to_string(), TomlValue::Boolean(false));
     let mut roots = policy
         .get("allowed_roots")
@@ -990,6 +991,11 @@ mod tests {
             Some(legacy_registry.to_string_lossy().as_ref())
         );
         assert_eq!(parsed["custom_field"].as_str(), Some("preserved"));
+        assert_eq!(
+            parsed["policy"]["allow_raw_shell"].as_bool(),
+            Some(false),
+            "Connect profile refresh must not reopen model-authored local execution"
+        );
     }
 
     #[cfg(unix)]

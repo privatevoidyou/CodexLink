@@ -576,6 +576,9 @@ pub(crate) fn stage_connection(
         project_registry_dir: published_project_registry_dir.to_path_buf(),
         output: paths.runner_config.clone(),
         allowed_roots: allowed_roots.to_vec(),
+        // CodexLink safe mode: model-authored shell/process/script execution stays
+        // disabled until a real OS sandbox is evaluated and explicitly enabled.
+        allow_raw_shell: false,
         allow_cwd_anywhere: false,
         overwrite: true,
     })?;
@@ -1362,6 +1365,11 @@ mod tests {
         let runner_config = std::fs::read_to_string(&paths.runner_config).unwrap();
         assert!(runner_config.contains(AGENT_TOKEN));
         let parsed: toml::Value = toml::from_str(&runner_config).unwrap();
+        assert_eq!(
+            parsed["policy"]["allow_raw_shell"].as_bool(),
+            Some(false),
+            "CodexLink-managed login must keep model-authored local execution disabled"
+        );
         let configured_project_registry_dir = PathBuf::from(
             parsed
                 .get("project_registry_dir")

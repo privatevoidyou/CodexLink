@@ -2084,6 +2084,27 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // Advertise the distinct capability only because this binary installs the
     // bounded typed prepare/incoming/outgoing traversal implementation.
     capabilities.lsp_call_hierarchy = true;
+    // CodexLink safe mode treats allow_raw_shell as the master gate for every
+    // model-authored local code-execution surface. Keep typed file/LSP/internal
+    // Runner plumbing available, but do not advertise tools that the policy will
+    // reject before spawn.
+    if !cfg.policy.allow_raw_shell {
+        capabilities.shell = false;
+        capabilities.async_shell_jobs = false;
+        capabilities.ssh_shell = false;
+        capabilities.persistent_shell = false;
+        capabilities.ssh_persistent_shell = false;
+        capabilities.structured_validation_argv = false;
+        capabilities.structured_cargo_test_count_assertion = false;
+        capabilities.structured_cargo_test_execution_policy = false;
+        capabilities.structured_go_test_json = false;
+        capabilities.structured_go_test_tool = false;
+        capabilities.structured_go_test_packages = false;
+        capabilities.structured_process_argv = false;
+        capabilities.structured_script_payload = false;
+        capabilities.structured_execution_jobs = false;
+        capabilities.detached_process_jobs = false;
+    }
     capabilities
 }
 
@@ -2125,7 +2146,8 @@ fn build_register_request_with_provider_status(
         .map(|manager| manager.providers())
         .unwrap_or_default();
     let coding_agent_inventory = runtime.coding_agents().map(|manager| manager.inventory());
-    capabilities.coding_agent_runs = !coding_agent_providers.is_empty();
+    capabilities.coding_agent_runs =
+        hot.policy.allow_raw_shell && !coding_agent_providers.is_empty();
     let (mut tool_providers, revision) = hot.external_tools.registration_status();
     tool_providers.config_reload = hot.reload_status();
     (

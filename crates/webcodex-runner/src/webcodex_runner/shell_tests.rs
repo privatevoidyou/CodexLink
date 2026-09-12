@@ -510,6 +510,97 @@ fn pre_spawn_rejection_is_not_started() {
 }
 
 #[test]
+fn codexlink_safe_policy_rejects_model_authored_process_and_script_before_spawn() {
+    let cwd = tempfile::tempdir().unwrap();
+    let project_registry_dir = tempfile::tempdir().unwrap();
+    let mut policy = unrestricted_policy();
+    policy.allow_raw_shell = false;
+
+    let process = run_process_with_profiles_and_execution_state(
+        1,
+        &policy,
+        &ShellConfig::default(),
+        project_registry_dir.path(),
+        &PreparedShellProfileCache::default(),
+        Some(cwd.path().to_string_lossy().as_ref()),
+        "definitely-not-a-real-executable",
+        &[],
+        None,
+        10,
+        None,
+    );
+    assert_eq!(
+        process.execution_state,
+        ShellCommandExecutionState::NotStarted
+    );
+    assert!(process.result.exit_code.is_none());
+    assert!(process
+        .result
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("disabled by local Runner policy"));
+
+    let script = run_script_with_profiles_and_execution_state(
+        1,
+        &policy,
+        &ShellConfig::default(),
+        project_registry_dir.path(),
+        &PreparedShellProfileCache::default(),
+        Some(cwd.path().to_string_lossy().as_ref()),
+        &ShellScriptPayload {
+            language: ShellScriptLanguage::Powershell,
+            script: "Write-Output should-not-run".to_string(),
+            args: Vec::new(),
+        },
+        None,
+        10,
+        None,
+    );
+    assert_eq!(
+        script.execution_state,
+        ShellCommandExecutionState::NotStarted
+    );
+    assert!(script.result.exit_code.is_none());
+    assert!(script
+        .result
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("disabled by local Runner policy"));
+}
+
+#[cfg(windows)]
+#[test]
+fn codexlink_safe_policy_keeps_runner_generated_internal_scripts_separate() {
+    let cwd = tempfile::tempdir().unwrap();
+    let project_registry_dir = tempfile::tempdir().unwrap();
+    let mut policy = unrestricted_policy();
+    policy.allow_raw_shell = false;
+    let result = run_internal_search_script_with_profiles_and_execution_state(
+        1,
+        &policy,
+        &ShellConfig::default(),
+        project_registry_dir.path(),
+        &PreparedShellProfileCache::default(),
+        Some(cwd.path().to_string_lossy().as_ref()),
+        "",
+        10,
+        None,
+    );
+    assert_eq!(
+        result.execution_state,
+        ShellCommandExecutionState::NotStarted
+    );
+    let error = result.result.error.as_deref().unwrap_or_default();
+    assert!(error.contains("empty"), "{error}");
+    assert!(
+        !error.contains("disabled by local Runner policy"),
+        "{error}"
+    );
+}
+
+#[test]
 fn terminal_process_result_is_completed() {
     let result = run_shell_impl(
         &unrestricted_policy(),
