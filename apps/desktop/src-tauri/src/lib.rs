@@ -8,6 +8,7 @@ mod operation;
 mod platform;
 mod process;
 mod state;
+mod state_migration;
 mod tray;
 mod tunnel_config;
 mod webcodex;
@@ -31,6 +32,7 @@ pub fn run() {
         ))
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
+            state_migration::migrate_legacy_state_if_needed(&data_dir)?;
             let resource_dir = app.path().resource_dir()?;
             app.manage(AppState::new(data_dir, resource_dir)?);
             app.manage(desktop_shell::DesktopShellState::default());

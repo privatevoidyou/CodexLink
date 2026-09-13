@@ -2587,7 +2587,7 @@ fn local_enrollment_directory(data_dir: &Path, config: &StoredDesktopConfig) -> 
     let root = data_dir
         .canonicalize()
         .unwrap_or_else(|_| data_dir.to_path_buf())
-        .join("local-connections");
+        .join("connections");
     let first = root.join("a");
     let saved_runner = config
         .runtime
@@ -3363,6 +3363,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut config = test_stored_config("previous");
         let first = local_enrollment_directory(&dir, &config);
+        assert!(first.ends_with(std::path::Path::new("connections").join("a")));
+        assert!(!first.to_string_lossy().contains("local-connections"));
         let saved_runner = first.join("server").join("runner.toml");
         std::fs::create_dir_all(saved_runner.parent().unwrap()).unwrap();
         std::fs::write(&saved_runner, "previous project fixture").unwrap();
