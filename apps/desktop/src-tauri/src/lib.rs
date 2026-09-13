@@ -67,7 +67,7 @@ pub fn run() {
             commands::get_bounded_activity,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build WebCodex Desktop");
+        .expect("failed to build CodexLink");
 
     app.run(|app_handle, event| match event {
         tauri::RunEvent::WindowEvent {
@@ -103,4 +103,30 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod product_identity_tests {
+    #[test]
+    fn tauri_product_identity_is_codexlink() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid Tauri config");
+
+        assert_eq!(config["productName"], "CodexLink");
+        assert_eq!(config["mainBinaryName"], "CodexLink");
+        assert_eq!(config["identifier"], "dev.codexlink.desktop");
+        assert_eq!(config["app"]["windows"][0]["title"], "CodexLink");
+
+        let html = include_str!("../../index.html");
+        assert!(html.contains("<title>CodexLink</title>"));
+        assert!(!html.contains("<title>WebCodex</title>"));
+
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json"))
+                .expect("valid default capability");
+        assert_eq!(
+            capability["description"],
+            "Minimal CodexLink window permissions"
+        );
+    }
 }

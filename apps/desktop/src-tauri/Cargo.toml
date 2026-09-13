@@ -1,7 +1,7 @@
 [package]
 name = "webcodex-desktop"
 version = "0.4.1"
-description = "WebCodex Desktop runtime and setup control surface"
+description = "CodexLink desktop shell powered by the WebCodex Engine"
 edition = "2021"
 publish = false
 

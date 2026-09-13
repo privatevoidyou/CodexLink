@@ -167,7 +167,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = build_menu(app, &projection)?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .tooltip("WebCodex Desktop")
+        .tooltip("CodexLink")
         .icon_as_template(cfg!(target_os = "macos"))
         .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
@@ -275,7 +275,7 @@ fn build_menu(app: &AppHandle, projection: &TrayProjection) -> tauri::Result<Men
         None::<&str>,
     )?;
     let status_separator = PredefinedMenuItem::separator(app)?;
-    let open = MenuItem::with_id(app, OPEN_ID, "Open WebCodex", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, OPEN_ID, "Open CodexLink", true, None::<&str>)?;
     let activity = MenuItem::with_id(app, ACTIVITY_ID, "Activity…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     menu.append_items(&[
@@ -350,7 +350,7 @@ fn build_menu(app: &AppHandle, projection: &TrayProjection) -> tauri::Result<Men
         None::<&str>,
     )?;
     let quit_separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit WebCodex", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "Quit CodexLink", true, None::<&str>)?;
     menu.append_items(&[
         &preferences_separator,
         &launch_at_login,

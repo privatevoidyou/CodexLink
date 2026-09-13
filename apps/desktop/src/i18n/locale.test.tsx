@@ -26,6 +26,46 @@ function LocaleProbe() {
 }
 
 describe("LocaleProvider", () => {
+  it("uses the CodexLink UI preference namespace", () => {
+    expect(LOCALE_STORAGE_KEY).toBe("codexlink.desktop.locale");
+  });
+
+  it("keeps product-shell branding on CodexLink in every locale", () => {
+    const productBrandKeys = [
+      "app.loading",
+      "operation.localSetup",
+      "home.service",
+      "home.serviceLocal",
+      "readiness.serviceNeedsAttention",
+      "action.startOrReconnectService",
+      "first.welcome",
+      "first.localTitle",
+      "setup.localTitle",
+      "setup.setUp",
+      "powershell7.fallbackAvailable",
+      "powershell7.restartHint",
+      "connection.description",
+      "connection.localDescription",
+      "connection.runtimeRequired",
+      "activity.source.service",
+      "activity.localSetupPreparing",
+      "activity.localRuntimeReady",
+      "settings.launchAtLogin",
+      "settings.launchAtLoginHelp",
+      "tunnelConfig.restartRequired",
+      "error.serverTitle",
+      "error.runtimeAction",
+    ] as const;
+
+    for (const locale of Object.keys(messages) as Locale[]) {
+      for (const key of productBrandKeys) {
+        const text = messages[locale][key];
+        expect(text, `${locale}: ${key}`).toContain("CodexLink");
+        expect(text, `${locale}: ${key}`).not.toContain("WebCodex");
+      }
+    }
+  });
+
   it.each(LANGUAGES)("persists and restores $value", async ({ value }) => {
     const first = render(<LocaleProvider><LocaleProbe /></LocaleProvider>);
     fireEvent.change(screen.getByRole("combobox"), { target: { value } });

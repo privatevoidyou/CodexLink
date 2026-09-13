@@ -219,7 +219,7 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValue(stopped);
     api.refresh.mockResolvedValue(stopped);
     renderApp();
-    await screen.findByRole("heading", { name: "WebCodex", level: 1 });
+    await screen.findByRole("heading", { name: "CodexLink", level: 1 });
     expect(screen.getByRole("status")).toHaveTextContent("已停止");
     expect(screen.getByRole("button", { name: "启动" })).toBeEnabled();
     expect(screen.queryByText(/运行环境正常/)).not.toBeInTheDocument();
@@ -260,7 +260,7 @@ describe("semantic Desktop UI", () => {
       { sequence: 3, timestamp_ms: 3, source: "desktop", level: "info", event_kind: "project_activated", message: "sample-project" },
     ]);
     renderApp();
-    await screen.findByRole("heading", { name: "WebCodex", level: 1 });
+    await screen.findByRole("heading", { name: "CodexLink", level: 1 });
     expect(screen.getByText(/如果目录为空/)).toBeInTheDocument();
     expect(screen.queryByText(/读取.*README/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "活动" }));
@@ -312,7 +312,7 @@ describe("semantic Desktop UI", () => {
     expect(screen.getByText("查看运行诊断").closest("details")).not.toHaveAttribute("open");
     fireEvent.click(screen.getByRole("button", { name: "选择其他项目" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Picker unavailable");
-    expect(screen.getByRole("heading", { level: 1, name: "WebCodex" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "CodexLink" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "repo" })).toBeInTheDocument();
     expect(api.configureLocal).not.toHaveBeenCalled();
   });
@@ -348,7 +348,7 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValue(firstRunState);
     api.updateTunnelConfig.mockRejectedValue({ code: "tunnel_config_save_failed", message: "Could not save", next_action: "Retry." });
     renderApp();
-    fireEvent.click(await screen.findByRole("button", { name: /在此电脑使用 WebCodex/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /在此电脑使用 CodexLink/ }));
     const tunnelInput = screen.getByLabelText("Tunnel ID");
     fireEvent.change(tunnelInput, { target: { value: "tunnel_test" } });
     const key = screen.getByLabelText("Tunnel API key");
@@ -427,7 +427,7 @@ describe("semantic Desktop UI", () => {
     await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(projectC.path));
     expect(api.configureLocal).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getAllByText(projectC.path)).toHaveLength(2));
-    expect(screen.queryByRole("button", { name: /在此电脑使用 WebCodex/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /在此电脑使用 CodexLink/ })).not.toBeInTheDocument();
     expect(screen.getByText("Tunnel 已就绪，等待 ChatGPT")).toBeInTheDocument();
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
   });
@@ -441,7 +441,7 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
     fireEvent.click(screen.getByRole("button", { name: /添加项目/ }));
 
-    expect(await screen.findByRole("button", { name: /在此电脑使用 WebCodex/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(api.activateLocalProject).not.toHaveBeenCalled();
     expect(api.configureLocal).not.toHaveBeenCalled();
   });
@@ -499,15 +499,15 @@ describe("semantic Desktop UI", () => {
     api.configureLocal.mockResolvedValue(tunneledState);
 
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
-    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 WebCodex/ }));
+    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     expect(screen.queryByRole("checkbox", { name: "配置完成后连接 ChatGPT" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "配置 WebCodex" }));
+    fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
 
     await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(tunneledState.project!.path));
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
-    expect(await screen.findByRole("heading", { level: 1, name: "WebCodex" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "CodexLink" })).toBeInTheDocument();
   });
 
   it("navigates by accessible role/name and marks the current page", async () => {
@@ -515,7 +515,7 @@ describe("semantic Desktop UI", () => {
     api.refresh.mockResolvedValue(readyState);
     renderApp();
 
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     const home = screen.getByRole("button", { name: "首页" });
     const connection = screen.getByRole("button", { name: "连接" });
     expect(home).toHaveAttribute("aria-current", "page");
@@ -543,7 +543,7 @@ describe("semantic Desktop UI", () => {
     api.refresh.mockResolvedValue(observed);
     renderApp();
 
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     const connectionCard = screen.getByText("ChatGPT 连接").closest("article");
     expect(connectionCard).not.toBeNull();
     expect(connectionCard!.querySelector(".status-dot")).toHaveClass("ready");
@@ -563,7 +563,7 @@ describe("semantic Desktop UI", () => {
     api.refresh.mockResolvedValue(readyState);
     renderApp();
 
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     const connectionCard = screen.getByText("ChatGPT 连接").closest("article");
     expect(connectionCard).not.toBeNull();
     expect(connectionCard).toHaveTextContent("不由 Desktop 管理连接");
@@ -660,7 +660,7 @@ describe("semantic Desktop UI", () => {
     };
     api.getState.mockResolvedValue(missingKey);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
 
     const diagnostics = screen.getByText("OpenAI Tunnel 配置检测").closest("article");
@@ -696,7 +696,7 @@ describe("semantic Desktop UI", () => {
   it("navigates to existing Activity and Settings pages from the tray host event", async () => {
     api.getState.mockResolvedValue(readyState);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     await waitFor(() => expect(tauriEvents.handler).not.toBeNull());
 
     act(() => {
@@ -719,13 +719,13 @@ describe("semantic Desktop UI", () => {
   it("reads and updates Launch at Login through the narrow Desktop host API", async () => {
     api.getState.mockResolvedValue(readyState);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
 
-    const launchAtLogin = await screen.findByRole("checkbox", { name: "登录时启动 WebCodex" });
+    const launchAtLogin = await screen.findByRole("checkbox", { name: "登录时启动 CodexLink" });
     await waitFor(() => expect(launchAtLogin).toBeEnabled());
     expect(launchAtLogin).not.toBeChecked();
-    expect(screen.getByText(/WebCodex 会在后台启动/)).toBeInTheDocument();
+    expect(screen.getByText(/CodexLink 会在后台启动/)).toBeInTheDocument();
 
     fireEvent.click(launchAtLogin);
     await waitFor(() => expect(api.setLaunchAtLogin).toHaveBeenCalledWith(true));
@@ -736,17 +736,17 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValue(firstRunState);
     renderApp();
 
-    expect(await screen.findByRole("button", { name: /在此电脑使用 WebCodex/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /快速共享项目/ })).toBeInTheDocument();
     expect(api.configureLocal).not.toHaveBeenCalled();
     expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 WebCodex/ }));
-    expect(await screen.findByRole("heading", { level: 1, name: "在此电脑配置 WebCodex" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
+    expect(await screen.findByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "选择文件夹" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "配置 WebCodex" })).toBeDisabled();
-    fireEvent.submit(screen.getByRole("button", { name: "配置 WebCodex" }).closest("form")!);
+    expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("button", { name: "配置 CodexLink" }).closest("form")!);
     expect(api.configureLocal).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "← 返回全部配置方式" }));
@@ -774,17 +774,17 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValueOnce(missingPwsh).mockResolvedValueOnce(detectedPwsh);
     renderApp();
 
-    fireEvent.click(await screen.findByRole("button", { name: /在此电脑使用 WebCodex/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /在此电脑使用 CodexLink/ }));
     const guidance = screen.getByText("建议安装 PowerShell 7").closest("article");
     expect(guidance).not.toBeNull();
     expect(guidance).toHaveTextContent("Windows PowerShell 5.1");
     expect(guidance).toHaveTextContent("winget install --id Microsoft.PowerShell --source winget");
-    expect(screen.getByRole("button", { name: "配置 WebCodex" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeDisabled();
 
     vi.mocked(open).mockResolvedValue(readyState.project!.path);
     api.inspectProject.mockResolvedValue(readyState.project);
     fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "配置 WebCodex" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeEnabled());
 
     fireEvent.click(within(guidance!).getByRole("button", { name: "打开 Microsoft 安装说明" }));
     await waitFor(() => expect(api.openPowerShellInstallGuide).toHaveBeenCalledTimes(1));
@@ -804,15 +804,15 @@ describe("semantic Desktop UI", () => {
       api.inspectProject.mockResolvedValue(readyState.project);
       const view = renderApp();
       await act(async () => {});
-      fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 WebCodex/ }));
+      fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
       fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
       await act(async () => {});
-      fireEvent.click(screen.getByRole("button", { name: "配置 WebCodex" }));
+      fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
       expect(api.configureLocal).toHaveBeenCalledWith(readyState.project!.path);
 
       api.getState.mockResolvedValue(localSetupOperationState());
       await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
-      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 WebCodex" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "更改文件夹" })).toBeDisabled();
 
       api.getState.mockResolvedValue(setupState());
@@ -824,11 +824,11 @@ describe("semantic Desktop UI", () => {
       fireEvent.click(screen.getByRole("button", { name: "重新激活项目" }));
       await act(async () => {});
       expect(screen.getByRole("alert")).toHaveTextContent("tunnel_unavailable");
-      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 WebCodex" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
       api.startRegularTunnel.mockResolvedValue(readyState);
-      fireEvent.click(screen.getByRole("button", { name: "配置 WebCodex" }));
+      fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
       await act(async () => {});
-      expect(screen.getByRole("heading", { level: 1, name: "WebCodex" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1, name: "CodexLink" })).toBeInTheDocument();
       view.unmount();
     } finally {
       vi.useRealTimers();
@@ -849,19 +849,19 @@ describe("semantic Desktop UI", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("desktop_state_unavailable");
-    expect(screen.queryByText("正在加载 WebCodex…")).not.toBeInTheDocument();
+    expect(screen.queryByText("正在加载 CodexLink…")).not.toBeInTheDocument();
     expect(api.configureLocal).not.toHaveBeenCalled();
     expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("正在加载 WebCodex…");
+    expect(await screen.findByRole("status")).toHaveTextContent("正在加载 CodexLink…");
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
     await waitFor(() => expect(api.getState).toHaveBeenCalledTimes(2));
 
     await act(async () => {
       retryState.resolve(firstRunState);
     });
-    expect(await screen.findByRole("button", { name: /在此电脑使用 WebCodex/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(api.configureLocal).not.toHaveBeenCalled();
     expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -913,7 +913,7 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(submit);
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("WebCodex 服务不可用");
+    expect(alert).toHaveTextContent("CodexLink 服务不可用");
     expect(alert).toHaveTextContent("server_unreachable");
   });
 
@@ -927,10 +927,10 @@ describe("semantic Desktop UI", () => {
       })
       .mockResolvedValueOnce(readyState);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
     fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
-    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 WebCodex/ }));
-    fireEvent.click(screen.getByRole("button", { name: "配置 WebCodex" }));
+    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
+    fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("项目尚未就绪");
@@ -1004,7 +1004,7 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValue(degradedTunnel);
     api.refresh.mockResolvedValue(degradedTunnel);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
 
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
     expect(await screen.findByText("安全隧道正在运行，但连接信息仍需要处理")).toBeInTheDocument();
@@ -1043,7 +1043,7 @@ describe("semantic Desktop UI", () => {
       });
 
       const operationStatus = screen.getByRole("status", { name: "当前 Desktop 操作" });
-      expect(operationStatus).toHaveTextContent("正在配置本机 WebCodex");
+      expect(operationStatus).toHaveTextContent("正在配置本机 CodexLink");
       expect(operationStatus).toHaveTextContent("停止当前操作不会自动重复执行尚未确认的步骤");
 
       fireEvent.click(screen.getByRole("button", { name: "活动" }));
@@ -1240,7 +1240,7 @@ describe("semantic Desktop UI", () => {
     api.getState.mockResolvedValue(remote);
     api.refresh.mockResolvedValue(remote);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
 
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
     expect(await screen.findByRole("heading", { level: 2, name: "远程 WebCodex Server" })).toBeInTheDocument();
@@ -1256,8 +1256,8 @@ describe("semantic Desktop UI", () => {
     renderApp();
 
     await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("heading", { level: 1, name: "WebCodex" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "配置 WebCodex" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "CodexLink" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "配置 CodexLink" })).not.toBeInTheDocument();
   });
 
   it("reconnects the remembered OpenAI Tunnel after restoring the runtime", async () => {
@@ -1312,7 +1312,7 @@ describe("semantic Desktop UI", () => {
     });
     vi.mocked(open).mockResolvedValue(projectB.path);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
 
     fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
@@ -1371,7 +1371,7 @@ describe("semantic Desktop UI", () => {
       });
     vi.mocked(open).mockResolvedValue(projectB.path);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
 
     fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
@@ -1402,12 +1402,12 @@ describe("semantic Desktop UI", () => {
   it("keeps Remote Server as a first-class runtime choice after local setup", async () => {
     api.getState.mockResolvedValue(readyState);
     renderApp();
-    await screen.findByRole("heading", { level: 1, name: "WebCodex" });
+    await screen.findByRole("heading", { level: 1, name: "CodexLink" });
 
     fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
 
     expect(await screen.findByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /在此电脑使用 WebCodex/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /快速共享项目/ })).toBeInTheDocument();
   });
 });

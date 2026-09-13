@@ -23,7 +23,7 @@ export const LANGUAGES = [
 ] as const;
 export type Locale = typeof LANGUAGES[number]["value"];
 
-const LOCALE_STORAGE_KEY = "webcodex.desktop.locale";
+const LOCALE_STORAGE_KEY = "codexlink.desktop.locale";
 
 export type MessageKey = keyof typeof zhCN;
 

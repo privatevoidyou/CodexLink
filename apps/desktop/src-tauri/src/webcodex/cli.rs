@@ -80,7 +80,7 @@ impl ResolvedBinaries {
                 return Err(DesktopError::new(
                     "bundled_runtime_missing",
                     format!("The installed WebCodex runtime is missing: {expected}"),
-                    "Reinstall WebCodex Desktop from the matching release installer.",
+                    "Reinstall CodexLink from the matching release installer.",
                 ));
             } else if let Some(value) = std::env::var_os("WEBCODEX_DESKTOP_BIN_DIR") {
                 let directory = PathBuf::from(value);
@@ -112,7 +112,7 @@ impl ResolvedBinaries {
             };
         let missing_directory_action = match source {
             ResolvedBinarySource::Bundled => {
-                "Reinstall WebCodex Desktop from the matching release installer."
+                "Reinstall CodexLink from the matching release installer."
             }
             ResolvedBinarySource::Environment | ResolvedBinarySource::SourceDogfoodTarget => {
                 "Build `cargo build --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner` from this source baseline or set WEBCODEX_DESKTOP_BIN_DIR."
@@ -138,7 +138,7 @@ impl ResolvedBinaries {
                     format!("Required WebCodex binary is missing: {}", path.display()),
                     match source {
                         ResolvedBinarySource::Bundled => {
-                            "Reinstall WebCodex Desktop from the matching release installer."
+                            "Reinstall CodexLink from the matching release installer."
                         }
                         ResolvedBinarySource::Environment
                         | ResolvedBinarySource::SourceDogfoodTarget => {

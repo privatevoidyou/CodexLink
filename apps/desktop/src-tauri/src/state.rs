@@ -1086,7 +1086,7 @@ impl DesktopCore {
                         DesktopError::new(
                             "default_project_unavailable",
                             "Desktop could not prepare its default management project",
-                            "Check that the WebCodex Desktop install directory is writable, or choose another project from Change runtime mode.",
+                            "Check that the CodexLink install directory is writable, or choose another project from Change runtime mode.",
                         )
                         .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
                     })?;
@@ -2884,7 +2884,7 @@ fn desktop_state_corrupt() -> DesktopError {
     DesktopError::new(
         "desktop_state_corrupt",
         "Desktop saved state is corrupt and no valid recovery snapshot is available",
-        "Restore or remove the Desktop state files explicitly, then restart WebCodex Desktop.",
+        "Restore or remove the Desktop state files explicitly, then restart CodexLink.",
     )
     .with_details(serde_json::json!({ "category": "state_corrupt" }))
 }

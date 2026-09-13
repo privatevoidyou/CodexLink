@@ -60,7 +60,7 @@ export function Dashboard({
       <div className="page-heading-row">
         <div>
           <div className="eyebrow">{t("home.eyebrow")}</div>
-          <h1 id="home-title">WebCodex</h1>
+          <h1 id="home-title">CodexLink</h1>
           <p className="lede">{t("workspace.description")}</p>
         </div>
         <button
