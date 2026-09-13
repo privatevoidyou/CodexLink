@@ -240,6 +240,19 @@ button:disabled { opacity: .48; cursor: default; }
   .status-value { font-size: 15px; line-height: 1.5; }
 }
 
+.activation-shell { min-height: 100vh; display: grid; place-items: center; padding: 36px 24px; background: radial-gradient(circle at 75% 22%, rgba(70, 105, 255, .09), transparent 32%), #f3f6f8; overflow: auto; }
+.activation-card { width: min(560px, 100%); padding: 34px; border: 1px solid #dce1e3; border-radius: 16px; background: #fff; box-shadow: 0 18px 48px rgba(26,31,35,.08); }
+.activation-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+.activation-brand > div { display: grid; gap: 4px; }
+.activation-brand strong { font-size: 17px; }
+.activation-brand span { color: #7a858d; font-size: 12px; }
+.activation-form { display: grid; gap: 16px; margin-top: 22px; }
+.activation-form .primary-button { justify-self: start; min-width: 150px; }
+.activation-recovery { margin: 0; padding: 11px 12px; border-radius: 8px; background: #fff8e8; color: #765e31; font-size: 12px; line-height: 1.5; }
+.activation-locale { margin-top: 28px; padding-top: 18px; border-top: 1px solid #e5e9eb; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.activation-locale label { color: #687178; font-size: 12px; font-weight: 650; }
+.activation-locale select { width: auto; min-width: 140px; }
+
 @media (max-width: 1050px) {
   .main-content { padding-left: 38px; padding-right: 38px; }
   .entry-grid { grid-template-columns: 1fr; }

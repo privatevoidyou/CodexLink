@@ -3,6 +3,7 @@ mod commands;
 mod deadline;
 mod desktop_shell;
 mod error;
+mod license;
 mod models;
 mod operation;
 mod platform;
@@ -41,13 +42,16 @@ pub fn run() {
 
             let snapshot = app.state::<AppState>().get_state();
             tray::refresh_from_snapshot(app.handle(), &snapshot);
-            if !desktop_shell::is_background_launch(std::env::args()) {
+            if !desktop_shell::is_background_launch(std::env::args())
+                || !snapshot.license.is_active()
+            {
                 desktop_shell::show_main_window(app.handle())?;
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_state,
+            commands::activate_license,
             commands::open_powershell_install_guide,
             commands::get_launch_at_login,
             commands::set_launch_at_login,

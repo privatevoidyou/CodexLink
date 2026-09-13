@@ -7,6 +7,8 @@ import type {
 } from "../models/topology";
 
 export const desktopApi = {
+  activateLicense: (activationCode: string) =>
+    invoke<DesktopState>("activate_license", { request: { activationCode } }),
   updateTunnelConfig: (request: { action: "save"; tunnelId: string; apiKey: string | null } | { action: "use_environment" }) =>
     invoke<DesktopState>("update_tunnel_config", { request }),
   getState: () => invoke<DesktopState>("get_desktop_state"),

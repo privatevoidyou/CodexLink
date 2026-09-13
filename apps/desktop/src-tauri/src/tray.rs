@@ -79,6 +79,7 @@ impl TrayProjection {
         });
         let runtime_stopped = matches!(snapshot.readiness.server, ServerReadiness::Stopped)
             && matches!(snapshot.readiness.runner, RunnerReadiness::Stopped);
+        let licensed = snapshot.license.is_active();
         let runtime_status = if snapshot.readiness.runtime_ready {
             RuntimeStatus::Ready
         } else if snapshot.topology.is_none() || runtime_stopped {
@@ -109,18 +110,17 @@ impl TrayProjection {
         } else {
             ConnectionStatus::NotConnected
         };
-        let runtime_action = if local_full {
-            if runtime_stopped {
-                Some(RuntimeAction::Resume)
-            } else {
-                Some(RuntimeAction::Stop)
-            }
+        let runtime_action = if local_full && !runtime_stopped {
+            Some(RuntimeAction::Stop)
+        } else if licensed && local_full && runtime_stopped {
+            Some(RuntimeAction::Resume)
         } else {
             None
         };
         let connection_action = if local_full && snapshot.regular_tunnel.is_some() {
             Some(ConnectionAction::Disconnect)
-        } else if local_full
+        } else if licensed
+            && local_full
             && snapshot.readiness.runtime_ready
             && snapshot.openai_tunnel_configured
             && snapshot.regular_tunnel_available
@@ -450,6 +450,7 @@ mod tests {
 
     fn local_snapshot() -> DesktopStateSnapshot {
         let mut snapshot = DesktopStateSnapshot::default();
+        snapshot.license.status = crate::models::LicenseStatus::Activated;
         snapshot.topology = Some(RuntimeTopology {
             experience: Experience::Full,
             server: ServerTopology::Local,
@@ -460,6 +461,34 @@ mod tests {
         snapshot.openai_tunnel_configured = true;
         snapshot.regular_tunnel_available = true;
         snapshot
+    }
+
+    #[test]
+    fn unactivated_tray_never_offers_start_actions_but_keeps_cleanup_actions() {
+        let mut snapshot = local_snapshot();
+        snapshot.license.status = crate::models::LicenseStatus::NotActivated;
+        snapshot.readiness.server = ServerReadiness::Stopped;
+        snapshot.readiness.runner = RunnerReadiness::Stopped;
+        let stopped = TrayProjection::from_snapshot(&snapshot, Some(false));
+        assert_eq!(stopped.runtime_action, None);
+        assert_eq!(stopped.connection_action, None);
+
+        snapshot.readiness.server = ServerReadiness::Ready;
+        snapshot.readiness.runner = RunnerReadiness::Ready;
+        snapshot.readiness.runtime_ready = true;
+        snapshot.regular_tunnel = Some(RegularTunnelState {
+            provider: "openai".into(),
+            status: RegularTunnelStatus::Ready,
+            clipboard_state: "copied".into(),
+            clipboard_contains: "tunnel_id".into(),
+            ready_for_chatgpt: true,
+        });
+        let running = TrayProjection::from_snapshot(&snapshot, Some(false));
+        assert_eq!(running.runtime_action, Some(RuntimeAction::Stop));
+        assert_eq!(
+            running.connection_action,
+            Some(ConnectionAction::Disconnect)
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import brandIcon from "./assets/brand.png";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { desktopApi } from "./lib/desktop-api";
@@ -126,6 +126,7 @@ export default function App() {
         // and the optional Tunnel handoff, including their error/retry paths.
         if (!initial.topology) setShowSetup(true);
         commitState(initial);
+        if (initial.license.status !== "activated") return;
         if (initial.current_operation) return;
         const resumeExisting = Boolean(
           initial.topology
@@ -162,7 +163,7 @@ export default function App() {
   }, [commitState, startupAttempt]);
 
   useEffect(() => {
-    if (!hasLoadedState) return;
+    if (!hasLoadedState || state?.license.status !== "activated") return;
 
     let cancelled = false;
     let timeoutId: number | undefined;
@@ -194,7 +195,7 @@ export default function App() {
       cancelled = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [commitState, hasCurrentOperation, hasLoadedState, hasRegularTunnel, refreshing]);
+  }, [commitState, hasCurrentOperation, hasLoadedState, hasRegularTunnel, refreshing, state?.license.status]);
 
   useEffect(() => {
     if (!shouldObserveChatgptActivity) return;
@@ -348,6 +349,15 @@ export default function App() {
     );
   }
 
+  if (state.license.status !== "activated") {
+    return (
+      <ActivationGate
+        state={state}
+        onActivated={commitState}
+      />
+    );
+  }
+
   const needsSetup = !state.topology || showSetup;
 
   return (
@@ -463,6 +473,81 @@ export default function App() {
   );
 }
 
+function ActivationGate({ state, onActivated }: { state: DesktopState; onActivated: (state: DesktopState) => void }) {
+  const { locale, setLocale, t } = useLocale();
+  const [activationCode, setActivationCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const recovery = state.license.status === "invalid";
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setActivationError(null);
+    try {
+      const next = await desktopApi.activateLicense(activationCode);
+      setActivationCode("");
+      onActivated(next);
+    } catch (value) {
+      const normalized = normalizeDesktopError(value);
+      setActivationCode("");
+      setActivationError(normalized.next_action || t("activation.error"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="activation-shell">
+      <section className="activation-card" aria-labelledby="activation-title">
+        <div className="activation-brand">
+          <img className="brand-mark" src={brandIcon} alt="" />
+          <div><strong>CodexLink</strong><span>{t("app.subtitle")}</span></div>
+        </div>
+        <span className="section-kicker">{t("activation.eyebrow")}</span>
+        <h1 id="activation-title">{recovery ? t("activation.recoveryTitle") : t("activation.title")}</h1>
+        <p className="lede">{recovery ? t("activation.recoveryBody") : t("activation.firstUse")}</p>
+        <form className="activation-form" onSubmit={(event) => void submit(event)}>
+          <div className="field-group">
+            <label htmlFor="codexlink-activation-code">{t("activation.codeLabel")}</label>
+            <input
+              id="codexlink-activation-code"
+              value={activationCode}
+              onChange={(event) => setActivationCode(event.target.value)}
+              placeholder="MYWS-XXXXX-XXXXX-XXXXX-XXXXX"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={submitting}
+              data-webcodex-control="license-activation-code"
+            />
+            <span className="field-help">{t("activation.codeHelp")}</span>
+          </div>
+          {activationError && <p className="activation-recovery" role="alert">{activationError}</p>}
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={submitting || activationCode.trim().length === 0}
+            data-webcodex-action="activate-license"
+          >
+            {submitting ? t("activation.activating") : t("activation.submit")}
+          </button>
+        </form>
+        <div className="activation-locale">
+          <label htmlFor="activation-locale">{t("locale.label")}</label>
+          <select
+            id="activation-locale"
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as typeof locale)}
+          >
+            {LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}
+          </select>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function sidebarConnectionLabel(state: DesktopState, t: ReturnType<typeof useLocale>["t"]) {
   if (!state.readiness.runtime_ready) return t("workspace.afterStart");
   if (state.regular_tunnel?.status !== "error" && state.readiness.runtime_ready && state.chatgpt_activity?.observed) {
@@ -474,7 +559,8 @@ function sidebarConnectionLabel(state: DesktopState, t: ReturnType<typeof useLoc
 }
 
 function shouldStartPreferredTunnel(state: DesktopState) {
-  return state.preferred_connection === "open_ai_tunnel" &&
+  return state.license.status === "activated" &&
+    state.preferred_connection === "open_ai_tunnel" &&
     state.topology?.experience === "full" &&
     state.topology.server.kind === "local" &&
     state.readiness.runtime_ready &&

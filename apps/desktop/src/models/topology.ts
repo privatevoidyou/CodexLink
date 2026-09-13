@@ -174,7 +174,15 @@ export interface ChatGptActivitySnapshot {
   last_meaningful_activity_at_ms?: number | null;
 }
 
+export type LicenseStatus = "not_activated" | "activated" | "invalid";
+
+export interface LicenseSnapshot {
+  status: LicenseStatus;
+  reason_code?: string | null;
+}
+
 export interface DesktopState {
+  license: LicenseSnapshot;
   topology?: RuntimeTopology | null;
   readiness: ReadinessSnapshot;
   project?: ProjectSelection | null;

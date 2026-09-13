@@ -395,8 +395,31 @@ pub struct ChatGptActivitySnapshot {
     pub last_meaningful_activity_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LicenseStatus {
+    #[default]
+    NotActivated,
+    Activated,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LicenseSnapshot {
+    pub status: LicenseStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<String>,
+}
+
+impl LicenseSnapshot {
+    pub fn is_active(&self) -> bool {
+        self.status == LicenseStatus::Activated
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DesktopStateSnapshot {
+    pub license: LicenseSnapshot,
     pub topology: Option<RuntimeTopology>,
     pub readiness: ReadinessSnapshot,
     pub project: Option<ProjectSelection>,
@@ -420,6 +443,7 @@ pub struct DesktopStateSnapshot {
 impl Default for DesktopStateSnapshot {
     fn default() -> Self {
         Self {
+            license: LicenseSnapshot::default(),
             topology: None,
             readiness: ReadinessSnapshot::default(),
             project: None,

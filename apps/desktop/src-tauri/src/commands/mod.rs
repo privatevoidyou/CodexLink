@@ -18,6 +18,12 @@ pub async fn update_tunnel_config(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LicenseActivationRequest {
+    pub activation_code: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectRequest {
     pub project_path: String,
 }
@@ -70,6 +76,15 @@ fn project_state_result(
         tray::refresh_from_snapshot(app, snapshot);
     }
     result
+}
+
+#[tauri::command]
+pub async fn activate_license(
+    request: LicenseActivationRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopStateSnapshot, DesktopError> {
+    project_state_result(&app, state.activate_license(&request.activation_code).await)
 }
 
 #[tauri::command]

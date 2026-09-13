@@ -5,6 +5,7 @@ import { LocaleProvider } from "./i18n/locale";
 
 const api = vi.hoisted(() => ({
   getState: vi.fn(),
+  activateLicense: vi.fn(),
   updateTunnelConfig: vi.fn(),
   openPowerShellInstallGuide: vi.fn(),
   refresh: vi.fn(),
@@ -50,6 +51,7 @@ import App from "./App";
 import { open } from "@tauri-apps/plugin-dialog";
 
 const readyState: DesktopState = {
+  license: { status: "activated" },
   topology: {
     experience: "full",
     server: { kind: "local" },
@@ -104,6 +106,7 @@ const readyState: DesktopState = {
 };
 
 const firstRunState: DesktopState = {
+  license: { status: "activated" },
   readiness: {
     server: "unknown",
     runner: "unknown",
@@ -206,12 +209,61 @@ describe("semantic Desktop UI", () => {
     api.activity.mockResolvedValue([]);
     api.getLaunchAtLogin.mockResolvedValue(false);
     api.openPowerShellInstallGuide.mockResolvedValue(undefined);
+    api.activateLicense.mockResolvedValue(readyState);
     api.setLaunchAtLogin.mockImplementation(async (enabled: boolean) => enabled);
     api.resumeSavedRuntime.mockResolvedValue(readyState);
     api.observeChatgptActivity.mockResolvedValue(readyState);
     api.updateTunnelProxy.mockResolvedValue(readyState);
     api.startRegularTunnel.mockResolvedValue(readyState);
     api.stopRegularTunnel.mockResolvedValue(readyState);
+  });
+
+  it("shows device activation first and never resumes a saved runtime before activation", async () => {
+    const unactivated: DesktopState = {
+      ...readyState,
+      license: { status: "not_activated" },
+      runtime_autostart: true,
+    };
+    const activated: DesktopState = {
+      ...unactivated,
+      license: { status: "activated" },
+      runtime_autostart: false,
+    };
+    api.getState.mockResolvedValue(unactivated);
+    api.activateLicense.mockResolvedValue(activated);
+
+    renderApp();
+
+    await screen.findByRole("heading", { name: "激活 CodexLink", level: 1 });
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+    expect(api.startRegularTunnel).not.toHaveBeenCalled();
+    const input = screen.getByLabelText("销售激活码");
+    expect(input).toHaveAttribute("placeholder", "MYWS-XXXXX-XXXXX-XXXXX-XXXXX");
+    expect(screen.getByText("首次使用时，请完成设备激活。")).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "MYWS-ABCDE-12345-FGHIJ-67890" } });
+    fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
+
+    await waitFor(() => expect(api.activateLicense).toHaveBeenCalledWith("MYWS-ABCDE-12345-FGHIJ-67890"));
+    await screen.findByRole("heading", { name: "CodexLink", level: 1 });
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+  });
+
+  it("shows customer-level recovery without exposing licensing internals", async () => {
+    api.getState.mockResolvedValue({
+      ...firstRunState,
+      license: { status: "invalid", reason_code: "device_identity_missing" },
+    });
+
+    renderApp();
+
+    await screen.findByRole("heading", { name: "CodexLink 激活需要恢复", level: 1 });
+    expect(screen.getByText(/请重新输入购买后收到的激活码/)).toBeInTheDocument();
+    const input = screen.getByLabelText("销售激活码");
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: "MYWS-ABCDE-12345-FGHIJ-67890" } });
+    expect(screen.getByRole("button", { name: "激活 CodexLink" })).toBeEnabled();
+    expect(document.body.textContent).not.toMatch(/Ed25519|offline verification|private key|plaintext/i);
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps a user stop consistent after refresh and offers Start", async () => {

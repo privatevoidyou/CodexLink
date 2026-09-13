@@ -1,13 +1,14 @@
 use crate::activity::{ActivityEventKind, ActivityLevel, ActivityLog};
 use crate::deadline::Deadline;
 use crate::error::{DesktopError, DesktopResult};
+use crate::license::LicenseManager;
 use crate::models::{
     aggregate_readiness, ChatGptActivitySnapshot, DesktopOperationKind, DesktopStateSnapshot,
-    Enrollment, Experience, Exposure, ExposureReadiness, ProjectReadiness, ProjectSelection,
-    QuickShareState, ReadinessNextActionKind, ReadinessSummaryKind, RegularConnectionPreference,
-    RegularTunnelState, RegularTunnelStatus, RunnerReadiness, RunnerTopology, RuntimeTopology,
-    ServerReadiness, ServerTopology, StoredDesktopConfig, StoredRuntime, TunnelProxyConfig,
-    TunnelProxyMode, TunnelProxySnapshot,
+    Enrollment, Experience, Exposure, ExposureReadiness, LicenseSnapshot, ProjectReadiness,
+    ProjectSelection, QuickShareState, ReadinessNextActionKind, ReadinessSummaryKind,
+    RegularConnectionPreference, RegularTunnelState, RegularTunnelStatus, RunnerReadiness,
+    RunnerTopology, RuntimeTopology, ServerReadiness, ServerTopology, StoredDesktopConfig,
+    StoredRuntime, TunnelProxyConfig, TunnelProxyMode, TunnelProxySnapshot,
 };
 use crate::operation::{
     cancelled_error, CancellationContext, CancellationSignal, OperationAdmission,
@@ -62,10 +63,14 @@ pub struct AppState {
     operations: OperationController,
     shutdown_signal: CancellationSignal,
     shutdown_started: AtomicBool,
+    license: Mutex<LicenseManager>,
+    license_snapshot: Arc<RwLock<LicenseSnapshot>>,
 }
 
 impl AppState {
     pub fn new(data_dir: PathBuf, resource_dir: PathBuf) -> DesktopResult<Self> {
+        let license = LicenseManager::load(&data_dir);
+        let license_snapshot = Arc::new(RwLock::new(license.snapshot()));
         let core = DesktopCore::new(data_dir, resource_dir)?;
         let published = Arc::clone(&core.published);
         let supervisor = Arc::clone(&core.supervisor);
@@ -78,6 +83,8 @@ impl AppState {
             activity,
             shutdown_signal: CancellationSignal::new(),
             shutdown_started: AtomicBool::new(false),
+            license: Mutex::new(license),
+            license_snapshot,
         })
     }
 
@@ -113,6 +120,11 @@ impl AppState {
         }
         snapshot.current_operation = self.operations.current();
         snapshot.activity_sequence = self.activity.latest_sequence();
+        snapshot.license = self
+            .license_snapshot
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         if snapshot.openai_tunnel_config.source == crate::models::TunnelConfigSource::Environment {
             snapshot.openai_tunnel_config = crate::tunnel_config::environment_snapshot();
             snapshot.openai_tunnel_configured = snapshot.openai_tunnel_config.is_configured();
@@ -120,6 +132,24 @@ impl AppState {
         snapshot.regular_tunnel_available = true;
         snapshot.powershell_runtime = crate::platform::powershell_runtime_snapshot();
         snapshot
+    }
+
+    pub async fn activate_license(
+        &self,
+        activation_code: &str,
+    ) -> DesktopResult<DesktopStateSnapshot> {
+        if self.shutdown_signal.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        let snapshot = {
+            let mut license = self.license.lock().await;
+            license.activate(activation_code).await?
+        };
+        self.license_snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone_from(&snapshot);
+        Ok(self.get_state())
     }
 
     pub fn activity(&self) -> Vec<crate::activity::ActivityEntry> {
@@ -360,6 +390,15 @@ impl AppState {
         if self.shutdown_signal.is_cancelled() {
             return Err(cancelled_error());
         }
+        if operation_requires_license(kind)
+            && !self
+                .license_snapshot
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_active()
+        {
+            return Err(crate::license::license_required_error());
+        }
         let operation = self.operations.admit(kind, cancellable)?;
         let cancellation =
             CancellationContext::new(operation.cancellation.clone(), self.shutdown_signal.clone());
@@ -446,6 +485,14 @@ impl AppState {
     }
 
     #[cfg(test)]
+    fn set_test_license_active(&self) {
+        self.license_snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .status = crate::models::LicenseStatus::Activated;
+    }
+
+    #[cfg(test)]
     async fn hold_test_operation(
         &self,
         started: tokio::sync::oneshot::Sender<String>,
@@ -485,6 +532,18 @@ impl AppState {
         self.finish_operation(operation, cancellation, core, baseline, result)
             .await
     }
+}
+
+fn operation_requires_license(kind: DesktopOperationKind) -> bool {
+    matches!(
+        kind,
+        DesktopOperationKind::LocalSetup
+            | DesktopOperationKind::LocalProjectActivate
+            | DesktopOperationKind::RemoteSetup
+            | DesktopOperationKind::QuickShareStart
+            | DesktopOperationKind::RegularTunnelStart
+            | DesktopOperationKind::RuntimeResume
+    )
 }
 
 #[derive(Clone)]
@@ -3668,6 +3727,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unactivated_desktop_rejects_runtime_start_before_any_process_is_spawned() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let state = AppState::new(temp.path().to_path_buf(), temp.path().join("resources"))
+            .expect("create unactivated Desktop state");
+
+        assert_eq!(
+            state.get_state().license.status,
+            crate::models::LicenseStatus::NotActivated
+        );
+        let error = state
+            .resume_saved_runtime()
+            .await
+            .expect_err("runtime resume must be gated by device activation");
+        assert_eq!(error.code, "license_required");
+
+        let mut supervisor = state.supervisor.lock().await;
+        for kind in [
+            ProcessKind::LocalServer,
+            ProcessKind::LocalRunner,
+            ProcessKind::QuickShare,
+            ProcessKind::RegularTunnel,
+        ] {
+            assert!(
+                supervisor.snapshot(kind).is_none(),
+                "activation gate must run before any Desktop-owned process is created"
+            );
+        }
+        assert!(!state
+            .activity()
+            .iter()
+            .any(|entry| entry.event_kind == ActivityEventKind::ProcessStarted));
+    }
+
+    #[tokio::test]
     async fn control_plane_stays_observable_and_cancel_is_exact_while_mutation_is_stuck() {
         let data_dir = std::env::temp_dir().join(format!(
             "webcodex-desktop-control-plane-{}-{}",
@@ -3681,6 +3774,7 @@ mod tests {
             AppState::new(data_dir.clone(), data_dir.join("test-resources"))
                 .expect("create Desktop test state"),
         );
+        state.set_test_license_active();
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
         let operation_state = Arc::clone(&state);

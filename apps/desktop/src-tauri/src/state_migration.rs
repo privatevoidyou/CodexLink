@@ -9,7 +9,6 @@ const MIGRATION_MARKER: &str = ".codexlink-state-migration-v1";
 const MIGRATION_IN_PROGRESS: &str = ".codexlink-state-migration-v1.in-progress";
 const CONFIG_FILE_LIMIT: u64 = 2 * 1024 * 1024;
 const DATABASE_FILE_LIMIT: u64 = 1024 * 1024 * 1024;
-const MAX_LICENSE_FILES: usize = 16;
 const MAX_CONNECTION_DIRS: usize = 128;
 const MAX_PROJECT_RECORDS: usize = 256;
 
@@ -171,38 +170,8 @@ fn migrate_runtime(legacy: &Path, target: &Path) -> io::Result<()> {
 }
 
 fn migrate_license_payload(legacy: &Path, target: &Path) -> io::Result<()> {
-    let source = legacy.join("license");
-    if !path_exists(&source)? {
-        return Ok(());
-    }
-    require_real_directory(&source, "legacy license directory")?;
-    let destination = target.join("license");
-    ensure_real_directory(&destination)?;
-    let mut entries = fs::read_dir(&source)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    if entries.len() > MAX_LICENSE_FILES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "legacy license directory exceeds the bounded migration file count",
-        ));
-    }
-    for entry in entries {
-        let name = entry.file_name();
-        if !valid_dynamic_component(&name) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "legacy license directory contains an unsupported entry name",
-            ));
-        }
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)?;
-        if !metadata.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "legacy license directory must contain only regular files",
-            ));
-        }
-        copy_known_file(&path, &destination.join(name), CONFIG_FILE_LIMIT)?;
+    for relative in ["license/license.json", "license/device_identity.dpapi"] {
+        copy_known_relative_file(legacy, target, relative, CONFIG_FILE_LIMIT)?;
     }
     Ok(())
 }
@@ -707,7 +676,6 @@ mod tests {
     use crate::models::{
         ProjectSelection, RegularConnectionPreference, StoredRuntime, TunnelProxyConfig,
     };
-    use std::collections::BTreeMap;
 
     fn roots() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let temp = tempfile::tempdir().expect("temp dir");
@@ -1086,22 +1054,22 @@ mod tests {
     }
 
     #[test]
-    fn license_migration_is_flat_and_bounded() {
+    fn license_migration_uses_rc5_allowlist() {
         let (_temp, legacy, target) = roots();
-        let mut files = BTreeMap::new();
-        files.insert("license.json", "one");
-        files.insert("device.json", "two");
-        for (name, body) in files {
-            write(&legacy.join("license").join(name), body);
-        }
+        write(&legacy.join("license/license.json"), "one");
+        write(&legacy.join("license/device_identity.dpapi"), "two");
+        write(&legacy.join("license/device.json"), "ignored");
+
         migrate_legacy_state_if_needed(&target).expect("migration");
+
         assert_eq!(
             fs::read_to_string(target.join("license/license.json")).unwrap(),
             "one"
         );
         assert_eq!(
-            fs::read_to_string(target.join("license/device.json")).unwrap(),
+            fs::read_to_string(target.join("license/device_identity.dpapi")).unwrap(),
             "two"
         );
+        assert!(!target.join("license/device.json").exists());
     }
 }
