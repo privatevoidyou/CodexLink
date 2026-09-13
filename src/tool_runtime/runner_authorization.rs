@@ -11,12 +11,51 @@ pub(crate) fn required_runner_capability(call: &ToolCall) -> Option<RunnerCapabi
     runtime_tool_runner_capability(call.tool_name())
 }
 
+fn requires_model_authored_execution_permission(call: &ToolCall) -> bool {
+    matches!(
+        call,
+        ToolCall::RunProcess { .. }
+            | ToolCall::RunDetachedProcess { .. }
+            | ToolCall::RunScript { .. }
+            | ToolCall::RunShell { .. }
+            | ToolCall::RunJob { .. }
+            | ToolCall::OpenSessionShell { .. }
+            | ToolCall::SessionShellExec { .. }
+            | ToolCall::CargoFmt { .. }
+            | ToolCall::CargoCheck { .. }
+            | ToolCall::CargoTest { .. }
+            | ToolCall::GoTest { .. }
+            | ToolCall::CodingAgentStart { .. }
+            | ToolCall::StartAgentTaskCodingRun { .. }
+    )
+}
+
 fn runner_capability_unavailable_result(message: impl Into<String>) -> ToolResult {
     // Stable pre-0.4 ToolResult/Session compatibility identity. Current Rust
     // policy terminology is Runner-facing, but replay must retain this wire code.
     ToolResult::err_with_output(
         message,
         json!({"error_kind": "agent_capability_unavailable"}),
+    )
+    .with_recovery(RecoveryKind::NoAction, None)
+}
+
+fn runner_policy_denied_result(call: &ToolCall) -> ToolResult {
+    ToolResult::err_with_output(
+        format!(
+            "runner_policy_denied: {} is disabled by local Runner policy; execution was not started",
+            call.tool_name()
+        ),
+        json!({
+            "error_kind": "runner_policy_denied",
+            "command_started": false,
+            "command_completed": false,
+            "command_ok": false,
+            "exit_code": null,
+            "execution_state": "not_started",
+            "failure_kind": "runner_policy_denied",
+            "tool_failure": true,
+        }),
     )
     .with_recovery(RecoveryKind::NoAction, None)
 }
@@ -89,21 +128,28 @@ impl ToolRuntime {
         }
         let client_id = proj.client_id.clone();
         let access = crate::runner_http::runner_access_from_auth(auth);
-        if self
+        let runner = self
             .runner_registry
             .get_runner_view_for_auth(&client_id, access.as_ref())
             .await
-            .is_none()
-        {
-            return Err(ToolResult::err(format!(
-                "unknown shell client: {}",
-                client_id
-            )));
-        }
+            .ok_or_else(|| ToolResult::err(format!("unknown shell client: {}", client_id)))?;
         self.runner_registry
             .assert_runner_access(access.as_ref(), &client_id)
             .await
             .map_err(ToolResult::err)?;
+        // Capability advertisement answers whether the Runner implementation can
+        // perform an operation. Local Runner policy answers whether model-authored
+        // execution is admitted on this installation. Keep those concerns
+        // separate so generation-2 registration remains compatible while
+        // CodexLink safe mode still fails closed before dispatch.
+        if runner
+            .policy
+            .as_ref()
+            .is_some_and(|policy| !policy.allow_raw_shell)
+            && requires_model_authored_execution_permission(call)
+        {
+            return Err(runner_policy_denied_result(call));
+        }
         if let Some(required) = required {
             if !required.is_owner_only() {
                 // Capability check via the registry helper so the requirement is

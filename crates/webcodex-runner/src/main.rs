@@ -2084,27 +2084,11 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     // Advertise the distinct capability only because this binary installs the
     // bounded typed prepare/incoming/outgoing traversal implementation.
     capabilities.lsp_call_hierarchy = true;
-    // CodexLink safe mode treats allow_raw_shell as the master gate for every
-    // model-authored local code-execution surface. Keep typed file/LSP/internal
-    // Runner plumbing available, but do not advertise tools that the policy will
-    // reject before spawn.
-    if !cfg.policy.allow_raw_shell {
-        capabilities.shell = false;
-        capabilities.async_shell_jobs = false;
-        capabilities.ssh_shell = false;
-        capabilities.persistent_shell = false;
-        capabilities.ssh_persistent_shell = false;
-        capabilities.structured_validation_argv = false;
-        capabilities.structured_cargo_test_count_assertion = false;
-        capabilities.structured_cargo_test_execution_policy = false;
-        capabilities.structured_go_test_json = false;
-        capabilities.structured_go_test_tool = false;
-        capabilities.structured_go_test_packages = false;
-        capabilities.structured_process_argv = false;
-        capabilities.structured_script_payload = false;
-        capabilities.structured_execution_jobs = false;
-        capabilities.detached_process_jobs = false;
-    }
+    // Registration describes technical Runner support, not whether local policy
+    // admits a model-authored execution request. Generation-2 baseline bits must
+    // therefore remain truthful when CodexLink safe mode sets
+    // `allow_raw_shell = false`; Server ToolRuntime admission and Runner
+    // pre-spawn policy enforcement decide whether execution is permitted.
     capabilities
 }
 

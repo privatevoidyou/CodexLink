@@ -4,8 +4,8 @@ use super::super::*;
 use super::support::*;
 use crate::runner_http::RunnerRegistry;
 use crate::runner_protocol::{
-    RunnerCapabilities, RunnerRegisterRequest, RunnerResultRequest, ShellProjectInventoryPage,
-    RUNNER_PROTOCOL_GENERATION_V2,
+    RunnerCapabilities, RunnerPolicySummary, RunnerRegisterRequest, RunnerResultRequest,
+    ShellProjectInventoryPage, ShellScriptLanguage, RUNNER_PROTOCOL_GENERATION_V2,
 };
 use crate::tool_runtime::kernel::{
     HostFileImportTrust, ToolCallContext, ToolCallErrorStatus, ToolCallRequest,
@@ -1507,6 +1507,182 @@ async fn runner_capability_rejection_matrix_names_required_capability() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn codexlink_safe_runner_policy_denies_model_execution_after_capability_registration() {
+    let client_id = "safe-policy-agent";
+    let runtime = runtime_with_agent_project(client_id);
+    register_agent_with_policy(
+        &runtime,
+        client_id,
+        None,
+        RunnerCapabilities {
+            shell: true,
+            ..Default::default()
+        },
+        RunnerPolicySummary {
+            allow_raw_shell: false,
+            allow_cwd_anywhere: false,
+            allowed_roots: Vec::new(),
+            max_timeout_secs: 3600,
+            max_output_bytes: 262144,
+            shell_profiles: None,
+            tool_providers: None,
+            mcp_gateway_providers: None,
+        },
+    )
+    .await;
+    let project = agent_test_project_id(client_id);
+    let bootstrap = auth_context(None, true);
+    let denied = vec![
+        ToolCall::RunShell {
+            project: project.clone(),
+            command: "echo should-not-run".to_string(),
+            session_id: None,
+            timeout_secs: Some(30),
+            cwd: None,
+            purpose: None,
+            shell: None,
+        },
+        ToolCall::RunProcess {
+            project: project.clone(),
+            executable: "git".to_string(),
+            args: vec!["status".to_string()],
+            stdin: None,
+            session_id: None,
+            timeout_secs: Some(30),
+            sync_wait_secs: None,
+            cwd: None,
+            purpose: None,
+        },
+        ToolCall::RunScript {
+            project: project.clone(),
+            language: ShellScriptLanguage::Powershell,
+            script: "Write-Output should-not-run".to_string(),
+            args: Vec::new(),
+            stdin: None,
+            session_id: None,
+            timeout_secs: Some(30),
+            sync_wait_secs: None,
+            cwd: None,
+            purpose: None,
+        },
+        ToolCall::RunDetachedProcess {
+            project: project.clone(),
+            idempotency_key: "safe-detached".to_string(),
+            executable: "git".to_string(),
+            args: vec!["status".to_string()],
+            stdin: None,
+            session_id: None,
+            timeout_secs: Some(30),
+            cwd: None,
+            purpose: None,
+        },
+        ToolCall::RunJob {
+            project: project.clone(),
+            command: "echo should-not-run".to_string(),
+            session_id: None,
+            timeout_secs: Some(30),
+            cwd: None,
+            purpose: None,
+            shell: None,
+        },
+        ToolCall::OpenSessionShell {
+            project: project.clone(),
+            session_id: "wc_sess_safe_policy".to_string(),
+            cwd: None,
+            shell: None,
+        },
+        ToolCall::CargoCheck {
+            project: project.clone(),
+            session_id: None,
+            cwd: None,
+            all_targets: None,
+            all_features: None,
+            no_default_features: None,
+            features: None,
+            package: None,
+            timeout_secs: Some(30),
+            sync_wait_secs: None,
+        },
+        ToolCall::CodingAgentStart {
+            project: project.clone(),
+            provider_id: "test-provider".to_string(),
+            idempotency_key: "safe-coding-agent".to_string(),
+            instruction: "do not start".to_string(),
+            config: None,
+            timeout_secs: Some(30),
+            recording_session_id: None,
+        },
+    ];
+
+    for call in denied {
+        let tool_name = call.tool_name().to_string();
+        let error = runtime
+            .authorize_runner_tool(&call, None, Some(&bootstrap), None)
+            .await
+            .expect_err("safe policy must reject model-authored execution");
+        assert_eq!(
+            error.output["error_kind"], "runner_policy_denied",
+            "{tool_name}: {}",
+            error.output
+        );
+        assert_eq!(error.output["command_started"], false, "{tool_name}");
+        assert_eq!(
+            error.output["execution_state"], "not_started",
+            "{tool_name}"
+        );
+    }
+
+    let dispatched = runtime
+        .dispatch_with_auth(
+            ToolCall::RunShell {
+                project: project.clone(),
+                command: "echo dispatch-must-not-run".to_string(),
+                session_id: None,
+                timeout_secs: Some(30),
+                cwd: None,
+                purpose: None,
+                shell: None,
+            },
+            Some(&bootstrap),
+        )
+        .await;
+    assert!(!dispatched.success);
+    assert_eq!(dispatched.output["error_kind"], "runner_policy_denied");
+    assert_eq!(dispatched.output["command_started"], false);
+
+    runtime
+        .authorize_runner_tool(
+            &ToolCall::ReadFile {
+                project: project.clone(),
+                path: "Cargo.toml".to_string(),
+                session_id: None,
+                start_line: None,
+                limit: None,
+                with_line_numbers: None,
+            },
+            None,
+            Some(&bootstrap),
+            None,
+        )
+        .await
+        .expect("safe policy must keep bounded file reads admitted");
+
+    let runner = runtime
+        .runner_registry
+        .get_runner_view(client_id)
+        .await
+        .expect("registered safe-mode Runner");
+    assert!(runner.capabilities.async_shell_jobs);
+    assert!(runner.capabilities.structured_process_argv);
+    assert!(runner.capabilities.structured_script_payload);
+    assert_eq!(
+        runner.policy.as_ref().map(|policy| policy.allow_raw_shell),
+        Some(false)
+    );
+    assert_eq!(runner.pending_requests, 0);
 }
 
 #[tokio::test]

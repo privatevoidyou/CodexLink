@@ -108,35 +108,31 @@ fn current_runner_registration_advertises_v2_and_complete_generation_baseline() 
 }
 
 #[test]
-fn codexlink_safe_policy_does_not_advertise_model_authored_execution_capabilities() {
+fn codexlink_safe_policy_preserves_technical_registration_capabilities() {
     let tmp = tempfile::tempdir().unwrap();
     let mut cfg = test_config(tmp.path().join("config/project-registry"));
     cfg.policy.allow_raw_shell = false;
     let body = build_register_request(&cfg, "safe-instance", 0);
-    let caps = body.capabilities;
+    let capabilities = serde_json::to_value(&body.capabilities).unwrap();
 
-    assert!(!caps.shell);
-    assert!(!caps.async_shell_jobs);
-    assert!(!caps.ssh_shell);
-    assert!(!caps.persistent_shell);
-    assert!(!caps.ssh_persistent_shell);
-    assert!(!caps.structured_validation_argv);
-    assert!(!caps.structured_cargo_test_count_assertion);
-    assert!(!caps.structured_cargo_test_execution_policy);
-    assert!(!caps.structured_go_test_json);
-    assert!(!caps.structured_go_test_tool);
-    assert!(!caps.structured_go_test_packages);
-    assert!(!caps.structured_process_argv);
-    assert!(!caps.structured_script_payload);
-    assert!(!caps.structured_execution_jobs);
-    assert!(!caps.detached_process_jobs);
-    assert!(!caps.coding_agent_runs);
-
-    assert!(caps.file_read);
-    assert!(caps.file_write);
-    assert!(caps.apply_patch);
-    assert!(caps.internal_posix_script);
-    assert!(caps.lsp_read_only_navigation);
+    for capability in RUNNER_PROTOCOL_GENERATION_V2_BASELINE_CAPABILITY_NAMES {
+        assert_eq!(
+            capabilities
+                .get(*capability)
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "safe policy must not hide V2 technical baseline capability {capability}"
+        );
+    }
+    assert!(body.capabilities.async_shell_jobs);
+    assert!(body.capabilities.structured_process_argv);
+    assert!(body.capabilities.structured_script_payload);
+    assert!(body.capabilities.structured_execution_jobs);
+    assert!(body.capabilities.file_read);
+    assert!(body.capabilities.file_write);
+    assert!(body.capabilities.apply_patch);
+    assert!(body.capabilities.internal_posix_script);
+    assert!(body.capabilities.lsp_read_only_navigation);
     assert_eq!(
         body.policy.as_ref().map(|policy| policy.allow_raw_shell),
         Some(false)

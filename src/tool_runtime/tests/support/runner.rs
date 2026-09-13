@@ -631,6 +631,43 @@ pub(in crate::tool_runtime::tests) async fn register_agent(
     .await;
 }
 
+pub(in crate::tool_runtime::tests) async fn register_agent_with_policy(
+    runtime: &ToolRuntime,
+    client_id: &str,
+    owner: Option<&str>,
+    caps: RunnerCapabilities,
+    policy: RunnerPolicySummary,
+) {
+    runtime
+        .runner_registry
+        .register(RunnerRegisterRequest {
+            process_started_at: None,
+            build: None,
+            job_concurrency_limit: None,
+            job_inventory: None,
+            coding_agent_providers: None,
+            coding_agent_inventory: None,
+            client_id: client_id.to_string(),
+            runner_instance_id: "inst".to_string(),
+            runner_protocol_generation: crate::runner_protocol::RUNNER_PROTOCOL_GENERATION_V2,
+            display_name: None,
+            owner: owner.map(str::to_string),
+            hostname: None,
+            host_context: None,
+            capabilities: crate::test_support::current_runner_capabilities(caps),
+            policy: Some(policy),
+        })
+        .await
+        .unwrap();
+    crate::test_support::apply_project_inventory_snapshot(
+        &runtime.runner_registry,
+        client_id,
+        "inst",
+        vec![registered_project("agent-proj", "/tmp/agent-proj")],
+    )
+    .await;
+}
+
 pub(in crate::tool_runtime::tests) fn agent_test_project_id(client_id: &str) -> String {
     crate::tool_runtime::runner_project_runtime_id(client_id, "agent-proj")
 }

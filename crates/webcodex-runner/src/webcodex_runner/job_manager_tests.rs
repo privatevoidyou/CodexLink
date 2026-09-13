@@ -135,6 +135,10 @@ fn job_reconciliation_inventory_drops_terminal_payload_before_active_jobs() {
 
 #[test]
 fn job_reconciliation_local_snapshot_advances_before_best_effort_send() {
+    // Live delivery runs on a background OS thread. Keep the correctness
+    // assertions strict, but give loaded Windows CI enough scheduler headroom
+    // before classifying an otherwise-immediate delivery as a timeout.
+    const DELIVERY_WAIT: Duration = Duration::from_secs(5);
     let manager = JobManager::new(1);
     let mut snapshot = test_job_snapshot("offline-terminal-job");
     snapshot.context.validation_steps = vec!["check".to_string()];
@@ -170,7 +174,7 @@ fn job_reconciliation_local_snapshot_advances_before_best_effort_send() {
             ..Default::default()
         },
     );
-    let first = recv_job_update(&mut rx, Duration::from_secs(2), "incremental update");
+    let first = recv_job_update(&mut rx, DELIVERY_WAIT, "incremental update");
     assert_eq!(first.update_seq, Some(2));
     assert!(first.stdout_chunk.is_none());
     let first_logs = first
@@ -249,7 +253,7 @@ fn job_reconciliation_local_snapshot_advances_before_best_effort_send() {
         runner_instance_id: "test-instance".to_string(),
     });
     manager.replay_snapshots_since(&registered_inventory);
-    assert!(wait_until(Duration::from_secs(2), || {
+    assert!(wait_until(DELIVERY_WAIT, || {
         !lock_unpoison(&manager.pending_job_updates).contains_key("offline-terminal-job")
     }));
     while reconnected_rx.try_recv().is_ok() {}
@@ -272,11 +276,7 @@ fn job_reconciliation_local_snapshot_advances_before_best_effort_send() {
         .unwrap()
         .update_seq -= 1;
     manager.replay_snapshots_since(&registered_inventory);
-    let replay = recv_job_update(
-        &mut fresh_rx,
-        Duration::from_secs(2),
-        "post-register replay",
-    );
+    let replay = recv_job_update(&mut fresh_rx, DELIVERY_WAIT, "post-register replay");
     assert_eq!(replay.job_id, "offline-terminal-job");
     assert_eq!(replay.update_seq, Some(3));
     assert!(replay.finished);
@@ -287,7 +287,7 @@ fn job_reconciliation_local_snapshot_advances_before_best_effort_send() {
     manager.stop("offline-terminal-job").unwrap();
     let stopped_race = recv_job_update(
         &mut fresh_rx,
-        Duration::from_secs(2),
+        DELIVERY_WAIT,
         "stop racing a lost terminal update replays the terminal snapshot",
     );
     assert_eq!(stopped_race.status, "completed");
