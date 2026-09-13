@@ -479,6 +479,8 @@ pub struct StoredDesktopConfig {
     pub runtime_autostart: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_connection: Option<RegularConnectionPreference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_tunnel_id: Option<String>,
     #[serde(default)]
     pub tunnel_proxy: TunnelProxyConfig,
 }

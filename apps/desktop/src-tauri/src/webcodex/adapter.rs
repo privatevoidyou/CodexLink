@@ -273,6 +273,9 @@ impl WebCodexAdapter {
             .arg("--json")
             .arg("--stop-on-stdin-eof");
         if tunnel == "openai" {
+            if let Some(path) = binaries.bundled_tunnel_client()? {
+                command.env("WEBCODEX_TUNNEL_CLIENT_BIN", path);
+            }
             command
                 .env_remove("OPENAI_ADMIN_KEY")
                 .env_remove("OPENAI_API_KEY");
@@ -301,6 +304,9 @@ impl WebCodexAdapter {
             .arg("--stop-on-stdin-eof")
             .env_remove("OPENAI_ADMIN_KEY")
             .env_remove("OPENAI_API_KEY");
+        if let Some(path) = binaries.bundled_tunnel_client()? {
+            command.env("WEBCODEX_TUNNEL_CLIENT_BIN", path);
+        }
         configure_tunnel_proxy_environment(&mut command, tunnel_proxy);
         Ok(command)
     }
@@ -1000,6 +1006,41 @@ mod tests {
             name.to_str() == Some("NO_PROXY")
                 && value.and_then(|value| value.to_str()) == Some("127.0.0.1,localhost,::1")
         }));
+    }
+
+    #[test]
+    fn bundled_tunnel_client_is_required_only_for_openai_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let binaries = ResolvedBinaries {
+            directory: temp.path().to_path_buf(),
+            webcodex: PathBuf::from("webcodex"),
+            server: PathBuf::from("webcodex-server"),
+            runner: PathBuf::from("webcodex-runner"),
+            version: "0.4.1".to_string(),
+            git_commit: "0123456789abcdef".to_string(),
+            source: super::super::cli::ResolvedBinarySource::Bundled,
+        };
+        let adapter = WebCodexAdapter {
+            binaries: Some(binaries),
+            bundled_runtime_dir: None,
+        };
+        assert!(adapter
+            .quick_share_command(Path::new("repo"), "none", None)
+            .is_ok());
+        assert_eq!(
+            adapter
+                .quick_share_command(Path::new("repo"), "openai", None)
+                .unwrap_err()
+                .code,
+            "bundled_tunnel_client_missing"
+        );
+        assert_eq!(
+            adapter
+                .regular_tunnel_command(Path::new("server.env"), None)
+                .unwrap_err()
+                .code,
+            "bundled_tunnel_client_missing"
+        );
     }
 
     #[test]

@@ -15,7 +15,9 @@ use crate::operation::{
     OperationController,
 };
 use crate::process::{MachineEventReceiver, ProcessKind, ProcessPhase, ProcessSupervisor};
-use crate::tunnel_config::{TunnelConfig, TunnelConfigRequest};
+use crate::tunnel_config::{
+    TunnelConfig, TunnelConfigRequest, LEGACY_TUNNEL_CONFIG_FILE_NAME, TUNNEL_KEY_FILE_NAME,
+};
 use crate::webcodex::{
     inspect_project_path, ProjectRuntimeIdentity, QuickShareReadyEvent, RegularTunnelReadyEvent,
     WebCodexAdapter,
@@ -228,11 +230,11 @@ impl AppState {
             .await?;
         let result = async {
             cancellation.check()?;
-            let path = core.data_dir.join("secrets").join("tunnel-config.json");
-            let mut config = core.tunnel_config.clone();
-            core.tunnel_config = tokio::task::spawn_blocking(move || {
-                config.update(&path, request)?;
-                Ok::<_, DesktopError>(config)
+            let key_path = core.data_dir.join("secrets").join(TUNNEL_KEY_FILE_NAME);
+            let mut tunnel_config = core.tunnel_config.clone();
+            let (tunnel_config, tunnel_id) = tokio::task::spawn_blocking(move || {
+                let tunnel_id = tunnel_config.update(&key_path, request)?;
+                Ok::<_, DesktopError>((tunnel_config, tunnel_id))
             })
             .await
             .map_err(|_| {
@@ -242,6 +244,9 @@ impl AppState {
                     "Check the saved configuration before retrying.",
                 )
             })??;
+            core.tunnel_config = tunnel_config;
+            core.config.openai_tunnel_id = tunnel_id;
+            core.save_config().await?;
             core.get_state().await
         }
         .await;
@@ -620,8 +625,12 @@ impl DesktopCore {
         let default_project_dir = default_management_project_dir(&data_dir, &resource_dir);
         let config_path = data_dir.join("desktop-state.json");
         let config = load_config(&config_path, &activity)?;
-        let tunnel_config =
-            TunnelConfig::load(&data_dir.join("secrets").join("tunnel-config.json"));
+        let secrets_dir = data_dir.join("secrets");
+        let tunnel_config = TunnelConfig::load(
+            config.openai_tunnel_id.clone(),
+            &secrets_dir.join(TUNNEL_KEY_FILE_NAME),
+            &secrets_dir.join(LEGACY_TUNNEL_CONFIG_FILE_NAME),
+        );
         let mut snapshot = DesktopStateSnapshot::default();
         snapshot.topology = config.topology.clone();
         snapshot.project = project_snapshot(&config);
@@ -3277,6 +3286,7 @@ mod tests {
             }),
             runtime_autostart: None,
             preferred_connection: None,
+            openai_tunnel_id: None,
             tunnel_proxy: TunnelProxyConfig::default(),
             runtime: None,
         }
@@ -3709,6 +3719,7 @@ mod tests {
             }),
             runtime_autostart: None,
             preferred_connection: None,
+            openai_tunnel_id: None,
             tunnel_proxy: TunnelProxyConfig::default(),
             runtime: Some(StoredRuntime {
                 server_url: "https://example.test".to_string(),

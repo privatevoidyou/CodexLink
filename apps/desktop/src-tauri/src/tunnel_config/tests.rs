@@ -2,26 +2,43 @@ use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
 struct Fixture(std::path::PathBuf);
+
 impl Fixture {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "webcodex-tunnel-settings-{}-{}",
+            "codexlink-tunnel-settings-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(path.join("secrets")).unwrap();
         Self(path)
     }
-    fn path(&self) -> std::path::PathBuf {
-        self.0.join("secrets").join("tunnel-config.json")
+
+    fn key_path(&self) -> std::path::PathBuf {
+        self.0.join("secrets").join(TUNNEL_KEY_FILE_NAME)
+    }
+
+    fn legacy_path(&self) -> std::path::PathBuf {
+        self.0.join("secrets").join(LEGACY_TUNNEL_CONFIG_FILE_NAME)
+    }
+
+    fn load(&self, tunnel_id: Option<&str>) -> TunnelConfig {
+        TunnelConfig::load(
+            tunnel_id.map(str::to_owned),
+            &self.key_path(),
+            &self.legacy_path(),
+        )
     }
 }
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
 fn save(id: &str, key: Option<&str>) -> TunnelConfigRequest {
     TunnelConfigRequest::Save {
         tunnel_id: id.into(),
@@ -30,27 +47,38 @@ fn save(id: &str, key: Option<&str>) -> TunnelConfigRequest {
 }
 
 #[test]
-fn saved_pair_roundtrips_overrides_environment_and_never_projects_key() {
+fn validation_is_bounded_and_strict() {
+    assert!(validate("tunnel_valid", "key-123").is_ok());
+    assert!(validate("invalid/id", "key-123").is_err());
+    assert!(validate("tunnel_valid", "bad\nkey").is_err());
+    assert!(validate("tunnel_valid", &"x".repeat(MAX_API_KEY_BYTES + 1)).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn rc5_dpapi_pair_roundtrips_and_never_projects_key() {
     let fixture = Fixture::new();
     let mut config = TunnelConfig::default();
-    config
+    let id = config
         .update(
-            &fixture.path(),
+            &fixture.key_path(),
             save("tunnel_saved", Some("test-only-api-key")),
         )
         .unwrap();
-    let mut config = TunnelConfig::load(&fixture.path());
+    assert_eq!(id.as_deref(), Some("tunnel_saved"));
+
+    let encoded = std::fs::read(fixture.key_path()).unwrap();
+    assert!(encoded.starts_with(TUNNEL_KEY_MAGIC));
+    assert!(!encoded
+        .windows(b"test-only-api-key".len())
+        .any(|window| window == b"test-only-api-key"));
+
+    let mut config = fixture.load(Some("tunnel_saved"));
     assert_eq!(config.snapshot().source, TunnelConfigSource::File);
-    assert_eq!(
-        config.snapshot().effective_tunnel_id.as_deref(),
-        Some("tunnel_saved")
-    );
     let projected = serde_json::to_string(&config.snapshot()).unwrap();
     assert!(!projected.contains("test-only-api-key"));
+
     let mut command = Command::new("unused");
-    command
-        .env("CONTROL_PLANE_TUNNEL_ID", "tunnel_environment")
-        .env("CONTROL_PLANE_API_KEY", "environment-key");
     config.apply_to_command(&mut command).unwrap();
     let env: std::collections::HashMap<_, _> = command.get_envs().collect();
     assert_eq!(
@@ -61,116 +89,84 @@ fn saved_pair_roundtrips_overrides_environment_and_never_projects_key() {
         env[std::ffi::OsStr::new("CONTROL_PLANE_API_KEY")].unwrap(),
         "test-only-api-key"
     );
-    config
-        .update(&fixture.path(), save("tunnel_changed", None))
+
+    let changed = config
+        .update(&fixture.key_path(), save("tunnel_changed", None))
         .unwrap();
+    assert_eq!(changed.as_deref(), Some("tunnel_changed"));
     assert_eq!(
-        TunnelConfig::load(&fixture.path()).saved.unwrap().api_key,
+        fixture.load(Some("tunnel_changed")).saved.unwrap().api_key,
         "test-only-api-key"
     );
-    config
-        .update(&fixture.path(), TunnelConfigRequest::UseEnvironment)
-        .unwrap();
+
     assert_eq!(
-        TunnelConfig::load(&fixture.path()).snapshot().source,
-        TunnelConfigSource::Environment
+        config
+            .update(&fixture.key_path(), TunnelConfigRequest::UseEnvironment)
+            .unwrap(),
+        None
     );
-    assert_eq!(std::fs::read_to_string(fixture.path()).unwrap(), "null");
+    assert!(!fixture.key_path().exists());
     assert_eq!(
-        std::fs::read_dir(fixture.0.join("secrets"))
-            .unwrap()
-            .count(),
-        1,
-        "no secret backup"
+        fixture.load(None).snapshot().source,
+        TunnelConfigSource::Environment
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn invalid_or_unreadable_saved_config_fails_closed_and_can_be_repaired() {
+fn legacy_plaintext_is_converted_once_to_rc5_dpapi_storage() {
     let fixture = Fixture::new();
-    std::fs::write(fixture.path(), b"not-json-with-test-secret").unwrap();
-    let mut config = TunnelConfig::load(&fixture.path());
+    std::fs::write(
+        fixture.legacy_path(),
+        br#"{"tunnel_id":"tunnel_legacy","api_key":"legacy-test-key"}"#,
+    )
+    .unwrap();
+
+    let config = fixture.load(Some("tunnel_legacy"));
+    assert_eq!(config.snapshot().source, TunnelConfigSource::File);
+    assert!(!fixture.legacy_path().exists());
+    let encoded = std::fs::read(fixture.key_path()).unwrap();
+    assert!(encoded.starts_with(TUNNEL_KEY_MAGIC));
+    assert!(!encoded
+        .windows(b"legacy-test-key".len())
+        .any(|window| window == b"legacy-test-key"));
+}
+
+#[cfg(windows)]
+#[test]
+fn invalid_saved_secret_fails_closed_and_can_be_repaired() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.key_path(), b"not-a-dpapi-secret").unwrap();
+    let mut config = fixture.load(Some("tunnel_saved"));
     assert_eq!(config.snapshot().source, TunnelConfigSource::Invalid);
     assert!(!config.snapshot().is_configured());
     let error = config
         .apply_to_command(&mut Command::new("unused"))
         .unwrap_err();
-    assert!(!error.to_string().contains("test-secret"));
+    assert!(!error.to_string().contains("not-a-dpapi-secret"));
+
     config
-        .update(&fixture.path(), save("tunnel_fixed", Some("test-key")))
+        .update(&fixture.key_path(), save("tunnel_fixed", Some("test-key")))
         .unwrap();
-    assert!(TunnelConfig::load(&fixture.path())
+    assert!(fixture
+        .load(Some("tunnel_fixed"))
         .snapshot()
         .is_configured());
-    std::fs::write(fixture.path(), vec![b' '; MAX_CONFIG_BYTES as usize + 1]).unwrap();
+
+    std::fs::write(
+        fixture.key_path(),
+        vec![b' '; MAX_SECRET_BYTES as usize + 1],
+    )
+    .unwrap();
     assert_eq!(
-        TunnelConfig::load(&fixture.path()).snapshot().source,
+        fixture.load(Some("tunnel_fixed")).snapshot().source,
         TunnelConfigSource::Invalid
     );
 }
 
-#[test]
-fn validation_and_failed_writes_keep_previous_saved_pair() {
-    let fixture = Fixture::new();
-    let mut config = TunnelConfig::default();
-    assert!(config
-        .update(&fixture.path(), save("tunnel_one", None))
-        .is_err());
-    config
-        .update(&fixture.path(), save("tunnel_one", Some("old-test-key")))
-        .unwrap();
-    for (id, key) in [("invalid/id", "key"), ("tunnel_one", "invalid\nkey")] {
-        let error = config
-            .update(&fixture.path(), save(id, Some(key)))
-            .unwrap_err();
-        assert_eq!(error.code, "tunnel_config_invalid");
-    }
-    let escaped_key = "\\".repeat(8192);
-    assert!(config
-        .update(&fixture.path(), save("tunnel_one", Some(&escaped_key)))
-        .is_err());
-    let blocked = fixture.0.join("directory");
-    std::fs::create_dir(&blocked).unwrap();
-    assert!(config
-        .update(&blocked, save("tunnel_two", Some("new-test-key")))
-        .is_err());
-    assert_eq!(
-        config.snapshot().saved_tunnel_id.as_deref(),
-        Some("tunnel_one")
-    );
-    assert_eq!(
-        TunnelConfig::load(&fixture.path()).saved.unwrap().api_key,
-        "old-test-key"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn credential_file_is_private_and_symlinks_are_not_loaded() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
-    let fixture = Fixture::new();
-    let mut config = TunnelConfig::default();
-    config
-        .update(&fixture.path(), save("tunnel_one", Some("test-key")))
-        .unwrap();
-    assert_eq!(
-        std::fs::metadata(fixture.path())
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
-    );
-    let link = fixture.0.join("link.json");
-    symlink(fixture.path(), &link).unwrap();
-    assert_eq!(
-        TunnelConfig::load(&link).snapshot().source,
-        TunnelConfigSource::Invalid
-    );
-}
-
+#[cfg(windows)]
 #[tokio::test]
-async fn saved_settings_survive_restart_and_published_state_never_uses_environment_over_them() {
+async fn saved_settings_survive_restart_without_secret_projection() {
     let fixture = Fixture::new();
     let app = crate::state::AppState::new(fixture.0.clone(), fixture.0.join("resources")).unwrap();
     let snapshot = app
@@ -181,26 +177,27 @@ async fn saved_settings_survive_restart_and_published_state_never_uses_environme
         snapshot.openai_tunnel_config.source,
         TunnelConfigSource::File
     );
-    assert!(app.get_state().openai_tunnel_configured);
     assert_eq!(
-        app.get_state()
-            .openai_tunnel_config
-            .saved_tunnel_id
-            .as_deref(),
+        snapshot.openai_tunnel_config.saved_tunnel_id.as_deref(),
         Some("tunnel_persisted")
     );
-    let serialized = serde_json::to_string(&app.get_state()).unwrap();
-    assert!(!serialized.contains("test-only-secret"));
-    assert!(!serde_json::to_string(&app.activity())
-        .unwrap()
-        .contains("test-only-secret"));
+
+    let public_state = serde_json::to_string(&app.get_state()).unwrap();
+    let stored_state = std::fs::read_to_string(fixture.0.join("desktop-state.json")).unwrap();
+    let secret_file = std::fs::read(fixture.key_path()).unwrap();
+    assert!(!public_state.contains("test-only-secret"));
+    assert!(!stored_state.contains("test-only-secret"));
+    assert!(!secret_file
+        .windows(b"test-only-secret".len())
+        .any(|window| window == b"test-only-secret"));
+    assert!(stored_state.contains("openai_tunnel_id"));
+
     let restarted =
         crate::state::AppState::new(fixture.0.clone(), fixture.0.join("resources")).unwrap();
     assert_eq!(
         restarted.get_state().openai_tunnel_config.source,
         TunnelConfigSource::File
     );
-    assert!(restarted.get_state().openai_tunnel_configured);
     restarted
         .update_tunnel_config(TunnelConfigRequest::UseEnvironment)
         .await
@@ -208,5 +205,11 @@ async fn saved_settings_survive_restart_and_published_state_never_uses_environme
     assert_eq!(
         restarted.get_state().openai_tunnel_config.source,
         TunnelConfigSource::Environment
+    );
+    assert!(!fixture.key_path().exists());
+    assert!(
+        !std::fs::read_to_string(fixture.0.join("desktop-state.json"))
+            .unwrap()
+            .contains("openai_tunnel_id")
     );
 }

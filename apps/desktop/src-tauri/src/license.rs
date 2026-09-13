@@ -299,15 +299,18 @@ fn load_identity(license_dir: &Path) -> Result<Option<DeviceIdentity>, &'static 
     {
         return Err("device_identity_invalid");
     }
-    let secret = unprotect_device_secret(&bytes[DEVICE_IDENTITY_MAGIC.len()..])
-        .map_err(|_| "device_identity_invalid")?;
+    let secret =
+        crate::secret_protection::unprotect_current_user(&bytes[DEVICE_IDENTITY_MAGIC.len()..])
+            .map_err(|_| "device_identity_invalid")?;
+    let secret: [u8; DEVICE_SECRET_BYTES] =
+        secret.try_into().map_err(|_| "device_identity_invalid")?;
     Ok(Some(DeviceIdentity {
         device_id: derive_device_id(&secret),
     }))
 }
 
 fn persist_identity(license_dir: &Path, secret: &[u8; DEVICE_SECRET_BYTES]) -> io::Result<()> {
-    let protected = protect_device_secret(secret)
+    let protected = crate::secret_protection::protect_current_user(secret)
         .map_err(|_| io::Error::other("device identity protection failed"))?;
     let mut encoded = Vec::with_capacity(DEVICE_IDENTITY_MAGIC.len() + protected.len());
     encoded.extend_from_slice(DEVICE_IDENTITY_MAGIC);
@@ -443,101 +446,6 @@ fn generate_device_secret() -> Result<[u8; DEVICE_SECRET_BYTES], ()> {
 
 #[cfg(not(windows))]
 fn generate_device_secret() -> Result<[u8; DEVICE_SECRET_BYTES], ()> {
-    Err(())
-}
-
-#[cfg(windows)]
-fn protect_device_secret(secret: &[u8; DEVICE_SECRET_BYTES]) -> Result<Vec<u8>, ()> {
-    use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: secret.len() as u32,
-        pbData: secret.as_ptr() as *mut u8,
-    };
-    let mut output = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: std::ptr::null_mut(),
-    };
-    let ok = unsafe {
-        CryptProtectData(
-            &input,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if ok == 0 || output.pbData.is_null() {
-        return Err(());
-    }
-    let protected =
-        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
-    unsafe {
-        LocalFree(output.pbData as *mut _);
-    }
-    Ok(protected)
-}
-
-#[cfg(not(windows))]
-fn protect_device_secret(_secret: &[u8; DEVICE_SECRET_BYTES]) -> Result<Vec<u8>, ()> {
-    Err(())
-}
-
-#[cfg(windows)]
-fn unprotect_device_secret(protected: &[u8]) -> Result<[u8; DEVICE_SECRET_BYTES], ()> {
-    use windows_sys::Win32::Foundation::LocalFree;
-    use windows_sys::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-
-    if protected.is_empty() || protected.len() > u32::MAX as usize {
-        return Err(());
-    }
-    let input = CRYPT_INTEGER_BLOB {
-        cbData: protected.len() as u32,
-        pbData: protected.as_ptr() as *mut u8,
-    };
-    let mut output = CRYPT_INTEGER_BLOB {
-        cbData: 0,
-        pbData: std::ptr::null_mut(),
-    };
-    let ok = unsafe {
-        CryptUnprotectData(
-            &input,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-            CRYPTPROTECT_UI_FORBIDDEN,
-            &mut output,
-        )
-    };
-    if ok == 0 || output.pbData.is_null() || output.cbData as usize != DEVICE_SECRET_BYTES {
-        if !output.pbData.is_null() {
-            unsafe {
-                LocalFree(output.pbData as *mut _);
-            }
-        }
-        return Err(());
-    }
-    let mut secret = [0u8; DEVICE_SECRET_BYTES];
-    unsafe {
-        secret.copy_from_slice(std::slice::from_raw_parts(
-            output.pbData,
-            DEVICE_SECRET_BYTES,
-        ));
-        LocalFree(output.pbData as *mut _);
-    }
-    Ok(secret)
-}
-
-#[cfg(not(windows))]
-fn unprotect_device_secret(_protected: &[u8]) -> Result<[u8; DEVICE_SECRET_BYTES], ()> {
     Err(())
 }
 
@@ -729,12 +637,13 @@ mod tests {
     #[test]
     fn dpapi_identity_roundtrips_with_rc5_header() {
         let secret = [11u8; DEVICE_SECRET_BYTES];
-        let protected = protect_device_secret(&secret).unwrap();
+        let protected = crate::secret_protection::protect_current_user(&secret).unwrap();
         let mut file = DEVICE_IDENTITY_MAGIC.to_vec();
         file.extend_from_slice(&protected);
         assert_eq!(&file[..DEVICE_IDENTITY_MAGIC.len()], DEVICE_IDENTITY_MAGIC);
         assert_eq!(
-            unprotect_device_secret(&file[DEVICE_IDENTITY_MAGIC.len()..]).unwrap(),
+            crate::secret_protection::unprotect_current_user(&file[DEVICE_IDENTITY_MAGIC.len()..])
+                .unwrap(),
             secret
         );
     }

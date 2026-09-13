@@ -102,6 +102,7 @@ fn migrate_desktop_state(legacy: &Path, target: &Path) -> io::Result<()> {
         )
     })?;
     rebase_stored_runtime_paths(&mut config, legacy, target);
+    migrate_legacy_tunnel_id(legacy, &mut config)?;
     let encoded = serde_json::to_vec_pretty(&config).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -109,6 +110,52 @@ fn migrate_desktop_state(legacy: &Path, target: &Path) -> io::Result<()> {
         )
     })?;
     write_bytes_if_missing(&destination, &encoded, Some(&metadata))?;
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyTunnelCredentials {
+    tunnel_id: String,
+    api_key: String,
+}
+
+fn migrate_legacy_tunnel_id(legacy: &Path, config: &mut StoredDesktopConfig) -> io::Result<()> {
+    if config.openai_tunnel_id.is_some() {
+        return Ok(());
+    }
+    let path = legacy.join("secrets/tunnel-config.json");
+    if !path_exists(&path)? {
+        return Ok(());
+    }
+    require_regular_file(&path, CONFIG_FILE_LIMIT)?;
+    let bytes = fs::read(&path)?;
+    let saved: Option<LegacyTunnelCredentials> =
+        serde_json::from_slice(&bytes).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("legacy Tunnel configuration is invalid: {error}"),
+            )
+        })?;
+    let Some(saved) = saved else {
+        return Ok(());
+    };
+    let valid_id = !saved.tunnel_id.is_empty()
+        && saved.tunnel_id.len() <= 256
+        && saved
+            .tunnel_id
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || value == b'_' || value == b'-');
+    let valid_key = !saved.api_key.is_empty()
+        && saved.api_key.len() <= 8192
+        && saved.api_key.bytes().all(|value| value.is_ascii_graphic());
+    if !valid_id || !valid_key {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "legacy Tunnel configuration is invalid",
+        ));
+    }
+    config.openai_tunnel_id = Some(saved.tunnel_id);
     Ok(())
 }
 
@@ -769,6 +816,7 @@ mod tests {
             }),
             runtime_autostart: Some(true),
             preferred_connection: Some(RegularConnectionPreference::NoChatGpt),
+            openai_tunnel_id: None,
             tunnel_proxy: TunnelProxyConfig::default(),
         }
     }
@@ -781,7 +829,7 @@ mod tests {
         );
         write(
             &legacy.join("secrets/tunnel-config.json"),
-            br#"{"schema_version":1}"#,
+            br#"{"tunnel_id":"tunnel_0123456789abcdef0123456789abcdef","api_key":"test-only-runtime-key"}"#,
         );
         write(
             &legacy.join("runtime/local/webcodex.env"),
@@ -858,6 +906,13 @@ mod tests {
         )
         .expect("valid migrated state");
         assert_eq!(migrated.project, source_state.project);
+        assert_eq!(
+            migrated.openai_tunnel_id.as_deref(),
+            Some("tunnel_0123456789abcdef0123456789abcdef")
+        );
+        let migrated_state_text =
+            fs::read_to_string(target.join("desktop-state.json")).expect("migrated state text");
+        assert!(!migrated_state_text.contains("test-only-runtime-key"));
         let runtime = migrated.runtime.expect("runtime");
         assert_eq!(
             runtime.server_env_file,

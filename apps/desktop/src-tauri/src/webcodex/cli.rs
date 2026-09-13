@@ -4,6 +4,7 @@ use crate::models::BinaryInfo;
 use crate::operation::{cancelled_error, CancellationContext};
 use crate::platform;
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -19,6 +20,9 @@ const PROJECT_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(120);
 const CLI_CLEANUP_SLACK: Duration = Duration::from_secs(2);
 const CLI_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const CLI_GRACEFUL_CLEANUP: Duration = Duration::from_millis(250);
+const BUNDLED_TUNNEL_CLIENT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const BUNDLED_TUNNEL_CLIENT_WINDOWS_X64_SHA256: &str =
+    "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedBinarySource {
@@ -181,6 +185,10 @@ impl ResolvedBinaries {
         })
     }
 
+    pub fn bundled_tunnel_client(&self) -> DesktopResult<Option<PathBuf>> {
+        resolve_bundled_tunnel_client(&self.directory, self.source)
+    }
+
     pub fn info(&self) -> BinaryInfo {
         BinaryInfo {
             directory: self.directory.to_string_lossy().to_string(),
@@ -189,6 +197,63 @@ impl ResolvedBinaries {
             source: self.source.label().to_string(),
         }
     }
+}
+
+fn resolve_bundled_tunnel_client(
+    runtime_dir: &Path,
+    source: ResolvedBinarySource,
+) -> DesktopResult<Option<PathBuf>> {
+    if source != ResolvedBinarySource::Bundled {
+        return Ok(None);
+    }
+    if !cfg!(all(windows, target_arch = "x86_64")) {
+        return Err(bundled_tunnel_client_error(runtime_dir.join("tools")));
+    }
+    let path = runtime_dir
+        .join("tools")
+        .join(executable_name("tunnel-client"));
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|_| bundled_tunnel_client_error(path.clone()))?;
+    if !metadata.is_file()
+        || metadata.len() == 0
+        || metadata.len() > BUNDLED_TUNNEL_CLIENT_MAX_BYTES
+    {
+        return Err(bundled_tunnel_client_error(path));
+    }
+    let mut file =
+        std::fs::File::open(&path).map_err(|_| bundled_tunnel_client_error(path.clone()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| bundled_tunnel_client_error(path.clone()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = hasher.finalize();
+    let mut actual = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(&mut actual, "{byte:02x}");
+    }
+    if actual != BUNDLED_TUNNEL_CLIENT_WINDOWS_X64_SHA256 {
+        return Err(bundled_tunnel_client_error(path));
+    }
+    Ok(Some(path))
+}
+
+fn bundled_tunnel_client_error(path: PathBuf) -> DesktopError {
+    DesktopError::new(
+        "bundled_tunnel_client_missing",
+        format!(
+            "The packaged OpenAI tunnel-client is missing or invalid: {}",
+            path.display()
+        ),
+        "Reinstall CodexLink from the matching release installer.",
+    )
 }
 
 #[derive(Debug)]
@@ -905,6 +970,20 @@ mod tests {
     #[test]
     fn bundled_source_label_is_stable() {
         assert_eq!(ResolvedBinarySource::Bundled.label(), "Bundled");
+    }
+
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    #[test]
+    fn bundled_tunnel_client_fails_closed_when_packaged_file_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let error =
+            resolve_bundled_tunnel_client(temp.path(), ResolvedBinarySource::Bundled).unwrap_err();
+        assert_eq!(error.code, "bundled_tunnel_client_missing");
+        assert!(
+            resolve_bundled_tunnel_client(temp.path(), ResolvedBinarySource::Environment)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(unix)]

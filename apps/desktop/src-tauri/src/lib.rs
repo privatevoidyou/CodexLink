@@ -8,6 +8,7 @@ mod models;
 mod operation;
 mod platform;
 mod process;
+mod secret_protection;
 mod state;
 mod state_migration;
 mod tray;
