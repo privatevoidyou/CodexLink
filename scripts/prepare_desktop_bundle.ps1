@@ -7,6 +7,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BinDir,
+    [Parameter(Mandatory = $true)][string]$TunnelClient,
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt,
@@ -26,13 +27,29 @@ if ($BuiltAt -le 0) {
 }
 
 $BinDir = [System.IO.Path]::GetFullPath($BinDir)
+$TunnelClient = [System.IO.Path]::GetFullPath($TunnelClient)
 $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 if (Test-Path -LiteralPath $OutputDir) {
     throw "Desktop bundle output already exists: $OutputDir"
 }
+$tunnelClientVersion = "0.0.12"
+$tunnelClientSha256 = "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8"
+if (-not (Test-Path -LiteralPath $TunnelClient -PathType Leaf)) {
+    throw "missing OpenAI tunnel-client: $TunnelClient"
+}
+$tunnelClientItem = Get-Item -LiteralPath $TunnelClient
+if (($tunnelClientItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw "OpenAI tunnel-client must be a regular non-reparse file: $TunnelClient"
+}
+$tunnelClientHash = (Get-FileHash -LiteralPath $TunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($tunnelClientHash -ne $tunnelClientSha256) {
+    throw "unexpected OpenAI tunnel-client SHA-256: $tunnelClientHash"
+}
 
 $runtimeDir = Join-Path $OutputDir "resources\webcodex-runtime"
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+$toolsDir = Join-Path $runtimeDir "tools"
+New-Item -ItemType Directory -Path $toolsDir | Out-Null
 $shortSource = $SourceSha.Substring(0, 12).ToLowerInvariant()
 $binaryNames = @("webcodex", "webcodex-server", "webcodex-runner")
 $resourceMap = [ordered]@{}
@@ -82,6 +99,21 @@ try {
         }
     }
 
+    $stagedTunnelClient = Join-Path $toolsDir "tunnel-client.exe"
+    Copy-Item -LiteralPath $TunnelClient -Destination $stagedTunnelClient
+    $stagedTunnelItem = Get-Item -LiteralPath $stagedTunnelClient
+    $stagedTunnelHash = (Get-FileHash -LiteralPath $stagedTunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($stagedTunnelItem.Length -ne $tunnelClientItem.Length -or $stagedTunnelHash -ne $tunnelClientSha256) {
+        throw "staged OpenAI tunnel-client byte verification failed"
+    }
+    $resourceMap[[System.IO.Path]::GetFullPath($stagedTunnelClient)] = "webcodex-runtime/tools/tunnel-client.exe"
+    $fileMetadata["tunnel-client"] = [ordered]@{
+        filename = "tools/tunnel-client.exe"
+        version = $tunnelClientVersion
+        size = [Int64]$stagedTunnelItem.Length
+        sha256 = $stagedTunnelHash
+    }
+
     $overlay = [ordered]@{
         version = $Version
         bundle = [ordered]@{
@@ -105,6 +137,8 @@ try {
         source_sha = $SourceSha.ToLowerInvariant()
         built_at = $BuiltAt
         resource_dir = "resources/webcodex-runtime"
+        tunnel_client_required_for_codexlink = $true
+        tunnel_client_sha256 = $tunnelClientSha256
         files = $fileMetadata
     }
     $metadataPath = Join-Path $OutputDir "desktop-bundle.json"
@@ -114,8 +148,6 @@ try {
     Write-Output "Tauri config overlay: $overlayPath"
     Write-Output "Runtime resources: $runtimeDir"
 } catch {
-    if (Test-Path -LiteralPath $OutputDir) {
-        Remove-Item -LiteralPath $OutputDir -Recurse -Force
-    }
+    Write-Warning "Desktop bundle staging failed; preserving the new staging directory for inspection: $OutputDir"
     throw
 }

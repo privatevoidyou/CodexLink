@@ -1,8 +1,9 @@
-# Install, inspect, and uninstall one newly-built WebCodex Desktop NSIS package.
-# The helper never kills by executable name and never removes WebCodex user state.
+# Install, inspect, and uninstall one newly-built CodexLink NSIS package.
+# The helper never kills by executable name and proves uninstall preserves CodexLink user state.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
+    [Parameter(Mandatory = $true)][string]$InstallDir,
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt
@@ -10,8 +11,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Installer = [System.IO.Path]::GetFullPath($Installer)
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
     throw "Desktop installer does not exist: $Installer"
+}
+if (Test-Path -LiteralPath $InstallDir) {
+    throw "refusing Desktop installer smoke because custom install path already exists: $InstallDir"
 }
 if ($SourceSha -notmatch '^[0-9A-Fa-f]{40}$') {
     throw "SourceSha must be one exact 40-hex Git commit"
@@ -20,38 +25,38 @@ if ($BuiltAt -le 0) {
     throw "BuiltAt must be a positive Unix timestamp"
 }
 
-function Get-WebCodexUninstallEntry {
+function Get-CodexLinkUninstallEntry {
     $root = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
     if (-not (Test-Path -LiteralPath $root)) { return $null }
     $entries = @(
         Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue |
             ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue } |
-            Where-Object { $_.DisplayName -eq "WebCodex Desktop" }
+            Where-Object { $_.DisplayName -eq "CodexLink" }
     )
     if ($entries.Count -gt 1) {
-        throw "multiple current-user WebCodex Desktop uninstall entries found"
+        throw "multiple current-user CodexLink uninstall entries found"
     }
     return @($entries | Select-Object -First 1)[0]
 }
 
 function Resolve-UninstallExecutable([string]$command) {
-    if (-not $command) { throw "WebCodex uninstall command is missing" }
+    if (-not $command) { throw "CodexLink uninstall command is missing" }
     $match = [regex]::Match($command, '^\s*"([^"]+)"')
     if ($match.Success) { return $match.Groups[1].Value }
     return ($command -split '\s+', 2)[0]
 }
 
 function Resolve-RegistryPath([string]$value, [string]$field) {
-    if (-not $value) { throw "WebCodex $field is missing" }
+    if (-not $value) { throw "CodexLink $field is missing" }
     $trimmed = $value.Trim()
     if ($trimmed.StartsWith('"') -or $trimmed.EndsWith('"')) {
         if (-not ($trimmed.StartsWith('"') -and $trimmed.EndsWith('"') -and $trimmed.Length -ge 2)) {
-            throw "WebCodex $field has malformed quoting"
+            throw "CodexLink $field has malformed quoting"
         }
         $trimmed = $trimmed.Substring(1, $trimmed.Length - 2)
     }
     if (-not $trimmed -or $trimmed.Contains('"')) {
-        throw "WebCodex $field is not one executable-system path"
+        throw "CodexLink $field is not one executable-system path"
     }
     return [System.IO.Path]::GetFullPath($trimmed)
 }
@@ -95,35 +100,50 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds, [string]$Failure) {
     throw $Failure
 }
 
-if (Get-WebCodexUninstallEntry) {
-    throw "refusing Desktop installer smoke because WebCodex Desktop is already installed for this user"
+if (Get-CodexLinkUninstallEntry) {
+    throw "refusing Desktop installer smoke because CodexLink is already installed for this user"
 }
+
+$stateDir = Join-Path $env:LOCALAPPDATA "dev.codexlink.desktop"
+if (Test-Path -LiteralPath $stateDir) {
+    throw "refusing Desktop installer smoke because CodexLink user state already exists: $stateDir"
+}
+New-Item -ItemType Directory -Path $stateDir | Out-Null
+$stateSentinel = Join-Path $stateDir ("installer-smoke-preserve-" + [guid]::NewGuid().ToString("N") + ".txt")
+[System.IO.File]::WriteAllText($stateSentinel, "preserve-me`n", [System.Text.Encoding]::ASCII)
 
 $installedDir = $null
 $uninstaller = $null
 $installed = $false
 try {
-    $installProcess = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru
+    $installProcess = Start-Process -FilePath $Installer -ArgumentList @("/S", "/D=$InstallDir") -Wait -PassThru
     if ($installProcess.ExitCode -ne 0) {
         throw "Desktop silent install failed with exit code $($installProcess.ExitCode)"
     }
-    Wait-Until { $null -ne (Get-WebCodexUninstallEntry) } 30 "Desktop installer did not register a current-user uninstall entry"
+    Wait-Until { $null -ne (Get-CodexLinkUninstallEntry) } 30 "Desktop installer did not register a current-user uninstall entry"
     $installed = $true
 
-    $entry = Get-WebCodexUninstallEntry
+    $entry = Get-CodexLinkUninstallEntry
     $uninstaller = Resolve-UninstallExecutable ([string]$entry.UninstallString)
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-        throw "registered WebCodex uninstaller does not exist: $uninstaller"
+        throw "registered CodexLink uninstaller does not exist: $uninstaller"
     }
     $installedDir = if ($entry.InstallLocation) {
         Resolve-RegistryPath ([string]$entry.InstallLocation) "InstallLocation"
     } else {
         Split-Path -Parent ([System.IO.Path]::GetFullPath($uninstaller))
     }
+    if (-not [string]::Equals(
+        $installedDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar),
+        $InstallDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar),
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "CodexLink installer did not honor the requested custom install path: $installedDir"
+    }
 
-    $desktopExe = Join-Path $installedDir "WebCodex.exe"
+    $desktopExe = Join-Path $installedDir "CodexLink.exe"
     if (-not (Test-Path -LiteralPath $desktopExe -PathType Leaf)) {
-        throw "installed WebCodex Desktop executable is missing: $desktopExe"
+        throw "installed CodexLink executable is missing: $desktopExe"
     }
     $runtimeDir = Join-Path $installedDir "webcodex-runtime"
     if (-not (Test-Path -LiteralPath $runtimeDir -PathType Container)) {
@@ -143,12 +163,22 @@ try {
         }
     }
 
+    $tunnelClient = Join-Path $runtimeDir "tools\tunnel-client.exe"
+    if (-not (Test-Path -LiteralPath $tunnelClient -PathType Leaf)) {
+        throw "installed bundled OpenAI tunnel-client is missing: $tunnelClient"
+    }
+    $expectedTunnelSha = "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8"
+    $tunnelSha = (Get-FileHash -LiteralPath $tunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($tunnelSha -ne $expectedTunnelSha) {
+        throw "unexpected installed OpenAI tunnel-client SHA-256: $tunnelSha"
+    }
+
     Write-Output "Desktop install smoke passed: $installedDir"
     Write-Output "Bundled runtime: $runtimeDir"
 } finally {
     if ($installed) {
         if (-not $uninstaller) {
-            $entry = Get-WebCodexUninstallEntry
+            $entry = Get-CodexLinkUninstallEntry
             if ($entry) { $uninstaller = Resolve-UninstallExecutable ([string]$entry.UninstallString) }
         }
         if ($uninstaller -and (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
@@ -156,9 +186,9 @@ try {
             if ($uninstallProcess.ExitCode -ne 0) {
                 throw "Desktop silent uninstall failed with exit code $($uninstallProcess.ExitCode)"
             }
-            Wait-Until { $null -eq (Get-WebCodexUninstallEntry) } 30 "Desktop uninstall entry remained after silent uninstall"
+            Wait-Until { $null -eq (Get-CodexLinkUninstallEntry) } 30 "Desktop uninstall entry remained after silent uninstall"
             if ($installedDir) {
-                $desktopExe = Join-Path $installedDir "WebCodex.exe"
+                $desktopExe = Join-Path $installedDir "CodexLink.exe"
                 $runtimeDir = Join-Path $installedDir "webcodex-runtime"
                 Wait-Until {
                     -not (Test-Path -LiteralPath $desktopExe) -and
@@ -168,6 +198,16 @@ try {
             }
         }
     }
+    if (-not (Test-Path -LiteralPath $stateSentinel -PathType Leaf)) {
+        throw "CodexLink uninstall removed persistent user state: $stateSentinel"
+    }
 }
 
-Write-Output "Desktop uninstall smoke passed"
+if (Test-Path -LiteralPath $stateSentinel -PathType Leaf) {
+    Remove-Item -LiteralPath $stateSentinel -Force
+}
+if ((Test-Path -LiteralPath $stateDir -PathType Container) -and @(Get-ChildItem -LiteralPath $stateDir -Force).Count -eq 0) {
+    Remove-Item -LiteralPath $stateDir -Force
+}
+
+Write-Output "Desktop uninstall smoke passed; CodexLink user state was preserved"
