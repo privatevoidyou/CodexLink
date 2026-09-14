@@ -61,3 +61,11 @@ protocol field、兼容名称和实现 invariant；普通用户不需要为了�
 - [手动多窗口协作](agent/manual-window-collaboration.md)
 - [OpenAPI 指南](agent/openapi-guidelines.md)
 - [发布流程](agent/release-process.md)
+
+### CodexLink 产品 fork 内部规划
+
+下面三份是 CodexLink Windows 产品 fork 的内部交付文档，不是普通 WebCodex 用户使用说明。
+
+- [CodexLink 交付路线图](CODEXLINK_DELIVERY_ROADMAP.md) —— 当前 checkpoint、首发顺序与剩余工作
+- [CodexLink 恢复矩阵](CODEXLINK_RECOVERY_MATRIX.md) —— RC5 到 rebuild 的能力映射与实施进度
+- [CodexLink 首版安全边界](CODEXLINK_SECURITY_BOUNDARY.md) —— Destructive Guard、typed 文件操作、Bounded Recursive Delete 与非 Sandbox 威胁模型的权威规范

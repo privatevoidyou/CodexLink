@@ -61,3 +61,11 @@ ordinary users should not need to learn.
 - [Manual multi-window collaboration](agent/manual-window-collaboration.md)
 - [OpenAPI guidelines](agent/openapi-guidelines.md)
 - [Release process](agent/release-process.md)
+
+### CodexLink product-fork planning
+
+These are internal delivery documents for the CodexLink Windows product fork rather than ordinary WebCodex user documentation.
+
+- [CodexLink delivery roadmap](CODEXLINK_DELIVERY_ROADMAP.md) — current checkpoints, release sequence, and remaining first-release work
+- [CodexLink recovery matrix](CODEXLINK_RECOVERY_MATRIX.md) — RC5-to-rebuild capability mapping and implementation status
+- [CodexLink first-release security boundary](CODEXLINK_SECURITY_BOUNDARY.md) — authoritative Destructive Guard, typed filesystem, bounded recursive-delete, and non-sandbox threat model
