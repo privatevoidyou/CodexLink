@@ -19,14 +19,14 @@ import { desktopErrorPresentation, normalizeDesktopError, runtimeLabel, operatio
 
 type Navigation = "home" | "projects" | "connection" | "activity" | "settings";
 
-const NAVIGATION: Navigation[] = ["home", "projects", "connection", "activity", "settings"];
+const NAVIGATION: Navigation[] = ["home", "projects", "connection", "settings"];
 
 const REGULAR_TUNNEL_OBSERVATION_INTERVAL_MS = 1_500;
 const CHATGPT_ACTIVITY_OBSERVATION_INTERVAL_MS = 30_000;
 const ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS = 1_000;
 
 export default function App() {
-  const { locale, setLocale, t } = useLocale();
+  const { t } = useLocale();
   const [state, setState] = useState<DesktopState | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [navigation, setNavigation] = useState<Navigation>("home");
@@ -34,6 +34,7 @@ export default function App() {
   const [error, setError] = useState<DesktopError | null>(null);
   const [cancelSubmittingId, setCancelSubmittingId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [chooseSetupMode, setChooseSetupMode] = useState(false);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
   const stateVersionRef = useRef(0);
@@ -71,6 +72,7 @@ export default function App() {
     void listen<unknown>("desktop:navigate", (event) => {
       if (event.payload !== "activity" && event.payload !== "settings") return;
       setShowSetup(false);
+      setChooseSetupMode(false);
       setNavigation(event.payload);
     }).then((stopListening) => {
       if (disposed) stopListening();
@@ -98,6 +100,7 @@ export default function App() {
   }, []);
 
   const openSetup = () => {
+    setChooseSetupMode(true);
     setShowSetup(true);
     setNavigation("home");
   };
@@ -122,8 +125,9 @@ export default function App() {
       try {
         const initial = await desktopApi.getState();
         if (cancelled) return;
-        // Keep first-run setup mounted through intermediate topology snapshots
-        // and the optional Tunnel handoff, including their error/retry paths.
+        // Keep ordinary first-run setup mounted through intermediate topology
+        // snapshots. The separate chooseSetupMode flag stays false here, so a
+        // fresh install still goes directly to local project selection.
         if (!initial.topology) setShowSetup(true);
         commitState(initial);
         if (initial.license.status !== "activated") return;
@@ -243,17 +247,6 @@ export default function App() {
 
   const chooseLocalProject = async () => {
     if (!state || state.current_operation) return;
-    const topology = state.topology;
-    if (
-      !topology ||
-      topology.experience !== "full" ||
-      topology.server.kind !== "local" ||
-      !state.project ||
-      !state.readiness.runtime_ready
-    ) {
-      openSetup();
-      return;
-    }
     setError(null);
     try {
       const selection = await open({
@@ -262,6 +255,21 @@ export default function App() {
         title: t("setup.chooseProject"),
       });
       if (typeof selection !== "string") return;
+
+      const topology = state.topology;
+      const canSwitchInPlace = Boolean(
+        topology
+        && topology.experience === "full"
+        && topology.server.kind === "local"
+        && state.project
+        && state.readiness.runtime_ready,
+      );
+      if (!canSwitchInPlace) {
+        commitState(await desktopApi.configureLocal(selection));
+        setShowSetup(false);
+        return;
+      }
+
       try {
         commitState(await desktopApi.activateLocalProject(selection));
       } catch (value) {
@@ -381,18 +389,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-locale">
-          <label htmlFor="desktop-sidebar-locale">{t("locale.label")}</label>
-          <select
-            id="desktop-sidebar-locale"
-            aria-label={t("locale.label")}
-            value={locale}
-            onChange={(event) => setLocale(event.target.value as typeof locale)}
-            data-webcodex-control="locale"
-          >
-            {LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}
-          </select>
-        </div>
         <div className="sidebar-status">
           <i className={`status-dot ${state.readiness.runtime_ready ? "ready" : "unknown"}`} aria-hidden="true" />
           <div><strong>{runtimeLabel(state, t)}</strong><span>{sidebarConnectionLabel(state, t)}</span></div>
@@ -400,8 +396,8 @@ export default function App() {
       </aside>
 
       <main className="main-content" ref={mainRef} tabIndex={-1}>
-        {navigation === "home" && showSetup && state.topology && (
-          <button className="back-button" onClick={() => setShowSetup(false)}>
+        {navigation === "home" && chooseSetupMode && state.topology && (
+          <button className="back-button" onClick={() => { setShowSetup(false); setChooseSetupMode(false); }}>
             <span aria-hidden="true">← </span>{t("home.backToOverview")}
           </button>
         )}
@@ -445,8 +441,8 @@ export default function App() {
           <FirstRun
             state={state}
             onState={commitState}
-            chooseModeFirst={showSetup}
-            onComplete={() => setShowSetup(false)}
+            chooseModeFirst={chooseSetupMode}
+            onComplete={() => { setShowSetup(false); setChooseSetupMode(false); }}
           />
         ) : (
           <Dashboard
@@ -454,18 +450,22 @@ export default function App() {
             refreshing={refreshing}
             onRefresh={() => void refresh()}
             onResumeRuntime={() => void resumeRuntime()}
-            onConnectChatGpt={() => void runStateOperation(desktopApi.startRegularTunnel)}
             onChooseProject={() => void chooseLocalProject()}
             onChangeSetup={openSetup}
             onNavigate={setNavigation}
-            onStopQuickShare={() => void runStateOperation(desktopApi.stopQuickShare)}
             onStopRuntime={() => void runStateOperation(desktopApi.stopLocalRuntime)}
           />
         ))}
         {navigation === "projects" && (
           <ProjectsPanel state={state} onChooseProject={() => void chooseLocalProject()} />
         )}
-        {navigation === "connection" && <ConnectionPanel state={state} onState={commitState} />}
+        {navigation === "connection" && (
+          <ConnectionPanel
+            state={state}
+            onState={commitState}
+            onOpenSettings={() => setNavigation("settings")}
+          />
+        )}
         {navigation === "activity" && <ActivityPanel activity={activity} />}
         {navigation === "settings" && <SettingsPanel state={state} onState={commitState} />}
       </main>

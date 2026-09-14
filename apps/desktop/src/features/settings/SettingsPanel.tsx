@@ -3,6 +3,7 @@ import { desktopApi } from "../../lib/desktop-api";
 import type { DesktopError, DesktopState, TunnelProxyMode } from "../../models/topology";
 import { LANGUAGES, useLocale } from "../../i18n/locale";
 import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
+import { TunnelConfigDiagnostics } from "../connection/TunnelConfigDiagnostics";
 import { PowerShellInstallGuidance } from "./PowerShellInstallGuidance";
 
 export function SettingsPanel({
@@ -29,9 +30,7 @@ export function SettingsPanel({
     }).catch((value) => {
       if (!cancelled) setLaunchAtLoginError(normalizeDesktopError(value));
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const saveProxy = async () => {
@@ -59,48 +58,66 @@ export function SettingsPanel({
       setSavingLaunchAtLogin(false);
     }
   };
+
   return (
-    <section className="page-section" aria-labelledby="settings-title" data-webcodex-page="settings">
+    <section className="page-section rc5-page settings-page" aria-labelledby="settings-title" data-webcodex-page="settings">
       <div className="eyebrow">{t("settings.eyebrow")}</div>
       <h1 id="settings-title">{t("settings.title")}</h1>
       <p className="lede">{t("settings.description")}</p>
 
-      <section className="settings-section" aria-labelledby="settings-interface-title">
-        <h2 id="settings-interface-title">{t("settings.interface")}</h2>
-        <div className="detail-card setting-row">
-          <label htmlFor="desktop-settings-locale">{t("locale.label")}</label>
-          <select
-            id="desktop-settings-locale"
-            value={locale}
-            onChange={(event) => setLocale(event.target.value as typeof locale)}
-            data-webcodex-control="locale"
-          >
-            {LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}
-          </select>
+      <section className="settings-group" aria-labelledby="settings-general-title">
+        <div className="settings-group-heading">
+          <h2 id="settings-general-title">{t("settings.general")}</h2>
         </div>
-      </section>
-
-      <section className="settings-section" aria-labelledby="settings-background-title">
-        <h2 id="settings-background-title">{t("settings.backgroundStartup")}</h2>
-        <article className="detail-card setting-row">
-          <div className="field-group">
-            <label htmlFor="desktop-launch-at-login">{t("settings.launchAtLogin")}</label>
-            <span className="field-help">{t("settings.launchAtLoginHelp")}</span>
+        <div className="settings-surface">
+          <div className="setting-line">
+            <div>
+              <label htmlFor="desktop-settings-locale">{t("locale.label")}</label>
+              <span>{t("settings.languageHelp")}</span>
+            </div>
+            <select
+              id="desktop-settings-locale"
+              value={locale}
+              onChange={(event) => setLocale(event.target.value as typeof locale)}
+              data-webcodex-control="locale"
+            >
+              {LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}
+            </select>
           </div>
-          <input
-            id="desktop-launch-at-login"
-            type="checkbox"
-            checked={launchAtLogin ?? false}
-            onChange={(event) => void updateLaunchAtLogin(event.target.checked)}
-            disabled={launchAtLogin === null || savingLaunchAtLogin}
-            data-webcodex-control="launch-at-login"
-          />
-        </article>
+          <div className="setting-line">
+            <div>
+              <label htmlFor="desktop-launch-at-login">{t("settings.launchAtLogin")}</label>
+              <span>{t("settings.launchAtLoginHelp")}</span>
+            </div>
+            <label className="switch-control" htmlFor="desktop-launch-at-login">
+              <input
+                id="desktop-launch-at-login"
+                type="checkbox"
+                checked={launchAtLogin ?? false}
+                onChange={(event) => void updateLaunchAtLogin(event.target.checked)}
+                disabled={launchAtLogin === null || savingLaunchAtLogin}
+                data-webcodex-control="launch-at-login"
+              />
+              <span aria-hidden="true" />
+            </label>
+          </div>
+        </div>
         {launchAtLoginError && <SettingsError error={launchAtLoginError} />}
       </section>
 
-      <section className="settings-section" aria-labelledby="settings-tunnel-title">
-        <h2 id="settings-tunnel-title">{t("settings.tunnel")}</h2>
+      <section className="settings-group" aria-labelledby="settings-tunnel-title">
+        <div className="settings-group-heading">
+          <div>
+            <h2 id="settings-tunnel-title">{t("settings.tunnel")}</h2>
+            <p>{t("settings.tunnelHelp")}</p>
+          </div>
+        </div>
+        <TunnelConfigDiagnostics state={state} onState={onState} />
+      </section>
+
+      <details className="settings-advanced">
+        <summary>{t("settings.networkAdvanced")}</summary>
+        <p className="settings-advanced-intro">{t("settings.networkAdvancedHelp")}</p>
         <article className="detail-card tunnel-proxy-settings">
           <div className="field-group">
             <label htmlFor="desktop-tunnel-proxy-mode">{t("settings.tunnelProxy")}</label>
@@ -132,18 +149,6 @@ export function SettingsPanel({
               <span className="field-help">{t("settings.tunnelProxyCustomHelp")}</span>
             </div>
           )}
-          <dl className="detail-list tunnel-proxy-status">
-            <div>
-              <dt>{t("settings.tunnelProxyEffective")}</dt>
-              <dd>{state.tunnel_proxy.effective_url ?? t("settings.tunnelProxyDirectValue")}</dd>
-            </div>
-            {state.tunnel_proxy.detected_url && (
-              <div>
-                <dt>{t("settings.tunnelProxyDetected")}</dt>
-                <dd>{state.tunnel_proxy.detected_url}</dd>
-              </div>
-            )}
-          </dl>
           <button
             type="button"
             className="secondary-button tunnel-proxy-save"
@@ -155,28 +160,22 @@ export function SettingsPanel({
           </button>
           {proxyError && <SettingsError error={proxyError} />}
         </article>
-      </section>
+      </details>
 
-      <details className="settings-section">
+      <details className="settings-advanced settings-diagnostics">
         <summary>{t("settings.diagnostics")}</summary>
         <PowerShellInstallGuidance state={state} onState={onState} />
         <article className="detail-card">
-        {state.binaries ? (
-          <dl className="detail-list">
-            <div><dt>{t("settings.version")}</dt><dd>{state.binaries.version}</dd></div>
-            <div><dt>{t("settings.sourceRevision")}</dt><dd>{state.binaries.git_commit}</dd></div>
-            <div><dt>{t("settings.binaryDirectory")}</dt><dd>{state.binaries.directory}</dd></div>
-            <div><dt>{t("settings.binaryResolution")}</dt><dd>{state.binaries.source}</dd></div>
-          </dl>
-        ) : (
-          <p>{t("settings.binariesPending")}</p>
-        )}
-        </article>
-
-        <article className="detail-card">
-          <dl className="detail-list">
-            <div><dt>{t("settings.runtimeProjectId")}</dt><dd>{state.project?.runtime_project_id ?? t("settings.notEstablished")}</dd></div>
-          </dl>
+          {state.binaries ? (
+            <dl className="detail-list">
+              <div><dt>{t("settings.version")}</dt><dd>{state.binaries.version}</dd></div>
+              <div><dt>{t("settings.sourceRevision")}</dt><dd>{state.binaries.git_commit}</dd></div>
+              <div><dt>{t("settings.binaryDirectory")}</dt><dd>{state.binaries.directory}</dd></div>
+              <div><dt>{t("settings.runtimeProjectId")}</dt><dd>{state.project?.runtime_project_id ?? t("settings.notEstablished")}</dd></div>
+            </dl>
+          ) : (
+            <p>{t("settings.binariesPending")}</p>
+          )}
         </article>
       </details>
     </section>

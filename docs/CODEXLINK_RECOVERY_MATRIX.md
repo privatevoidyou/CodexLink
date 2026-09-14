@@ -38,8 +38,8 @@
 | License | 商业设备激活 | RC5 SignedLicense + DPAPI device identity + offline verification | RESTORE/HARDEN | DONE | 历史 RC5 状态真实验证通过 |
 | Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy；同一销售码用于 Desktop 首次激活 | RESTORE | DONE/VERIFY | production bundle 不含不必要实现说明；新 Product Shell 复核 |
 | Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
-| Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | NEXT | 逐页视觉/状态/交互与真实 RC 对照 |
-| First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | NEXT | 普通用户无需 Server/Runner/端口/客户端路径配置 |
+| Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | LOCAL | 四项主导航、首页/项目/连接/设置与克制动效已恢复；真机逐页视觉对照待新 RC |
+| First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Restricted Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | LOCAL | fresh setup 直达本机项目；保存凭据自动准备 Secure Link；高级拓扑不占首用主链 |
 | Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
 | Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | VERIFY | bounded delete 的 root/wildcard 逻辑已覆盖；显式整盘授权留给新 RC 真机复验 |
 | Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | DONE | 复用现有 canonical guarded file-edit contract，不另造重复工具 |
@@ -264,18 +264,19 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] focused evidence：Guard 7/7、Runner structured delete 4/4、CLI activation 11/11、startup guidance 4/4、tool contracts 95/95、tool-runtime-contracts 73/73、registry structured delete 10/10、file validation 6/6；
 - [ ] 新 RC 真机复验大型 generated tree、junction/reparse、normal Cargo/npm/Python/Node/PowerShell 与拒绝后无 child spawn。
 
-### Batch G — RC5 Product Shell & Minimal Setup UX — NEXT
+### Batch G — RC5 Product Shell & Minimal Setup UX — LOCAL DONE
 
 完整 UI 契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
-- [ ] 首页恢复“一切就绪 + 项目大卡片 + 连接链路 + 状态摘要”；
-- [ ] 首次无 License 时恢复 RC5 简洁 Activation Gate；激活成功前不进入可工作 Product Shell；
-- [ ] 项目页恢复卡片式项目管理；
-- [ ] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片；
-- [ ] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
-- [ ] 保存 Tunnel 凭据后自动准备或恢复所需 runtime/tunnel；
-- [ ] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；
-- [ ] 用 `D:\Test\CodexLink\Current-RC` 与真实安装程序逐页对照视觉、滚动、hover、focus、状态动效。
+- [x] 首页恢复“一切就绪 + 项目大卡片 + 连接链路 + 状态摘要”；
+- [x] 首次无 License 时继续由现有 RC5 简洁 Activation Gate 拦截；激活成功前不进入可工作 Product Shell；
+- [x] 项目页恢复卡片式项目管理；
+- [x] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片，并保留 Remote / Quick Share 高级状态页；
+- [x] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
+- [x] 保存 Tunnel 凭据后，在本地 runtime 已就绪时自动停止旧 regular tunnel 并重新准备 Secure Link；
+- [x] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；首次 fresh setup 直达本机项目；
+- [x] 本地验证：Vitest 51/51、TypeScript typecheck、production build、form-control CSS contract、Tauri `cargo check --all-targets`；
+- [ ] 用 `D:\Test\CodexLink\Current-RC` 与新 RC 真实安装程序逐页对照视觉、滚动、hover、focus、状态动效与高 DPI。
 
 ### Batch H — Commercial Entitlement / Deployment Center MVP — NEXT AFTER G
 

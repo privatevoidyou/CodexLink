@@ -198,7 +198,7 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 | P0 | Lifecycle / installer | **本地完成** | `7ebab38d`；待 GitHub TLS 恢复后 push，真实 upgrade 仍留给新 RC |
 | P0 | Batch F：Destructive Guard & Bounded Delete | **本地完成** | typed 文件合同 + bounded recursive delete + destructive admission + focused Windows regressions 已通过 |
 | P0 | 恢复正常 model execution | **本地完成** | CodexLink-managed Runner 经 checked project activation 开放 shell/process/script；通用 WebCodex 默认不放宽 |
-| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **下一阶段** | Activation Gate + 首页/项目/连接/设置恢复已验收 RC 心智；普通用户不接触底层 runtime 配置 |
+| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **本地完成** | 四项主导航、Activation Gate、RC5 首页/项目/连接/设置心智与极简 Tunnel 配置已恢复；真机视觉对照留给新 RC |
 | P0 | Batch H：商业激活 / Deployment Center MVP | 待做 | 同一 MYWS 码完成“验证购买并下载 → Desktop 设备激活”；网站验证与设备绑定语义清楚 |
 | P0 | Batch I：Windows 新 RC 商业全链验收 | 待做 | verify purchase → download → install → activate → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall |
 | P1 | 网站内容与小白图文教程收口 | 待做 | 使用真实新 RC 截图、当前 OpenAI 路线、版本历史、支持与安全边界说明 |
@@ -650,8 +650,8 @@ CodexLink 当前商业策略：
 2. **已完成：移除 Sandbox POC 产品主线。** `65a97891` 普通 revert，历史保留，没有 reset / 重写。
 3. **已完成：Batch F + normal execution 本地 focused Gate。** Bounded Recursive Delete、Destructive Guard、model guidance 与 checked activation opt-in 已通过 focused regressions。
 4. **远端备份待网络恢复。** GitHub TLS 恢复后把尚未推送的本地 checkpoint 普通 push 到 `origin/codexlink-rebuild`，不使用 TLS 绕过。
-5. **下一步：Batch G — RC5 Product Shell。** 恢复 Activation Gate、首页/项目/连接/设置、状态逻辑和动效；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”。
-6. **Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
+5. **已完成：Batch G — RC5 Product Shell 本地实现。** 主导航固定为首页/项目/连接/设置；首页、项目、连接、设置恢复 RC5 产品心智；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”；Activity 只保留为诊断入口；真实 RC5 逐页视觉/高 DPI/动效对照留给新 RC 真机验收。
+6. **下一步：Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
 7. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
 8. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
 9. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。

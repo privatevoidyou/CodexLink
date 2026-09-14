@@ -1,45 +1,73 @@
-import { useEffect, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { useState } from "react";
 import { desktopApi } from "../../lib/desktop-api";
 import type { DesktopError, DesktopState } from "../../models/topology";
 import { useLocale } from "../../i18n/locale";
-import {
-  desktopErrorPresentation,
-  normalizeDesktopError,
-  runtimeLabel,
-} from "../../i18n/presentation";
-import { TunnelConfigDiagnostics } from "./TunnelConfigDiagnostics";
-
-type RegularProvider = "local" | "openai";
+import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
 
 export function ConnectionPanel({
   state,
   onState,
+  onOpenSettings,
 }: {
   state: DesktopState;
   onState: (state: DesktopState) => void;
+  onOpenSettings: () => void;
 }) {
   const { t } = useLocale();
-  const [provider, setProvider] = useState<RegularProvider>(
-    state.regular_tunnel || state.preferred_connection === "open_ai_tunnel" ? "openai" : "local",
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<DesktopError | null>(null);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
-  const tunnelId = state.openai_tunnel_config.effective_tunnel_id ?? state.openai_tunnel_config.saved_tunnel_id;
-  useEffect(() => {
-    if (copyStatus !== "copied") return;
-    const timer = window.setTimeout(() => setCopyStatus("idle"), 2500);
-    return () => window.clearTimeout(timer);
-  }, [copyStatus]);
-  useEffect(() => setCopyStatus("idle"), [tunnelId]);
-  const copyTunnelId = async () => {
-    if (!tunnelId) return;
-    try { await writeText(tunnelId); setCopyStatus("copied"); }
-    catch { setCopyStatus("failed"); }
-  };
-  const topology = state.topology;
   const mutationBusy = busy || Boolean(state.current_operation);
+  const runtimeReady = state.readiness.runtime_ready;
+  const credentialsReady = state.openai_tunnel_configured;
+  const tunnelStarted = Boolean(state.regular_tunnel);
+  const secureLinkReady = state.regular_tunnel?.status === "ready"
+    && Boolean(state.regular_tunnel.ready_for_chatgpt);
+  const tunnelError = state.regular_tunnel?.status === "error";
+  const chatgptObserved = runtimeReady && secureLinkReady && Boolean(state.chatgpt_activity?.observed);
+  const tunnelId = state.openai_tunnel_config.effective_tunnel_id ?? state.openai_tunnel_config.saved_tunnel_id;
+
+  if (state.topology?.server.kind === "remote") {
+    return (
+      <section className="page-section rc5-page connection-page" aria-labelledby="connection-title" data-webcodex-page="connection">
+        <div className="eyebrow">{t("connection.eyebrow")}</div>
+        <h1 id="connection-title">{t("connection.title")}</h1>
+        <p className="lede">{t("connection.simpleDescription")}</p>
+        <article className="connection-status-card">
+          <span className="section-kicker">{t("connection.current")}</span>
+          <h2>{t("connection.remoteServer")}</h2>
+          <dl className="connection-status-list">
+            <ConnectionStatusRow label="Server" value={state.topology.server.url} ready />
+            <ConnectionStatusRow label="Runner" value={t("connection.runnerThisComputer")} ready={state.readiness.runner === "ready"} />
+            <ConnectionStatusRow label={t("connection.method")} value={t("connection.externalManagedRemote")} ready />
+          </dl>
+        </article>
+      </section>
+    );
+  }
+
+  if (state.topology?.experience === "quick_share") {
+    const quickShareReady = Boolean(state.quick_share?.ready_for_chatgpt);
+    return (
+      <section className="page-section rc5-page connection-page" aria-labelledby="connection-title" data-webcodex-page="connection">
+        <div className="eyebrow">{t("connection.eyebrow")}</div>
+        <h1 id="connection-title">{t("connection.title")}</h1>
+        <p className="lede">{t("connection.quickShareManaged")}</p>
+        <article className={`connection-progress-card ${quickShareReady ? "ready" : "pending"}`}>
+          <div className="connection-progress-heading">
+            <div>
+              <span className="section-kicker">Quick Share</span>
+              <h2>{quickShareReady ? t("common.ready") : t("connection.inProgress")}</h2>
+            </div>
+            <span className={`connection-state-badge ${quickShareReady ? "ready" : "pending"}`}>
+              <i className={`status-dot ${quickShareReady ? "ready" : "pending"}`} aria-hidden="true" />
+              {quickShareReady ? t("common.ready") : t("connection.inProgress")}
+            </span>
+          </div>
+          {state.quick_share?.mcp_url && <code className="quick-share-url">{state.quick_share.mcp_url}</code>}
+        </article>
+      </section>
+    );
+  }
 
   const run = async (operation: () => Promise<DesktopState>) => {
     if (mutationBusy) return;
@@ -54,186 +82,131 @@ export function ConnectionPanel({
     }
   };
 
-  const chooseProvider = (value: RegularProvider) => {
-    setProvider(value);
+  const restartSecureLink = async () => {
+    if (mutationBusy || !runtimeReady || !credentialsReady) return;
+    setBusy(true);
+    setError(null);
+    try {
+      let next = state;
+      if (next.regular_tunnel) {
+        next = await desktopApi.stopRegularTunnel();
+        onState(next);
+      }
+      next = await desktopApi.startRegularTunnel();
+      onState(next);
+    } catch (value) {
+      setError(normalizeDesktopError(value));
+    } finally {
+      setBusy(false);
+    }
   };
-
-  if (topology?.server.kind === "remote") {
-    return (
-      <section className="page-section" aria-labelledby="connection-title" data-webcodex-page="connection">
-        <PageHeading />
-        <article className="detail-card" aria-labelledby="remote-server-title">
-          <h2 id="remote-server-title">{t("connection.remoteServer")}</h2>
-          <strong>{topology.server.url}</strong>
-          <dl className="detail-list">
-            <div><dt>Runner</dt><dd>{t("connection.runnerThisComputer")}</dd></div>
-            <div><dt>{t("connection.methods")}</dt><dd>{t("connection.externalManagedRemote")}</dd></div>
-          </dl>
-        </article>
-      </section>
-    );
-  }
-
-  if (topology?.experience === "quick_share") {
-    return (
-      <section className="page-section" aria-labelledby="connection-title" data-webcodex-page="connection">
-        <PageHeading />
-        <article className="detail-card">
-          <span className="section-kicker">Quick Share</span>
-          <strong>{currentConnection(state, t)}</strong>
-          <p>{t("connection.quickShareManaged")}</p>
-        </article>
-      </section>
-    );
-  }
-
-  const tunnelEstablished = state.regular_tunnel?.status === "ready";
-  const tunnelLocallyReady = tunnelEstablished && Boolean(state.regular_tunnel?.ready_for_chatgpt);
-  const tunnelError = state.regular_tunnel?.status === "error";
-  const chatgptObserved = state.readiness.runtime_ready &&
-    Boolean(state.chatgpt_activity?.observed) &&
-    !tunnelError;
-  const canStart = state.readiness.runtime_ready && state.openai_tunnel_configured && provider === "openai";
 
   return (
     <section
-      className="page-section"
+      className="page-section rc5-page connection-page"
       aria-labelledby="connection-title"
       aria-busy={mutationBusy}
       data-webcodex-page="connection"
     >
-      <PageHeading />
+      <div className="eyebrow">{t("connection.eyebrow")}</div>
+      <h1 id="connection-title">{t("connection.title")}</h1>
+      <p className="lede">{t("connection.simpleDescription")}</p>
 
-      <article className="connection-current detail-card" aria-labelledby="connection-current-title">
-        <h2 id="connection-current-title" className="section-title">{t("connection.current")}</h2>
-        <div className="status-value">
-          <i className={`status-dot ${chatgptObserved ? "ready" : tunnelLocallyReady ? "ready" : tunnelError ? "error" : state.regular_tunnel ? "pending" : "unknown"}`} aria-hidden="true" />
-          <strong>{!state.readiness.runtime_ready ? runtimeLabel(state, t) : chatgptObserved ? t("connection.observed") : tunnelLocallyReady ? t("connection.tunnelReady") : currentConnection(state, t)}</strong>
+      <article className={`connection-progress-card ${chatgptObserved ? "ready" : "pending"}`}>
+        <div className="connection-progress-heading">
+          <div>
+            <span className="section-kicker">{t("connection.connectTitle")}</span>
+            <h2>{chatgptObserved ? t("connection.established") : t("connection.followSteps")}</h2>
+          </div>
+          <span className={`connection-state-badge ${chatgptObserved ? "ready" : "pending"}`}>
+            <i className={`status-dot ${chatgptObserved ? "ready" : "pending"}`} aria-hidden="true" />
+            {chatgptObserved ? t("common.connected") : t("connection.inProgress")}
+          </span>
         </div>
-        <p>{!state.readiness.runtime_ready ? t("workspace.afterStart") : chatgptObserved ? t("connection.observedDescription") : tunnelLocallyReady ? t("connection.waitingForChatGpt") : tunnelEstablished ? t("connection.tunnelHandoffNeedsAction") : t("connection.notVerified")}</p>
+        <ol className="connection-step-list">
+          <ConnectionStep ready={runtimeReady} label={t("connection.stepRuntime")} />
+          <ConnectionStep ready={credentialsReady} label={t("connection.stepCredentials")} />
+          <ConnectionStep ready={secureLinkReady} label={t("connection.stepSecureLink")} />
+          <ConnectionStep ready={chatgptObserved} label={t("connection.stepChatGpt")} />
+        </ol>
       </article>
 
       {error && <LocalizedError error={error} />}
 
-      {state.regular_tunnel ? (
-        <article className="handoff-card" aria-label="OpenAI Secure Tunnel">
+      <article className="connection-status-card">
+        <div className="section-heading-row">
           <div>
-            <span className="section-kicker">OpenAI Secure Tunnel</span>
-            <span>{tunnelError ? t("workspace.stopToRetry") : !tunnelEstablished ? t("connection.tunnelStarting") : null}</span>
+            <span className="section-kicker">{t("connection.current")}</span>
+            <h2>{chatgptObserved ? t("connection.normal") : secureLinkReady ? t("connection.waitingForChatGptShort") : t("connection.needsAction")}</h2>
           </div>
-          <button
-            className="danger-button"
-            disabled={mutationBusy}
-            onClick={() => void run(desktopApi.stopRegularTunnel)}
-            data-webcodex-action="stop-regular-tunnel"
-          >
-            {mutationBusy ? t("common.checking") : t("connection.stopTunnel")}
-          </button>
-        </article>
-      ) : (
-        <div
-          className="connection-form"
-        >
-          <fieldset className="provider-row provider-fieldset" role="radiogroup" aria-labelledby="regular-provider-legend">
-            <legend id="regular-provider-legend">{t("connection.methods")}</legend>
-            <ProviderOption
-              id="regular-provider-local"
-              value="local"
-              checked={provider === "local"}
-              onChange={chooseProvider}
-              title={t("connection.noDesktopTunnel")}
-              description={t("connection.localDescription")}
-              disabled={mutationBusy}
-            />
-            <ProviderOption
-              id="regular-provider-openai"
-              value="openai"
-              checked={provider === "openai"}
-              onChange={chooseProvider}
-              title="OpenAI Secure Tunnel"
-              description={state.openai_tunnel_configured ? t("connection.openaiDescription") : t("connection.openaiNotConfigured")}
-              disabled={mutationBusy || !state.openai_tunnel_configured}
-            />
-          </fieldset>
-
-          {!state.readiness.runtime_ready && <p className="inline-note">{t("connection.runtimeRequired")}</p>}
-
-          {provider === "openai" && (
-            <button className="primary-button" disabled={mutationBusy || !canStart} onClick={() => void run(desktopApi.startRegularTunnel)} data-webcodex-action="start-regular-tunnel">
-              {mutationBusy ? t("connection.tunnelStarting") : t("home.connectChatGpt")}
-            </button>
-          )}
         </div>
-      )}
-      {tunnelId && (
-        <article className="detail-card tunnel-copy">
-          <label htmlFor="active-tunnel-id">Tunnel ID</label>
-          <input id="active-tunnel-id" readOnly value={tunnelId} onFocus={(event) => event.target.select()} />
-          <button className="secondary-button" onClick={() => void copyTunnelId()}>{t("connection.copyTunnelId")}</button>
-          <span role="status">{copyStatus === "copied" ? t("connection.clipboardReady") : copyStatus === "failed" ? t("connection.copyFailed") : ""}</span>
-        </article>
-      )}
-      <article className="connection-instructions detail-card">
-        <h2>{t("workspace.handoffTitle")}</h2>
-        <ol>
-          <li>{t("workspace.handoffOne")}</li>
-          <li>{t("workspace.handoffTwo")}</li>
-          <li>{t("workspace.verifyHint")}</li>
-        </ol>
+        <dl className="connection-status-list">
+          <ConnectionStatusRow label={t("connection.runtimeStatus")} value={runtimeReady ? t("common.ready") : t("common.stopped")} ready={runtimeReady} />
+          <ConnectionStatusRow label={t("connection.credentialsStatus")} value={credentialsReady ? t("common.configured") : t("connection.notConfigured")} ready={credentialsReady} />
+          <ConnectionStatusRow label={t("connection.method")} value="OpenAI Tunnel" ready={secureLinkReady} />
+          {tunnelId && <ConnectionStatusRow label="Tunnel ID" value={tunnelId} ready={credentialsReady} mono />}
+          {state.tunnel_proxy.effective_url && <ConnectionStatusRow label={t("connection.networkRoute")} value={state.tunnel_proxy.effective_url} ready />}
+        </dl>
+        {!credentialsReady && (
+          <button className="primary-button" onClick={onOpenSettings}>{t("connection.configureCredentials")}</button>
+        )}
+        {credentialsReady && runtimeReady && (!secureLinkReady || tunnelError) && (
+          <button className="primary-button" onClick={() => void restartSecureLink()} disabled={mutationBusy} data-webcodex-action="restart-regular-tunnel">
+            {mutationBusy ? t("connection.tunnelStarting") : t("connection.retrySecureLink")}
+          </button>
+        )}
       </article>
-      <details className="setup-tunnel-details" open={!state.openai_tunnel_configured}>
-        <summary>{t("workspace.optionalTunnel")}</summary>
-        <p>{t("connection.description")}</p>
-        <TunnelConfigDiagnostics state={state} onState={onState} />
-      </details>
+
+      <article className={`secure-link-card ${secureLinkReady ? "ready" : tunnelError ? "error" : "pending"}`}>
+        <div className="secure-link-icon" aria-hidden="true">↗</div>
+        <div>
+          <span className="section-kicker">Secure Tunnel</span>
+          <strong>{secureLinkReady ? t("connection.tunnelReady") : tunnelError ? t("common.error") : tunnelStarted ? t("connection.needsAction") : t("connection.secureLinkNotStarted")}</strong>
+          <p>{secureLinkReady ? t("connection.waitingForChatGpt") : credentialsReady ? t("connection.secureLinkHelp") : t("connection.credentialsFirst")}</p>
+        </div>
+        {tunnelStarted && (
+          <button className="danger-button" onClick={() => void run(desktopApi.stopRegularTunnel)} disabled={mutationBusy} data-webcodex-action="stop-regular-tunnel">
+            {t("connection.stopTunnel")}
+          </button>
+        )}
+      </article>
+
+      <article className="chatgpt-next-card">
+        <span className="section-kicker">{t("connection.nextInChatGpt")}</span>
+        <h2>{t("connection.createAppTitle")}</h2>
+        <p>{t("connection.createAppHelp")}</p>
+      </article>
     </section>
   );
 }
 
-function PageHeading() {
-  const { t } = useLocale();
+function ConnectionStep({ ready, label }: { ready: boolean; label: string }) {
   return (
-    <>
-      <div className="eyebrow">{t("connection.eyebrow")}</div>
-      <h1 id="connection-title">{t("connection.title")}</h1>
-    </>
+    <li className={ready ? "complete" : "pending"} aria-label={label}>
+      <span aria-hidden="true">{ready ? "✓" : "·"}</span>
+      <strong>{label}</strong>
+    </li>
   );
 }
 
-function ProviderOption({
-  id,
+function ConnectionStatusRow({
+  label,
   value,
-  checked,
-  onChange,
-  title,
-  description,
-  disabled,
+  ready,
+  mono = false,
 }: {
-  id: string;
-  value: RegularProvider;
-  checked: boolean;
-  onChange: (value: RegularProvider) => void;
-  title: string;
-  description: string;
-  disabled: boolean;
+  label: string;
+  value: string;
+  ready: boolean;
+  mono?: boolean;
 }) {
-  const descriptionId = `${id}-description`;
   return (
-    <div className={`provider-option ${checked ? "selected" : ""}`}>
-      <input
-        id={id}
-        type="radio"
-        name="regular-connection-provider"
-        value={value}
-        checked={checked}
-        onChange={() => onChange(value)}
-        aria-describedby={descriptionId}
-        disabled={disabled}
-      />
-      <label htmlFor={id}>
-        <strong>{title}</strong>
-        <span id={descriptionId}>{description}</span>
-      </label>
+    <div>
+      <dt>{label}</dt>
+      <dd className={mono ? "mono" : ""}>
+        <i className={`status-dot ${ready ? "ready" : "pending"}`} aria-hidden="true" />
+        {value}
+      </dd>
     </div>
   );
 }
@@ -252,14 +225,5 @@ function LocalizedError({ error }: { error: DesktopError }) {
       </details>
     </div>
   );
-}
-
-function currentConnection(state: DesktopState, t: ReturnType<typeof useLocale>["t"]) {
-  if (state.regular_tunnel) return "OpenAI Secure Tunnel";
-  const exposure = state.topology?.exposure;
-  if (!exposure || exposure.kind === "none") return t("connection.noDesktopTunnel");
-  if (exposure.kind === "existing_https") return `Existing HTTPS · ${exposure.url}`;
-  if (exposure.kind === "cloudflare") return "Cloudflare Quick Share";
-  return "OpenAI Secure Tunnel";
 }
 

@@ -4,6 +4,8 @@
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
+> 实施状态：**Batch G 已完成本地 Product Shell / 首用流程恢复；真实新 RC 与历史 RC5 的逐页视觉、动效和高 DPI 对照仍属于真机发布验收。**
+>
 > 目标：用户只理解“项目”和“ChatGPT 连接”，Server、Runner、端口、进程、Tunnel client 等实现细节由 CodexLink 自动处理。
 
 本文是首版 CodexLink 产品壳与首次配置体验的权威规范。安全边界仍以 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md) 为准；购买资格与设备激活合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。

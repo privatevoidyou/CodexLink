@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { desktopApi, type QuickShareProvider } from "../../lib/desktop-api";
 import { useLocale } from "../../i18n/locale";
-import { TunnelConfigDiagnostics } from "../connection/TunnelConfigDiagnostics";
 import { PowerShellInstallGuidance } from "../settings/PowerShellInstallGuidance";
 import {
   desktopErrorPresentation,
@@ -30,7 +29,7 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
     if (state.topology?.experience === "quick_share") return "share";
     if (state.topology?.server.kind === "local") return "local";
     if (state.topology?.server.kind === "remote") return "remote";
-    return null;
+    return "local";
   }, [chooseModeFirst, state.topology]);
   const [mode, setMode] = useState<SetupMode | null>(initialMode);
   const [project, setProject] = useState<ProjectSelection | null>(
@@ -42,7 +41,6 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   const [pairingCode, setPairingCode] = useState("");
   const [remoteEnrollmentNeedsRefresh, setRemoteEnrollmentNeedsRefresh] = useState(false);
   const [provider, setProvider] = useState<QuickShareProvider>("cloudflare");
-  const [connectAfterSetup, setConnectAfterSetup] = useState(state.openai_tunnel_configured);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<DesktopError | null>(null);
   const mutationBusy = busy || Boolean(state.current_operation);
@@ -76,12 +74,8 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
     setError(null);
     try {
       if (mode === "local") {
-        let next = await desktopApi.configureLocal(project.path);
+        const next = await desktopApi.configureLocal(project.path);
         onState(next);
-        if (connectAfterSetup && next.openai_tunnel_configured && next.readiness.runtime_ready && !next.regular_tunnel) {
-          next = await desktopApi.startRegularTunnel();
-          onState(next);
-        }
         onComplete?.();
       } else if (mode === "remote") {
         if (!project) return;
@@ -160,9 +154,11 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         void run();
       }}
     >
-      <button type="button" className="back-button" onClick={() => setMode(null)} data-webcodex-action="show-setup-options">
-        {t("setup.back")}
-      </button>
+      {chooseModeFirst && (
+        <button type="button" className="back-button" onClick={() => setMode(null)} data-webcodex-action="show-setup-options">
+          {t("setup.back")}
+        </button>
+      )}
       <div className="eyebrow">{modeLabel(mode, t)}</div>
       <h1 id="setup-title">{setupTitle(mode, t)}</h1>
       <p className="lede">{setupDescription(mode, t)}</p>
@@ -187,12 +183,10 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         </button>
       </div>
 
-      <PowerShellInstallGuidance state={state} onState={onState} />
-
       {mode === "local" && (
-        <details className="setup-tunnel-details">
-          <summary>{t("workspace.optionalTunnel")}</summary>
-          <TunnelConfigDiagnostics state={state} onState={onState} />
+        <details className="setup-advanced">
+          <summary>{t("settings.diagnostics")}</summary>
+          <PowerShellInstallGuidance state={state} onState={onState} />
         </details>
       )}
 
@@ -267,22 +261,6 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
             </div>
           ))}
         </fieldset>
-      )}
-
-      {mode === "local" && state.openai_tunnel_configured && !state.regular_tunnel && (
-        <label className="setup-choice-card" htmlFor="setup-connect-chatgpt">
-          <input
-            id="setup-connect-chatgpt"
-            type="checkbox"
-            checked={connectAfterSetup}
-            onChange={(event) => setConnectAfterSetup(event.target.checked)}
-            disabled={mutationBusy}
-          />
-          <span>
-            <strong>{t("setup.connectChatGptAfterSetup")}</strong>
-            <small>{t("setup.connectChatGptAfterSetupHelp")}</small>
-          </span>
-        </label>
       )}
 
       {mode === "remote" && (
