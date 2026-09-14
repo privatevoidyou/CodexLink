@@ -51,7 +51,7 @@ pub struct RunnerInitOptions {
     pub output: PathBuf,
     pub allowed_roots: Vec<PathBuf>,
     /// Master gate for model-authored command/process/script execution.
-    /// CodexLink-managed Runners set this false until an OS sandbox is explicitly enabled.
+    /// Generic enrollment may keep this false until a trusted product/operator explicitly opts in.
     pub allow_raw_shell: bool,
     pub allow_cwd_anywhere: bool,
     pub overwrite: bool,

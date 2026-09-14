@@ -277,6 +277,11 @@ fn tool_definitions_drive_session_and_permission_policy() {
             ToolEffect::Mutate,
             ToolRisk::ProjectWrite,
         ),
+        (
+            "delete_directory",
+            ToolEffect::Mutate,
+            ToolRisk::ProjectWrite,
+        ),
         ("run_shell", ToolEffect::Execute, ToolRisk::JobRun),
         ("cargo_check", ToolEffect::Execute, ToolRisk::JobRun),
         (
@@ -562,6 +567,7 @@ fn tool_definitions_drive_session_and_permission_policy() {
         ("stop_job", PERMISSION_RISK_JOB),
         ("close_session_shell", PERMISSION_RISK_JOB),
         ("delete_project_files", PERMISSION_RISK_DESTRUCTIVE),
+        ("delete_directory", PERMISSION_RISK_DESTRUCTIVE),
         ("save_project_artifact", PERMISSION_RISK_ARTIFACT_WRITE),
         (
             "import_conversation_files_to_project",
@@ -702,6 +708,11 @@ fn required_runner_capability_matches_metadata_risk_table() {
         ),
         (
             "delete_project_files",
+            ToolRisk::ProjectWrite,
+            RunnerCapabilityRequirement::Shell,
+        ),
+        (
+            "delete_directory",
             ToolRisk::ProjectWrite,
             RunnerCapabilityRequirement::Shell,
         ),

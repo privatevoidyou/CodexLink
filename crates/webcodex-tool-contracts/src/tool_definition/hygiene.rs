@@ -5,13 +5,14 @@ use super::{
     TOOL_CATEGORY_CLEANUP,
 };
 use crate::metadata::{
-    ToolPathHint::{None as NoPath, PathList},
+    ToolPathHint::{None as NoPath, PathList, SinglePath},
     ToolRisk::{ProjectWrite, Read},
     PROJECT_READ, PROJECT_WRITE, TOOL_PROVIDER_RUNNER,
 };
 use crate::registry::input_schemas::{
-    delete_project_files_input_schema, discard_untracked_input_schema,
-    git_restore_paths_input_schema, workspace_hygiene_check_input_schema,
+    delete_directory_input_schema, delete_project_files_input_schema,
+    discard_untracked_input_schema, git_restore_paths_input_schema,
+    workspace_hygiene_check_input_schema,
 };
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[adaptive_runtime_direct(
@@ -66,6 +67,30 @@ pub(super) const CLEANUP_DEFINITIONS: &[ToolDefinition] = &[
         ),
         "Delete selected project-relative files only; safer than arbitrary rm for cleanup.",
         delete_project_files_input_schema,
+    ),
+    model_spec(
+        def(
+            "delete_directory",
+            super::ToolAuditPolicy::TYPED_CANONICAL,
+            ModelVisible,
+            TOOL_CATEGORY_CLEANUP,
+            Some(Shell),
+            TOOL_PROVIDER_RUNNER,
+            super::ToolSemanticContract {
+                effect: super::ToolEffect::Mutate,
+                risk: ProjectWrite,
+                approval: super::ToolApprovalPolicy::Standard,
+                idempotency: super::ToolIdempotency::NonIdempotent,
+            },
+            Some(PROJECT_WRITE),
+            true,
+            SinglePath,
+            true,
+            false,
+            super::ToolSessionEvidencePolicy::NONE,
+        ),
+        "Delete one explicit project-relative directory tree recursively through CodexLink bounded deletion. The project root, parent traversal, wildcard targets, .git, protected host/product anchors, and symlink/junction/reparse traversal are refused. Use this instead of rm -rf, Remove-Item -Recurse, or rmdir /s for project cleanup.",
+        delete_directory_input_schema,
     ),
     git_like(model_spec(
         def(

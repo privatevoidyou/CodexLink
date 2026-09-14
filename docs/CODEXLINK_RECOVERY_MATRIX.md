@@ -4,7 +4,7 @@
 >
 > 当前 Engine 基线：WebCodex 0.4.1 (`26c44e6436f254183d74db6865d04e2ec1d85930`)。
 >
-> 当前产品 checkpoint：Safe Mode `22cab846` → Identity `863d5396` → State/Migration `b191bd85` → License `733b7b54` → Project/Tunnel `e85749d7` → Lifecycle/Installer `7ebab38d`（本地）→ Sandbox POC `c5fa9b50`（研究实验，待普通 revert）。
+> 当前产品 checkpoint：Safe Mode `22cab846` → Identity `863d5396` → State/Migration `b191bd85` → License `733b7b54` → Project/Tunnel `e85749d7` → Lifecycle/Installer `7ebab38d`（本地）→ Sandbox POC `c5fa9b50`（研究）→ POC revert `65a97891` → Batch F Destructive Guard / Bounded Delete（本地 focused Gate 已通过）。
 >
 > 首版安全策略详见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 >
@@ -30,7 +30,7 @@
 | 区域 | 历史 RC5 / 已接受行为 | rebuild / 首版目标 | 类型 | 进度 | 主要验收 |
 | --- | --- | --- | --- | --- | --- |
 | Engine baseline | WebCodex 0.4.1, source `26c44e...` | 保持 exact baseline，再选择性同步上游安全修复 | KEEP | DONE | Server/Runner source aligned |
-| Safe execution | 历史 RC 允许更广执行 | Batch F 通过后恢复 normal execution + Destructive Guard | REDESIGN/HARDEN | NEXT | 正常 build/test/script 通过；obvious destructive shell pre-spawn 拒绝 |
+| Safe execution | 历史 RC 允许更广执行 | normal execution + Destructive Guard；CodexLink 通过 checked project activation 显式启用 | REDESIGN/HARDEN | DONE | focused Guard / activation / guidance 回归已通过；真机全链留给新 RC |
 | Product name | 客户看到 CodexLink | customer-facing shell / installer 使用 CodexLink | RESTORE | DONE | fresh install 无 WebCodex 产品品牌泄漏 |
 | App data | `%LOCALAPPDATA%\dev.codexlink.desktop` | 产品独立 namespace | RESTORE | DONE | clean profile 只创建 CodexLink namespace |
 | Install/data split | 程序目录可自定义；用户状态独立持久 | upgrade/uninstall 不误删持久状态 | RESTORE | LOCAL | installer smoke 已完成；真实 upgrade 留给新 RC |
@@ -41,11 +41,11 @@
 | Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | NEXT | 逐页视觉/状态/交互与真实 RC 对照 |
 | First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | NEXT | 普通用户无需 Server/Runner/端口/客户端路径配置 |
 | Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
-| Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | NEXT | 明确子目录可 bounded delete；root 本身拒绝 |
-| Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | NEXT | 并发变化 fail closed |
-| Bounded recursive delete | 历史可通过 shell 广泛递归 | typed `delete_directory(path)`，只删可证明边界的明确子树 | REDESIGN | NEXT | deep tree / large generated tree / root / wildcard / reparse regressions |
-| Raw destructive admission | 历史 shell 更自由 | recursive delete / destructive Git / mirror-purge / disk destructive pre-spawn deny | HARDEN | NEXT | denied request 不产生 child process |
-| Windows OS sandbox | 曾做独立 POC | 不作为首版产品依赖或 release Gate | REFERENCE | LATER | 保留历史研究；主线普通 revert POC |
+| Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | VERIFY | bounded delete 的 root/wildcard 逻辑已覆盖；显式整盘授权留给新 RC 真机复验 |
+| Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | DONE | 复用现有 canonical guarded file-edit contract，不另造重复工具 |
+| Bounded recursive delete | 历史可通过 shell 广泛递归 | typed `delete_directory(path)`，只删可证明边界的明确子树 | REDESIGN | DONE | Runner focused delete 4/4；typed registry/contract Gate 已通过 |
+| Raw destructive admission | 历史 shell 更自由 | recursive delete / destructive Git / mirror-purge / disk destructive pre-dispatch deny | HARDEN | DONE | Guard focused 7/7；真机无-child-spawn 再复验 |
+| Windows OS sandbox | 曾做独立 POC | 不作为首版产品依赖或 release Gate | REFERENCE | LATER | `65a97891` 已普通 revert；历史研究保留 |
 | Tunnel binary | OpenAI tunnel-client 0.0.12 固定 SHA | 安装包自带且 fail closed | RESTORE | DONE | SHA `664916...`; 不访问 legacy WebCodex tool cache |
 | Tunnel health | 动态 `127.0.0.1:0` + url file | 保持 Engine 当前动态 health | KEEP | DONE | 不 hardcode 14286；health 200 |
 | Tunnel secrets | Tunnel ID + Runtime/API Key | DPAPI product-owned secret storage；不在日志回显 | RESTORE/HARDEN | DONE | logs/diagnostics 无 secret |
@@ -243,30 +243,28 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] host-side POC harness；
 - [x] 证明当前机器 Windows Sandbox feature disabled；
 - [x] 产品决策：**不作为首版依赖 / Gate**；
-- [ ] 用普通 revert 从产品主线移除，保留历史证据。
+- [x] `65a97891` 普通 revert 从产品主线移除，保留历史证据。
 
-### Batch F — Destructive Guard & Bounded Delete — NEXT
+### Batch F — Destructive Guard & Bounded Delete — LOCAL DONE
 
 完整 Gate 见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 
-- [ ] short model safety instructions；
-- [ ] create no-overwrite；
-- [ ] guarded edit / expected SHA regression；
-- [ ] rename no-overwrite；
-- [ ] `delete_file`；
-- [ ] `delete_directory` bounded recursive delete；
-- [ ] lightweight preflight；
-- [ ] root / parent / wildcard / protected-anchor guard；
-- [ ] reparse/junction/symlink fail-closed；
-- [ ] single-pass deletion + bounded summary；
-- [ ] raw recursive-delete admission；
-- [ ] destructive Git admission；
-- [ ] mirror/purge + disk-destructive admission；
-- [ ] safe audit / diagnostics leakage regression；
-- [ ] normal shell/process/script focused tests；
-- [ ] 全部通过后才切换 execution policy。
+- [x] short model safety instructions；
+- [x] KEEP existing create no-overwrite / guarded edit expected-SHA / rename no-overwrite / single-file delete contracts；
+- [x] `delete_directory` bounded recursive delete；
+- [x] lightweight preflight + exact project-relative target validation；
+- [x] root / parent / wildcard / `.git` / protected-anchor guard；
+- [x] reparse/junction/symlink fail-closed；
+- [x] single-pass deletion + bounded summary；
+- [x] raw recursive-delete admission；
+- [x] destructive Git admission；
+- [x] mirror/purge + disk-destructive admission；
+- [x] Guard denial只返回固定 reason code/copy，不把 raw command 写入新审计字段；
+- [x] normal execution 恢复走 `project activate --allow-raw-shell` + config check/generation CAS/hot reload；
+- [x] focused evidence：Guard 7/7、Runner structured delete 4/4、CLI activation 11/11、startup guidance 4/4、tool contracts 95/95、tool-runtime-contracts 73/73、registry structured delete 10/10、file validation 6/6；
+- [ ] 新 RC 真机复验大型 generated tree、junction/reparse、normal Cargo/npm/Python/Node/PowerShell 与拒绝后无 child spawn。
 
-### Batch G — RC5 Product Shell & Minimal Setup UX — NEXT AFTER F
+### Batch G — RC5 Product Shell & Minimal Setup UX — NEXT
 
 完整 UI 契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 

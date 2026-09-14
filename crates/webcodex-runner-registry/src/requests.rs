@@ -803,19 +803,22 @@ impl RunnerRegistry {
         Ok((request_id, rx))
     }
 
-    /// Enqueue a structured `delete_project_files` Runner file op. The
-    /// generation-2 `structured_file_delete` baseline check and pending-request
-    /// admission happen under the same registry lock. A baseline miss queues
-    /// nothing and is reported as an invariant failure; there is no shell fallback.
+    /// Enqueue a structured file-delete Runner op. The generation-2
+    /// `structured_file_delete` baseline covers exact file cleanup and bounded
+    /// directory-tree deletion. Admission and the capability check happen under
+    /// the same registry lock; there is no shell fallback.
     pub async fn enqueue_structured_file_delete(
         &self,
         body: ShellFileOpRequest,
         requested_by: String,
     ) -> Result<(String, oneshot::Receiver<ShellRunResponse>), String> {
         validate_file_request(&body)?;
-        if body.op != "delete_project_files" {
+        if !matches!(
+            body.op.as_str(),
+            "delete_project_files" | "delete_directory"
+        ) {
             return Err(format!(
-                "structured file delete only accepts op=delete_project_files (got {})",
+                "structured file delete only accepts op=delete_project_files or op=delete_directory (got {})",
                 body.op
             ));
         }

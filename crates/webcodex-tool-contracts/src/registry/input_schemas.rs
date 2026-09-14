@@ -45,8 +45,8 @@ pub use checkpoints::{
     checkpoint_validation_schema,
 };
 pub use cleanup::{
-    delete_project_files_input_schema, discard_untracked_input_schema,
-    git_restore_paths_input_schema,
+    delete_directory_input_schema, delete_project_files_input_schema,
+    discard_untracked_input_schema, git_restore_paths_input_schema,
 };
 pub use coding::{finish_coding_task_input_schema, work_on_project_input_schema};
 pub use coding_agents::{

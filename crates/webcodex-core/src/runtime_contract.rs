@@ -48,8 +48,8 @@ pub const RECOVERY_TOOL_VALUES: [&str; 7] = [
 ];
 
 pub const BUILTIN_CODING_WORKFLOW_CONTRACT: &str = "webcodex.coding_workflow";
-pub const BUILTIN_CODING_WORKFLOW_VERSION: u64 = 9;
-pub const BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS: usize = 8;
+pub const BUILTIN_CODING_WORKFLOW_VERSION: u64 = 10;
+pub const BUILTIN_CODING_WORKFLOW_MAX_GUIDANCE_ITEMS: usize = 9;
 
 /// Validate a Runner project path without applying host-local filesystem semantics.
 /// The Server may route to an agent on another OS, so both POSIX and Windows

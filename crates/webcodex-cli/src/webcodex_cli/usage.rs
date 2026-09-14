@@ -104,6 +104,7 @@ The command preserves Runner identity, grants only the canonical exact project r
 Options:\n\
   --config PATH              Active Runner configuration created by login/init\n\
   --user-token-file PATH     Existing user API token for operator Server calls\n\
+  --allow-raw-shell          Enable normal model-authored execution on this Runner\n\
   --json                     Print machine-readable output\n\
   -h, --help                 Print help and exit\n"
 }

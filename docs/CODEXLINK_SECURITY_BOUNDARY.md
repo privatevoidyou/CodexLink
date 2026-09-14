@@ -417,7 +417,7 @@ Git-aware classification **不是首版安全依赖**。
 
 ## 11. Batch F 实现 Gate
 
-在恢复 model-authored normal shell / process / script execution 之前，至少证明：
+Batch F 在恢复 CodexLink-managed model-authored normal shell / process / script execution 前，使用以下 focused Gate；当前本地实现已经通过该 Gate，真实 RC 仍需在 Windows 全链复验：
 
 ### Typed filesystem
 
@@ -450,7 +450,7 @@ Git-aware classification **不是首版安全依赖**。
 - Job Object / process ownership 不回归；
 - installer / migration / staging 无新增 broad destructive cleanup。
 
-只有这些 focused tests 通过后，才把当前 Safe Mode 从“临时全面禁止 arbitrary execution”切换到“正常 execution + Destructive Guard”。
+这些 focused tests 已通过后，CodexLink 不修改 WebCodex 通用 enrollment 默认，而是在自己管理的 Runner 上通过 `project activate --allow-raw-shell` + config check / generation CAS / hot reload，从初始 fail-closed 配置切换到“正常 execution + Destructive Guard”。新 RC 真机仍必须验证完整 normal execution 与 deny-no-child-spawn 行为。
 
 ---
 
@@ -463,7 +463,7 @@ Git-aware classification **不是首版安全依赖**。
 - 不要求客户手动启用 Windows Sandbox Optional Feature；
 - 不要求因为 CodexLink 安装而重启 Windows；
 - 不把 POC 接入 Desktop / Runner production path；
-- 主线通过普通 revert 保留历史记录并移除 POC 产品代码；
+- 主线已通过 `65a97891` 普通 revert 保留历史记录并移除 POC 产品代码；
 - 未来如果真实用户反馈要求运行不可信代码，再重新评估可选强隔离模式。
 
 ---

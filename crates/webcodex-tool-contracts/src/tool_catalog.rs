@@ -275,6 +275,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
         name: TOOL_DISCOVERY_GROUP_CLEANUP,
         tools: &[
             "delete_project_files",
+            "delete_directory",
             "git_restore_paths",
             "discard_untracked",
             "workspace_checkpoint_delete",

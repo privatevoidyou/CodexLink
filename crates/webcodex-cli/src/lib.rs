@@ -664,6 +664,7 @@ fn parse_project_subcommand(args: &[String]) -> CliAction {
             let mut user_token_file = None;
             let mut project = None;
             let mut json = false;
+            let mut allow_raw_shell = false;
             let mut index = 1;
             while index < args.len() {
                 match args[index].as_str() {
@@ -682,6 +683,7 @@ fn parse_project_subcommand(args: &[String]) -> CliAction {
                         }
                     }
                     "--json" => json = true,
+                    "--allow-raw-shell" => allow_raw_shell = true,
                     other if other.starts_with('-') => {
                         return cli_parse_error(format!("unknown project activate option: {other}"))
                     }
@@ -708,6 +710,7 @@ fn parse_project_subcommand(args: &[String]) -> CliAction {
                 user_token_file,
                 project,
                 json,
+                allow_raw_shell,
             })
         }
         Some("register") => {

@@ -14,6 +14,18 @@ pub fn delete_project_files_input_schema() -> Value {
     ]))
 }
 
+pub fn delete_directory_input_schema() -> Value {
+    object_schema(with_optional_session_id(vec![
+        ("project", "string", "Runner-registered project id.", true),
+        (
+            "path",
+            "string",
+            "One explicit project-relative directory to delete recursively. Root, parent traversal, wildcard, .git, symlink, junction, and reparse targets are refused.",
+            true,
+        ),
+    ]))
+}
+
 pub fn git_restore_paths_input_schema() -> Value {
     object_schema(with_optional_session_id(vec![
         ("project", "string", "Runner-registered project id.", true),

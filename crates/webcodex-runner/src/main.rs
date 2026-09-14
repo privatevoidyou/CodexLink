@@ -2086,8 +2086,8 @@ fn runner_register_capabilities(cfg: &RunnerConfig) -> RunnerCapabilities {
     capabilities.lsp_call_hierarchy = true;
     // Registration describes technical Runner support, not whether local policy
     // admits a model-authored execution request. Generation-2 baseline bits must
-    // therefore remain truthful when CodexLink safe mode sets
-    // `allow_raw_shell = false`; Server ToolRuntime admission and Runner
+    // therefore remain truthful when local policy sets `allow_raw_shell = false`;
+    // Server ToolRuntime admission and Runner
     // pre-spawn policy enforcement decide whether execution is permitted.
     capabilities
 }
@@ -2410,6 +2410,7 @@ fn handle_file_operation(policy: &RunnerPolicy, operation: &RunnerFileOperation)
         | RunnerFileOperation::List(_)
         | RunnerFileOperation::ProjectOverview(_)
         | RunnerFileOperation::DeleteProjectFiles(_)
+        | RunnerFileOperation::DeleteDirectory(_)
         | RunnerFileOperation::SkillListPackages(_)
         | RunnerFileOperation::SkillReadFile(_) => {
             handle_basic_file_request(policy, operation, &resolved, start)

@@ -140,8 +140,8 @@ impl ToolRuntime {
         // Capability advertisement answers whether the Runner implementation can
         // perform an operation. Local Runner policy answers whether model-authored
         // execution is admitted on this installation. Keep those concerns
-        // separate so generation-2 registration remains compatible while
-        // CodexLink safe mode still fails closed before dispatch.
+        // separate so generation-2 registration remains compatible while an
+        // explicitly disabled local execution policy still fails closed before dispatch.
         if runner
             .policy
             .as_ref()

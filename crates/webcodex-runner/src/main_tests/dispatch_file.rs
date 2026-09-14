@@ -8,6 +8,7 @@ fn file_request_kind_includes_edit_and_basic_ops() {
         "file_list",
         "file_project_overview",
         "file_delete_project_files",
+        "file_delete_directory",
         "file_skill_list_packages",
         "file_skill_read_file",
         "file_write_project_file",

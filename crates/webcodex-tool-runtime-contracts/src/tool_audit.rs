@@ -3175,6 +3175,10 @@ impl ToolCall {
                 "diff_present": true,
                 "deny_sensitive_paths": deny_sensitive_paths,
             }),
+            Self::DeleteDirectory { project, path, .. } => serde_json::json!({
+                "project": project,
+                "path": path,
+            }),
             Self::DeleteProjectFiles { project, paths, .. }
             | Self::GitRestorePaths { project, paths, .. }
             | Self::DiscardUntracked { project, paths, .. } => serde_json::json!({

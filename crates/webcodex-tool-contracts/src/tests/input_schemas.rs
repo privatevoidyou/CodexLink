@@ -461,6 +461,7 @@ fn tool_specs_covers_expected_tool_set() {
         "apply_patch",
         "apply_unified_diff",
         "delete_project_files",
+        "delete_directory",
         "git_restore_paths",
         "discard_untracked",
         "project_overview",

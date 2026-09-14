@@ -22,6 +22,7 @@ pub(crate) struct ProjectActivateOptions {
     pub(crate) config: PathBuf,
     pub(crate) user_token_file: PathBuf,
     pub(crate) project: PathBuf,
+    pub(crate) allow_raw_shell: bool,
     pub(crate) json: bool,
 }
 
@@ -37,6 +38,8 @@ pub(crate) struct ProjectRegistration {
 struct RegistrationPolicy {
     #[serde(default)]
     allow_cwd_anywhere: bool,
+    #[serde(default)]
+    allow_raw_shell: bool,
     #[serde(default)]
     allowed_roots: Vec<PathBuf>,
 }
@@ -328,6 +331,51 @@ fn persist_registration_allowed_roots_if_unchanged(
         return Err("runner_config_concurrent_change: Runner config changed while project authority was being prepared; retry from the current config".to_string());
     }
     let candidate = render_registration_allowed_roots(path, expected_content, roots)?;
+    atomic_write(path, candidate.as_bytes(), true)?;
+    Ok(candidate)
+}
+
+fn render_activation_policy(
+    path: &Path,
+    content: &str,
+    roots: &[PathBuf],
+    enable_raw_shell: bool,
+) -> Result<String, String> {
+    let mut document = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|error| format!("failed to parse Runner config {}: {error}", path.display()))?;
+    if document.get("policy").is_none() {
+        document["policy"] = toml_edit::table();
+    }
+    let policy = document["policy"].as_table_like_mut().ok_or_else(|| {
+        format!(
+            "Runner config {} has an invalid [policy] table",
+            path.display()
+        )
+    })?;
+    let mut allowed_roots = toml_edit::Array::new();
+    for root in roots {
+        allowed_roots.push(root.to_string_lossy().as_ref());
+    }
+    policy.insert("allowed_roots", toml_edit::value(allowed_roots));
+    if enable_raw_shell {
+        policy.insert("allow_raw_shell", toml_edit::value(true));
+    }
+    Ok(document.to_string())
+}
+
+fn persist_activation_policy_if_unchanged(
+    path: &Path,
+    expected_content: &str,
+    roots: &[PathBuf],
+    enable_raw_shell: bool,
+) -> Result<String, String> {
+    let current = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read Runner config {}: {error}", path.display()))?;
+    if current != expected_content {
+        return Err("runner_config_concurrent_change: Runner config changed while project authority was being prepared; retry from the current config".to_string());
+    }
+    let candidate = render_activation_policy(path, expected_content, roots, enable_raw_shell)?;
     atomic_write(path, candidate.as_bytes(), true)?;
     Ok(candidate)
 }
@@ -658,11 +706,13 @@ pub(crate) async fn run_project_activate(opts: ProjectActivateOptions) -> Result
     let mut generation_before = None;
     let mut generation_after = None;
     let mut reload_reconciled = false;
+    let mut raw_shell_pending = opts.allow_raw_shell && !config.policy.allow_raw_shell;
 
-    // Idempotence fast path: if the exact root is already persisted, let the
-    // current Runner prove active authority and canonical registration before
-    // touching config generation.
-    if !prepared.authority_changed {
+    // Idempotence fast path: only skip config reload when both the exact project
+    // root and the requested execution policy are already persisted. CodexLink
+    // uses the opt-in execution flag to upgrade its managed Runner from the
+    // temporary safe-mode enrollment without changing WebCodex login defaults.
+    if !prepared.authority_changed && !raw_shell_pending {
         match resolve_project_operator(&server_url, &token, &client_id, &canonical_project).await {
             Ok(result) if result.success => {
                 return render_activation_output(
@@ -740,13 +790,20 @@ pub(crate) async fn run_project_activate(opts: ProjectActivateOptions) -> Result
     }
 
     for _ in 0..3 {
-        if prepared.authority_changed {
-            config_content = persist_registration_allowed_roots_if_unchanged(
+        if prepared.authority_changed || raw_shell_pending {
+            let authority_change_this_round = prepared.authority_changed;
+            config_content = persist_activation_policy_if_unchanged(
                 &opts.config,
                 &config_content,
                 &prepared.allowed_roots,
+                opts.allow_raw_shell,
             )?;
-            authority_changed = true;
+            authority_changed |= authority_change_this_round;
+            config.policy.allowed_roots = prepared.allowed_roots.clone();
+            if opts.allow_raw_shell {
+                config.policy.allow_raw_shell = true;
+            }
+            prepared.authority_changed = false;
         }
 
         let checked = operator_tool_call(
@@ -802,6 +859,7 @@ pub(crate) async fn run_project_activate(opts: ProjectActivateOptions) -> Result
                 &config.policy.allowed_roots,
                 config.policy.allow_cwd_anywhere,
             )?;
+            raw_shell_pending = opts.allow_raw_shell && !config.policy.allow_raw_shell;
             continue;
         }
 
@@ -841,6 +899,7 @@ pub(crate) async fn run_project_activate(opts: ProjectActivateOptions) -> Result
                     &config.policy.allowed_roots,
                     config.policy.allow_cwd_anywhere,
                 )?;
+                raw_shell_pending = opts.allow_raw_shell && !config.policy.allow_raw_shell;
                 continue;
             }
             Ok(result) if operation_uncertain(&result) => {
@@ -1236,6 +1295,7 @@ mod tests {
             config: config_path.clone(),
             user_token_file: token_file,
             project,
+            allow_raw_shell: false,
             json: true,
         })
         .await
@@ -1275,6 +1335,69 @@ mod tests {
         )
         .unwrap();
         assert!(!runner_config_candidate_unchanged(&config_path, &candidate).unwrap());
+    }
+
+    #[tokio::test]
+    async fn activation_can_enable_normal_execution_through_existing_cas_reload_path() {
+        let tmp = canonical_test_tempdir();
+        let project = tmp.path().join("demo");
+        std::fs::create_dir_all(&project).unwrap();
+        let canonical_project = project.canonicalize().unwrap();
+        let responses = vec![
+            (
+                "/api/runners/config/check",
+                json!({"success":true,"output":{"valid":true,"current_generation":11,"restart_required":false}}),
+            ),
+            (
+                "/api/runners/config/reload",
+                json!({"success":true,"output":{"execution_state":"completed","valid":true,"current_generation":12,"restart_required":false}}),
+            ),
+            (
+                "/api/projects/resolve-or-register",
+                project_success(&canonical_project),
+            ),
+        ];
+        let (server_url, server) = spawn_operator_server(responses);
+        let config_path = tmp.path().join("runner.toml");
+        activation_config(
+            &config_path,
+            &server_url,
+            std::slice::from_ref(&canonical_project),
+            false,
+        );
+        let token_file = tmp.path().join("user-token");
+        std::fs::write(&token_file, TEST_USER_TOKEN).unwrap();
+
+        let output = run_project_activate(ProjectActivateOptions {
+            config: config_path.clone(),
+            user_token_file: token_file,
+            project,
+            allow_raw_shell: true,
+            json: true,
+        })
+        .await
+        .unwrap();
+        let output: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["policy"]["authority_changed"], false);
+        assert_eq!(output["policy"]["config_reloaded"], true);
+        assert_eq!(output["policy"]["generation_before"], 11);
+        assert_eq!(output["policy"]["generation_after"], 12);
+
+        let parsed: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(parsed["policy"]["allow_raw_shell"].as_bool(), Some(true));
+        let roots = parsed["policy"]["allowed_roots"].as_array().unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(
+            roots[0].as_str(),
+            Some(canonical_project.to_string_lossy().as_ref())
+        );
+
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[0].starts_with("POST /api/runners/config/check "));
+        assert_eq!(request_json(&requests[1])["expected_generation"], 11);
+        assert!(requests[2].starts_with("POST /api/projects/resolve-or-register "));
     }
 
     #[test]
@@ -1339,6 +1462,7 @@ mod tests {
             config: config_path.clone(),
             user_token_file: token_file,
             project,
+            allow_raw_shell: false,
             json: true,
         })
         .await
@@ -1396,6 +1520,7 @@ mod tests {
             config: config_path,
             user_token_file: token_file,
             project,
+            allow_raw_shell: false,
             json: true,
         })
         .await
@@ -1449,6 +1574,7 @@ mod tests {
             config: config_path,
             user_token_file: token_file,
             project,
+            allow_raw_shell: false,
             json: true,
         })
         .await
@@ -1506,6 +1632,7 @@ mod tests {
             config: config_path,
             user_token_file: token_file,
             project,
+            allow_raw_shell: false,
             json: true,
         })
         .await

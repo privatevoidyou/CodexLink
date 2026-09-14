@@ -1880,6 +1880,39 @@ fn edit_match_error(index: usize, kind: ApplyTextEditKind, msg: &str) -> String 
     )
 }
 
+fn validate_bounded_delete_directory_path(path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed != path {
+        return Err(
+            "delete_directory requires one explicit project-relative directory path".to_string(),
+        );
+    }
+    if trimmed.contains('\0') || trimmed.contains('*') || trimmed.contains('?') {
+        return Err("delete_directory refuses NUL and wildcard targets".to_string());
+    }
+    if trimmed.starts_with('/') || trimmed.starts_with('\\') || trimmed.contains(':') {
+        return Err("delete_directory refuses absolute or drive-qualified targets".to_string());
+    }
+    let mut component_count = 0usize;
+    for component in trimmed.split(|ch| ch == '/' || ch == '\\') {
+        if component.is_empty() || component == "." || component == ".." {
+            return Err(
+                "delete_directory refuses empty, current, or parent path components".to_string(),
+            );
+        }
+        if component.eq_ignore_ascii_case(".git") {
+            return Err("delete_directory refuses repository metadata".to_string());
+        }
+        component_count += 1;
+    }
+    if component_count == 0 {
+        return Err(
+            "delete_directory requires one explicit project-relative directory path".to_string(),
+        );
+    }
+    Ok(trimmed.to_string())
+}
+
 impl ToolRuntime {
     pub(crate) async fn delete_project_files(
         &self,
@@ -1896,6 +1929,19 @@ impl ToolRuntime {
         };
 
         self.delete_project_files_structured_agent(&proj, proj.client_id.clone(), paths, 30)
+            .await
+    }
+
+    pub(crate) async fn delete_directory(&self, project: String, path: String) -> ToolResult {
+        let path = match validate_bounded_delete_directory_path(&path) {
+            Ok(path) => path,
+            Err(error) => return ToolResult::err(error),
+        };
+        let proj = match self.resolve_project(&project).await {
+            Ok(project) => project,
+            Err(error) => return ToolResult::err(error),
+        };
+        self.delete_directory_structured_agent(&proj, proj.client_id.clone(), path, 30)
             .await
     }
 
@@ -1940,22 +1986,21 @@ impl ToolRuntime {
             .to_string()
     }
 
-    pub(crate) async fn delete_project_files_structured_agent(
+    async fn structured_file_delete_response(
         &self,
         proj: &ProjectConfig,
         client_id: String,
-        paths: Vec<String>,
+        op: &'static str,
+        payload: Value,
         wait_timeout_secs: u64,
-    ) -> ToolResult {
-        let payload = match serde_json::to_string(&json!({"paths": paths})) {
-            Ok(payload) => payload,
-            Err(_) => return ToolResult::err("failed to encode delete_project_files request"),
-        };
+    ) -> Result<Value, ToolResult> {
+        let payload = serde_json::to_string(&payload)
+            .map_err(|_| ToolResult::err(format!("failed to encode {op} request")))?;
         let (request_id, rx) = match self
             .runner_registry
             .enqueue_structured_file_delete(
                 ShellFileOpRequest {
-                    op: "delete_project_files".to_string(),
+                    op: op.to_string(),
                     client_id,
                     path: ".".to_string(),
                     cwd: Some(proj.path.clone()),
@@ -1969,7 +2014,7 @@ impl ToolRuntime {
                     end_line: None,
                     line: None,
                     create_dirs: false,
-                    wait_timeout_secs: wait_timeout_secs,
+                    wait_timeout_secs,
                 },
                 "tool_runtime".to_string(),
             )
@@ -1977,22 +2022,16 @@ impl ToolRuntime {
         {
             Ok(request) => request,
             Err(error) if error.starts_with("capability_unavailable:") => {
-                return Self::delete_project_files_lifecycle_failure(
-                    format!("agent delete_project_files generation-2 capability invariant failed: {error}"),
+                return Err(Self::delete_project_files_lifecycle_failure(
+                    format!("agent {op} generation-2 capability invariant failed: {error}"),
                     ShellCommandExecutionState::NotStarted,
-                );
+                ));
             }
-            Err(_) => return ToolResult::err("agent delete_project_files is unavailable"),
+            Err(_) => return Err(ToolResult::err(format!("agent {op} is unavailable"))),
         };
         let response = tokio::time::timeout(Duration::from_secs(wait_timeout_secs + 2), rx).await;
         let response = match response {
             Ok(Ok(response)) => {
-                // Authoritative effect-boundary evidence: only a definite
-                // terminal success enters the success path; every other
-                // response classifies as not_started (registry-proven
-                // undispatch, e.g. runner replacement before poll) or
-                // outcome_unknown (dispatched, or dispatch cannot be proven
-                // false — the Runner may already have deleted files).
                 let state = runner_command_lifecycle(&response, wait_timeout_secs);
                 match state {
                     ShellCommandExecutionState::Completed
@@ -2001,76 +2040,82 @@ impl ToolRuntime {
                         response
                     }
                     ShellCommandExecutionState::NotStarted => {
-                        return Self::delete_project_files_lifecycle_failure(
-                            Self::delete_project_files_not_started_message(),
+                        return Err(Self::delete_project_files_lifecycle_failure(
+                            format!("agent {op} was not dispatched; the structured delete did not start and the Runner executed no deletion from this request."),
                             state,
-                        )
+                        ));
                     }
                     _ => {
-                        return Self::delete_project_files_lifecycle_failure(
-                            Self::delete_project_files_outcome_unknown_message(),
+                        return Err(Self::delete_project_files_lifecycle_failure(
+                            format!("agent {op} outcome is unknown; the request may already have deleted files. Inspect current workspace state before deciding whether to retry."),
                             state,
-                        )
+                        ));
                     }
                 }
             }
             Ok(Err(_)) => {
-                // Waiter channel closed. Atomically remove the pending request
-                // and classify from recovered dispatch truth; a missing record
-                // cannot prove undispatch, so only explicit `Some(false)` is
-                // not_started.
                 let dispatch = self
                     .runner_registry
                     .cancel_request_dispatch_state(&request_id)
                     .await;
                 let state = dispatch_uncertainty_lifecycle(dispatch);
                 if state == ShellCommandExecutionState::NotStarted {
-                    return Self::delete_project_files_lifecycle_failure(
-                        Self::delete_project_files_not_started_message(),
+                    return Err(Self::delete_project_files_lifecycle_failure(
+                        format!("agent {op} was not dispatched; the structured delete did not start and the Runner executed no deletion from this request."),
                         state,
-                    );
+                    ));
                 }
-                return Self::delete_project_files_lifecycle_failure(
-                    "agent delete_project_files waiter was dropped and dispatch cannot be proven false; the request may already have deleted files. Inspect current workspace state before deciding whether to retry."
-                        .to_string(),
+                return Err(Self::delete_project_files_lifecycle_failure(
+                    format!("agent {op} waiter was dropped and dispatch cannot be proven false; the request may already have deleted files. Inspect current workspace state before deciding whether to retry."),
                     state,
-                );
+                ));
             }
             Err(_) => {
-                // Wait timeout: cancel with dispatch truth instead of erasing
-                // it. A timed-out mutation that may have dispatched must never
-                // be presented as definitely not started.
                 let dispatch = self
                     .runner_registry
                     .cancel_request_dispatch_state(&request_id)
                     .await;
                 let state = dispatch_uncertainty_lifecycle(dispatch);
                 if state == ShellCommandExecutionState::NotStarted {
-                    return Self::delete_project_files_lifecycle_failure(
-                        format!(
-                            "timed out waiting {wait_timeout_secs} seconds for agent delete_project_files before dispatch; the structured delete did not start and the Runner executed no deletion from this request."
-                        ),
+                    return Err(Self::delete_project_files_lifecycle_failure(
+                        format!("timed out waiting {wait_timeout_secs} seconds for agent {op} before dispatch; the structured delete did not start and the Runner executed no deletion from this request."),
                         state,
-                    );
+                    ));
                 }
-                return Self::delete_project_files_lifecycle_failure(
-                    format!(
-                        "timed out waiting {wait_timeout_secs} seconds for agent delete_project_files; the request may already have deleted files. Inspect current workspace state before deciding whether to retry."
-                    ),
+                return Err(Self::delete_project_files_lifecycle_failure(
+                    format!("timed out waiting {wait_timeout_secs} seconds for agent {op}; the request may already have deleted files. Inspect current workspace state before deciding whether to retry."),
                     state,
-                );
+                ));
             }
         };
-        let output: Value =
-            match serde_json::from_str(response.stdout.as_deref().unwrap_or_default()) {
-                Ok(output) => output,
-                Err(_) => {
-                    return Self::delete_project_files_lifecycle_failure(
-                        Self::delete_project_files_outcome_unknown_message(),
-                        ShellCommandExecutionState::OutcomeUnknown,
-                    )
-                }
-            };
+        serde_json::from_str(response.stdout.as_deref().unwrap_or_default()).map_err(|_| {
+            Self::delete_project_files_lifecycle_failure(
+                format!("agent {op} outcome is unknown; the Runner returned invalid structured deletion evidence. Inspect current workspace state before deciding whether to retry."),
+                ShellCommandExecutionState::OutcomeUnknown,
+            )
+        })
+    }
+
+    pub(crate) async fn delete_project_files_structured_agent(
+        &self,
+        proj: &ProjectConfig,
+        client_id: String,
+        paths: Vec<String>,
+        wait_timeout_secs: u64,
+    ) -> ToolResult {
+        let output = match self
+            .structured_file_delete_response(
+                proj,
+                client_id,
+                "delete_project_files",
+                json!({"paths": &paths}),
+                wait_timeout_secs,
+            )
+            .await
+        {
+            Ok(output) => output,
+            Err(result) => return result,
+        };
         let expected = json!(paths);
         if output.get("deleted_paths") != Some(&expected) {
             return Self::delete_project_files_lifecycle_failure(
@@ -2084,6 +2129,55 @@ impl ToolRuntime {
             "deleted_paths": paths,
             "stdout_present": false,
             "stderr_present": false,
+        }))
+    }
+
+    pub(crate) async fn delete_directory_structured_agent(
+        &self,
+        proj: &ProjectConfig,
+        client_id: String,
+        path: String,
+        wait_timeout_secs: u64,
+    ) -> ToolResult {
+        let output = match self
+            .structured_file_delete_response(
+                proj,
+                client_id,
+                "delete_directory",
+                json!({"path": &path}),
+                wait_timeout_secs,
+            )
+            .await
+        {
+            Ok(output) => output,
+            Err(result) => return result,
+        };
+        let valid = output.get("deleted_path").and_then(Value::as_str) == Some(path.as_str())
+            && output
+                .get("files_deleted")
+                .and_then(Value::as_u64)
+                .is_some()
+            && output
+                .get("directories_deleted")
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count >= 1)
+            && output
+                .get("bytes_deleted")
+                .and_then(Value::as_u64)
+                .is_some();
+        if !valid {
+            return Self::delete_project_files_lifecycle_failure(
+                "agent delete_directory outcome is unknown; the Runner returned invalid structured deletion evidence. Inspect current workspace state before deciding whether to retry.",
+                ShellCommandExecutionState::OutcomeUnknown,
+            );
+        }
+        ToolResult::ok(json!({
+            "ok": true,
+            "state_changed": true,
+            "deleted_path": path,
+            "files_deleted": output["files_deleted"],
+            "directories_deleted": output["directories_deleted"],
+            "bytes_deleted": output["bytes_deleted"],
         }))
     }
 

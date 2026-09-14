@@ -188,4 +188,8 @@ fn tool_specs_annotations_are_canonical_semantic_projections() {
         spec_named(&specs, "delete_project_files").annotations["destructiveHint"],
         true
     );
+    assert_eq!(
+        spec_named(&specs, "delete_directory").annotations["destructiveHint"],
+        true
+    );
 }

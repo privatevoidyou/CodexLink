@@ -85,6 +85,18 @@ fn validate_file_request_allows_structured_edit_payload_ops() {
 }
 
 #[test]
+fn validate_file_request_allows_only_bounded_structured_delete_payload_ops() {
+    for (op, content) in [
+        ("delete_project_files", r#"{"paths":["tmp.txt"]}"#),
+        ("delete_directory", r#"{"path":"target"}"#),
+    ] {
+        let mut req = file_request(op);
+        req.content = Some(content.to_string());
+        validate_file_request(&req).unwrap();
+    }
+}
+
+#[test]
 fn validate_file_request_accepts_only_bounded_skill_internal_shapes() {
     let mut list = file_request("skill_list_packages");
     list.path = ".agents/skills".to_string();

@@ -16,6 +16,7 @@ mod computer_tools;
 pub(crate) mod context_projection;
 mod continuation_feedback;
 pub(crate) mod conversation_import;
+mod destructive_guard;
 mod discovery_tools;
 mod dispatch;
 mod edit_tool_telemetry;

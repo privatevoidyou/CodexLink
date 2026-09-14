@@ -1527,6 +1527,27 @@ impl ToolRuntime {
         protocol_capabilities: super::kernel::ToolProtocolCapabilities,
         correlation: &mut super::window_activity::ToolCallCorrelation,
     ) -> ToolResult {
+        if let Some(decision) = super::destructive_guard::inspect_tool_call(&call) {
+            return ToolResult::err_with_output(
+                format!(
+                    "CodexLink blocked a destructive operation: {}",
+                    decision.reason
+                ),
+                json!({
+                    "execution_state": "not_started",
+                    "state_changed": false,
+                    "command_started": false,
+                    "command_completed": false,
+                    "command_ok": false,
+                    "exit_code": null,
+                    "failure_kind": "destructive_operation_blocked",
+                    "guard_rule": decision.code,
+                    "recovery_action": decision.recovery_action,
+                    "tool_failure": true,
+                }),
+            );
+        }
+
         match call {
             call @ (ToolCall::ListTools { .. }
             | ToolCall::ListRunners { .. }
@@ -2194,6 +2215,7 @@ impl ToolRuntime {
             }
 
             call @ (ToolCall::DeleteProjectFiles { .. }
+            | ToolCall::DeleteDirectory { .. }
             | ToolCall::ReadFile { .. }
             | ToolCall::ReadFiles { .. }
             | ToolCall::ListProjectFiles { .. }

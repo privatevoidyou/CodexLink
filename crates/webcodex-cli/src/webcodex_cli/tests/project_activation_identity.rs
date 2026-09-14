@@ -45,6 +45,7 @@ async fn activation_stops_if_connection_identity_changes_during_config_retry() {
                 config: config_path.clone(),
                 user_token_file: token_file,
                 project,
+                allow_raw_shell: false,
                 json: true,
             })
             .await

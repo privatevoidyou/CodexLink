@@ -881,6 +881,16 @@ pub enum ToolCall {
         session_id: Option<String>,
     },
 
+    /// Recursively delete one explicit project-relative directory through the
+    /// bounded CodexLink deletion contract. The Runner refuses project root,
+    /// traversal/wildcards, protected anchors, and reparse traversal.
+    DeleteDirectory {
+        project: String,
+        path: String,
+        #[serde(default)]
+        session_id: Option<String>,
+    },
+
     /// Restore tracked paths with `git restore -- <paths>`.
     GitRestorePaths {
         project: String,
@@ -2771,6 +2781,7 @@ impl ToolCall {
             Self::ApplyPatch { .. } => "apply_patch",
             Self::ApplyUnifiedDiff { .. } => "apply_unified_diff",
             Self::DeleteProjectFiles { .. } => "delete_project_files",
+            Self::DeleteDirectory { .. } => "delete_directory",
             Self::GitRestorePaths { .. } => "git_restore_paths",
             Self::DiscardUntracked { .. } => "discard_untracked",
             Self::GitCommitPaths { .. } => "git_commit_paths",
@@ -2898,6 +2909,7 @@ impl ToolCall {
             | Self::ApplyPatch { session_id, .. }
             | Self::ApplyUnifiedDiff { session_id, .. }
             | Self::DeleteProjectFiles { session_id, .. }
+            | Self::DeleteDirectory { session_id, .. }
             | Self::GitRestorePaths { session_id, .. }
             | Self::DiscardUntracked { session_id, .. }
             | Self::GitCommitPaths { session_id, .. }
@@ -3032,6 +3044,7 @@ impl ToolCall {
             | Self::ApplyPatch { project, .. }
             | Self::ApplyUnifiedDiff { project, .. }
             | Self::DeleteProjectFiles { project, .. }
+            | Self::DeleteDirectory { project, .. }
             | Self::GitRestorePaths { project, .. }
             | Self::DiscardUntracked { project, .. }
             | Self::GitCommitPaths { project, .. }

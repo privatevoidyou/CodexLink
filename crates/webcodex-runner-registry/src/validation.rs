@@ -253,6 +253,7 @@ pub(super) fn validate_file_request(body: &ShellFileOpRequest) -> Result<(), Str
         | "list"
         | "project_overview"
         | "delete_project_files"
+        | "delete_directory"
         | "write_project_file"
         | "apply_text_edits"
         | "apply_patch"
@@ -270,13 +271,16 @@ pub(super) fn validate_file_request(body: &ShellFileOpRequest) -> Result<(), Str
         | "skill_read_file" => {}
         _ => {
             return Err(
-                "op must be one of read, write, list, project_overview, write_project_file, apply_text_edits, apply_patch, save_project_artifact, read_project_artifact_metadata, read_project_artifact, read_project_artifact_export_chunk, artifact_upload_begin, artifact_upload_chunk, artifact_upload_finish, artifact_upload_abort, checkpoint_create, checkpoint_restore, skill_list_packages, skill_read_file"
+                "op must be one of read, write, list, project_overview, delete_project_files, delete_directory, write_project_file, apply_text_edits, apply_patch, save_project_artifact, read_project_artifact_metadata, read_project_artifact, read_project_artifact_export_chunk, artifact_upload_begin, artifact_upload_chunk, artifact_upload_finish, artifact_upload_abort, checkpoint_create, checkpoint_restore, skill_list_packages, skill_read_file"
                     .to_string(),
             )
         }
     }
     let structured_edit_payload = matches!(body.op.as_str(), "write_project_file" | "apply_patch");
-    let structured_delete_payload = body.op == "delete_project_files";
+    let structured_delete_payload = matches!(
+        body.op.as_str(),
+        "delete_project_files" | "delete_directory"
+    );
     let artifact_payload = matches!(
         body.op.as_str(),
         "save_project_artifact"
@@ -355,7 +359,7 @@ pub(super) fn validate_file_request(body: &ShellFileOpRequest) -> Result<(), Str
             && !skill_payload
         {
             return Err(
-                "content is only allowed for op=write, project_overview options, delete_project_files, apply_text_edits, structured edit tools, artifact tools, checkpoint tools, or skill runtime file ops"
+                "content is only allowed for op=write, project_overview options, structured delete tools, apply_text_edits, structured edit tools, artifact tools, checkpoint tools, or skill runtime file ops"
                     .to_string(),
             );
         }

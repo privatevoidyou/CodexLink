@@ -321,7 +321,8 @@ pub(crate) fn setup(options: &ProjectCommandOptions) -> Result<SetupReport, Prod
             project_registry_dir: paths.project_registry.clone(),
             output: runner_config.clone(),
             allowed_roots: vec![config.root.clone(), paths.runs.clone(), paths.cache.clone()],
-            // The product-entry Runner is managed by CodexLink and starts in safe mode.
+            // Bootstrap remains fail-closed; CodexLink Desktop later opts its managed
+            // Runner into normal execution through checked project activation.
             allow_raw_shell: false,
             allow_cwd_anywhere: false,
             overwrite: false,

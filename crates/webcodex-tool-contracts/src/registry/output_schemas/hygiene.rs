@@ -110,6 +110,14 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 ),
             ),
         ])),
+        "delete_directory" => Some(wrapped_output_schema(vec![
+            ("ok", schema_type("boolean", "True when bounded recursive deletion completed successfully.")),
+            ("state_changed", schema_type("boolean", "True when the requested directory tree was removed.")),
+            ("deleted_path", schema_type("string", "The explicit project-relative directory target.")),
+            ("files_deleted", schema_type("integer", "Number of regular files removed.")),
+            ("directories_deleted", schema_type("integer", "Number of directories removed, including the target.")),
+            ("bytes_deleted", schema_type("integer", "Sum of pre-delete regular-file lengths observed during the single traversal.")),
+        ])),
         _ => None,
     }
 }

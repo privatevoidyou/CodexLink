@@ -87,3 +87,100 @@ fn structured_delete_project_files_errors_do_not_leak_absolute_paths() {
     );
     assert!(!error.contains(&tmp.path().to_string_lossy().to_string()));
 }
+
+#[test]
+fn structured_delete_directory_removes_one_bounded_tree_with_summary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let policy = project_policy(tmp.path());
+    let target = tmp.path().join("cleanup");
+    std::fs::create_dir_all(target.join("a/b")).unwrap();
+    std::fs::write(target.join("one.txt"), b"abc").unwrap();
+    std::fs::write(target.join("a/b/two.bin"), b"12345").unwrap();
+
+    let request = json_file_op_request(
+        tmp.path(),
+        "file_delete_directory",
+        ".",
+        serde_json::json!({"path": "cleanup"}),
+    );
+    assert!(request.command.is_empty());
+    let result = handle_file_request(&policy, &request);
+    assert_eq!(result.exit_code, Some(0), "{:?}", result.error);
+    assert!(!target.exists());
+    let output: serde_json::Value =
+        serde_json::from_str(result.stdout.as_deref().expect("structured JSON result")).unwrap();
+    assert_eq!(output["deleted_path"], "cleanup");
+    assert_eq!(output["files_deleted"], 2);
+    assert_eq!(output["directories_deleted"], 3);
+    assert_eq!(output["bytes_deleted"], 8);
+}
+
+#[test]
+fn structured_delete_directory_rejects_unbounded_or_protected_targets() {
+    let tmp = tempfile::tempdir().unwrap();
+    let policy = project_policy(tmp.path());
+    std::fs::create_dir_all(tmp.path().join("safe-dir")).unwrap();
+    std::fs::write(tmp.path().join("plain.txt"), "content").unwrap();
+
+    for path in [
+        ".",
+        "..",
+        "../escape",
+        "*",
+        "safe-*",
+        ".git",
+        "src/.git/cache",
+    ] {
+        let request = json_file_op_request(
+            tmp.path(),
+            "file_delete_directory",
+            ".",
+            serde_json::json!({"path": path}),
+        );
+        let result = handle_file_request(&policy, &request);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("delete_directory request contains a refused path"),
+            "{path}"
+        );
+    }
+
+    let file_target = json_file_op_request(
+        tmp.path(),
+        "file_delete_directory",
+        ".",
+        serde_json::json!({"path": "plain.txt"}),
+    );
+    let result = handle_file_request(&policy, &file_target);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("delete_directory target is not a directory")
+    );
+    assert!(tmp.path().join("plain.txt").is_file());
+    assert!(tmp.path().join("safe-dir").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn structured_delete_directory_refuses_symlink_traversal() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let policy = project_policy(tmp.path());
+    std::fs::write(outside.path().join("keep.txt"), "keep").unwrap();
+    symlink(outside.path(), tmp.path().join("linked-outside")).unwrap();
+
+    let request = json_file_op_request(
+        tmp.path(),
+        "file_delete_directory",
+        ".",
+        serde_json::json!({"path": "linked-outside"}),
+    );
+    let result = handle_file_request(&policy, &request);
+    assert_eq!(
+        result.error.as_deref(),
+        Some("delete_directory refuses symlink, junction, or reparse traversal")
+    );
+    assert!(outside.path().join("keep.txt").is_file());
+}

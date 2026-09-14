@@ -576,8 +576,8 @@ pub(crate) fn stage_connection(
         project_registry_dir: published_project_registry_dir.to_path_buf(),
         output: paths.runner_config.clone(),
         allowed_roots: allowed_roots.to_vec(),
-        // CodexLink safe mode: model-authored shell/process/script execution stays
-        // disabled until a real OS sandbox is evaluated and explicitly enabled.
+        // Generic login remains fail-closed for model-authored execution. Product
+        // shells such as CodexLink may opt in later through checked project activation.
         allow_raw_shell: false,
         allow_cwd_anywhere: false,
         overwrite: true,

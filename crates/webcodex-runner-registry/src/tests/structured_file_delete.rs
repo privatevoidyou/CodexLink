@@ -85,6 +85,33 @@ async fn enqueue_structured_file_delete_queues_when_capability_advertised() {
 }
 
 #[tokio::test]
+async fn enqueue_structured_directory_delete_uses_typed_file_operation_without_shell_fallback() {
+    let registry = RunnerRegistry::default();
+    register_structured_delete_runner(&registry, "structured-delete-directory").await;
+    let mut request = structured_delete_request("structured-delete-directory");
+    request.op = "delete_directory".to_string();
+    request.content = Some(r#"{"path":"target"}"#.to_string());
+
+    let (request_id, _rx) = registry
+        .enqueue_structured_file_delete(request, "tester".to_string())
+        .await
+        .expect("capable client should accept bounded directory deletion");
+    let polled = registry
+        .poll(RunnerPollRequest {
+            client_id: "structured-delete-directory".to_string(),
+            runner_instance_id: "inst".to_string(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(polled.request_id, request_id);
+    assert_eq!(polled.kind, "file_delete_directory");
+    assert!(polled.command.is_empty());
+    assert_eq!(polled.path.as_deref(), Some("."));
+    assert_eq!(polled.content.as_deref(), Some(r#"{"path":"target"}"#));
+}
+
+#[tokio::test]
 async fn enqueue_structured_file_delete_unknown_runner_fails_closed() {
     let registry = RunnerRegistry::default();
     let error = registry

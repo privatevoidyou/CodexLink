@@ -527,6 +527,9 @@ impl WebCodexAdapter {
             "--user-token-file".into(),
             identity.user_token_file.to_string_lossy().to_string(),
             project.path.clone(),
+            // CodexLink owns this Runner and enables normal development execution
+            // only after the Server-side destructive guard is in the product build.
+            "--allow-raw-shell".into(),
             "--json".into(),
         ];
         let output: ProjectActivationOutput =

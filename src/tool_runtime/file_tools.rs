@@ -19,6 +19,11 @@ impl ToolRuntime {
                 paths,
                 session_id: _,
             } => self.delete_project_files(project, paths).await,
+            ToolCall::DeleteDirectory {
+                project,
+                path,
+                session_id: _,
+            } => self.delete_directory(project, path).await,
             ToolCall::ReadFile {
                 project,
                 path,

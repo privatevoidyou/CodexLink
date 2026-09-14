@@ -31,7 +31,9 @@
 - `733b7b54` — RC5 device activation；
 - `e85749d7` — secure Tunnel handoff（已推远端）；
 - `7ebab38d` — Windows installer lifecycle（本地完成，待 GitHub TLS 恢复后普通 push）；
-- `c5fa9b50` — Windows Sandbox isolation POC（**研究实验，不是产品方向**）。
+- `c5fa9b50` — Windows Sandbox isolation POC（**研究实验，不是产品方向**）；
+- `65a97891` — 普通 revert Sandbox POC，保留历史且从产品主线移除；
+- Batch F — Destructive Guard & Bounded Recursive Delete（本地 focused Gate 已通过；本路线图随 Batch F checkpoint 固化）。
 
 ### 当前正式产品决策
 
@@ -40,10 +42,10 @@ Windows Sandbox POC 已完成其研究价值，但首版不采用 OS sandbox 作
 - 不要求用户开启 Windows Optional Feature；
 - 不要求安装后为 sandbox 重启系统；
 - 不把 POC 接入 Desktop / Runner production path；
-- 后续用普通 revert 保留历史记录并把 POC 从产品主线移除，不 reset / 不改写历史；
-- 下一阶段改为 **Batch F — Destructive Guard & Bounded Recursive Delete**。
+- 已通过 `65a97891` 普通 revert 保留历史记录并把 POC 从产品主线移除，没有 reset / 改写历史；
+- **Batch F — Destructive Guard & Bounded Recursive Delete 已完成本地 focused Gate。**
 
-在 Batch F hard gate 通过之前，当前 Safe Mode 继续保持 model-authored arbitrary execution 关闭；Guard 通过后再恢复正常 shell / process / script execution。
+CodexLink-managed Runner 现在通过受控 `project activate --allow-raw-shell` 从初始 fail-closed enrollment 切到 normal execution；该切换继续走既有 config check / generation CAS / hot reload。WebCodex 通用 login/connect 默认不因此放宽。
 
 ### 首版 UI / UX 已正式冻结
 
@@ -146,7 +148,7 @@ WebCodex Engine
 - script；
 - Cargo / npm / Python / Node / PowerShell 等项目工作流。
 
-当前代码里的 Safe Mode 是**过渡期硬门**：在 Batch F 的 destructive admission、typed delete 和 Windows regressions 全部通过前，不先行开放 arbitrary execution。
+Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 destructive admission、typed delete 和 focused Windows regressions 通过后，通过受控 project activation 恢复 normal execution；通用 WebCodex enrollment 仍可保持 `allow_raw_shell=false`。
 
 ### 2.2 Destructive Guard，而不是 approval 地狱
 
@@ -194,9 +196,9 @@ WebCodex Engine
 | P0 | Engine / 开发链路基线 | **已完成** | Server + Runner 0.4.1 source aligned；安全 baseline 有 checkpoint |
 | P0 | Product identity / state / migration / device activation / Tunnel | **已完成** | Batch A-D focused tests 已通过；设备 Activation Gate 已恢复 |
 | P0 | Lifecycle / installer | **本地完成** | `7ebab38d`；待 GitHub TLS 恢复后 push，真实 upgrade 仍留给新 RC |
-| P0 | Batch F：Destructive Guard & Bounded Delete | **下一阶段** | typed 增删改读 + bounded recursive delete + destructive admission + focused Windows regressions |
-| P0 | 恢复正常 model execution | **等待 Batch F** | Guard 先全绿，再开放 shell/process/script；不做 OS sandbox Gate |
-| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **等待 Batch F 后恢复** | Activation Gate + 首页/项目/连接/设置恢复已验收 RC 心智；普通用户不接触底层 runtime 配置 |
+| P0 | Batch F：Destructive Guard & Bounded Delete | **本地完成** | typed 文件合同 + bounded recursive delete + destructive admission + focused Windows regressions 已通过 |
+| P0 | 恢复正常 model execution | **本地完成** | CodexLink-managed Runner 经 checked project activation 开放 shell/process/script；通用 WebCodex 默认不放宽 |
+| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **下一阶段** | Activation Gate + 首页/项目/连接/设置恢复已验收 RC 心智；普通用户不接触底层 runtime 配置 |
 | P0 | Batch H：商业激活 / Deployment Center MVP | 待做 | 同一 MYWS 码完成“验证购买并下载 → Desktop 设备激活”；网站验证与设备绑定语义清楚 |
 | P0 | Batch I：Windows 新 RC 商业全链验收 | 待做 | verify purchase → download → install → activate → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall |
 | P1 | 网站内容与小白图文教程收口 | 待做 | 使用真实新 RC 截图、当前 OpenAI 路线、版本历史、支持与安全边界说明 |
@@ -380,6 +382,8 @@ MYWS 销售激活码
 
 详细规范：[`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 
+**状态：本地实现与 focused Gate 已完成。** 新 RC 仍需在真实 Windows 上复验 normal execution、Guard 拒绝与大型目录清理。
+
 ### 实现顺序
 
 1. typed `create_file` 的 no-overwrite contract；
@@ -408,9 +412,9 @@ MYWS 销售激活码
 
 ### Gate
 
-Batch F 未通过前，保持当前 arbitrary execution deny。
+本地 focused Gate 已通过：normal execution 的受控恢复路径、Destructive Guard、typed `delete_directory`、tool/registry contracts 和 model guidance 均有回归证据。明显 recursive delete、root/wildcard destructive target、destructive Git、mirror/purge、disk destructive primitive 会在自由执行入口 dispatch 前拒绝；typed recursive delete 使用单遍 walker 且不 follow reparse point。
 
-Batch F 通过必须证明：正常 build/test/script 能运行，而 obvious recursive delete、root/parent destructive target、destructive Git、mirror/purge、disk destructive primitive 在 child spawn 前被拒绝；typed recursive delete 能安全处理深目录和大型 generated tree，并且不 follow reparse point。
+真实 Windows RC 仍必须复验大型 generated tree、junction/reparse、正常 Cargo/npm/Python/Node/PowerShell 工作流与“拒绝后无 child spawn”的端到端行为；这属于 Batch I 真机 Gate，不重新阻塞 Batch G 产品壳开发。
 
 ---
 
@@ -640,21 +644,19 @@ CodexLink 当前商业策略：
 
 ## 12. 当前下一步顺序
 
-从本次安全决策文档 checkpoint 开始，严格按以下顺序推进：
+从 Batch F 收口后，严格按以下顺序推进：
 
-1. **商业 / UI 决策入档**：安全边界、RC5 Product Shell、极简配置链和“同一 MYWS 码 = 购买 entitlement + Desktop 激活”全部作为首版权威合同。
-2. **移除 Sandbox POC 产品主线**：对 `c5fa9b50` 做普通 revert；保留历史，不 reset / 不重写。
-3. **推送本地 checkpoint**：GitHub TLS 恢复后把本地 checkpoint 用普通 push 备份到 `origin/codexlink-rebuild`。
-4. **实现 Batch F**：typed 增删改读、Bounded Recursive Delete、lightweight preflight、reparse fail-closed、protected anchors、raw-shell Destructive Guard、safe audit。
-5. **Batch F focused gate**：保持 Safe Mode 直到上述安全测试全绿；不得提前恢复 execution。
-6. **恢复 normal execution**：允许正常 shell/process/script/build/test，不做 interpreter approval，不做 OS sandbox Gate。
-7. **实现 Batch G — RC5 Product Shell**：恢复 Activation Gate、首页/项目/连接/设置、状态逻辑和动效；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”。
-8. **实现 Batch H — Deployment Center 商业 MVP**：销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
-9. **实现 Batch I — 新 RC 商业全链**：verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
-10. **外部 clean-machine 测试**：至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
-11. **修正 RC 反馈并重新候选**：发现问题就修，不覆盖 accepted/rejected 历史 artifact。
-12. **用最终 RC 截图完成网站内容**：图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
-13. **Batch J — 正式发布准备**：Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance。
-14. **Stable 首版发布**；UI V2 只有以后明确立项才推进。
+1. **已完成：商业 / UI / 安全决策入档。** 安全边界、RC5 Product Shell、极简配置链和“同一 MYWS 码 = 购买 entitlement + Desktop 激活”均为首版权威合同。
+2. **已完成：移除 Sandbox POC 产品主线。** `65a97891` 普通 revert，历史保留，没有 reset / 重写。
+3. **已完成：Batch F + normal execution 本地 focused Gate。** Bounded Recursive Delete、Destructive Guard、model guidance 与 checked activation opt-in 已通过 focused regressions。
+4. **远端备份待网络恢复。** GitHub TLS 恢复后把尚未推送的本地 checkpoint 普通 push 到 `origin/codexlink-rebuild`，不使用 TLS 绕过。
+5. **下一步：Batch G — RC5 Product Shell。** 恢复 Activation Gate、首页/项目/连接/设置、状态逻辑和动效；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”。
+6. **Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
+7. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
+8. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
+9. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。
+10. **用最终 RC 截图完成网站内容。** 图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
+11. **Batch J — 正式发布准备。** Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance。
+12. **Stable 首版发布。** UI V2 只有以后明确立项才推进。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆迁移时，立即 stop-the-line，先解决边界再继续。

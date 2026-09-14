@@ -60,6 +60,7 @@ pub(crate) fn is_basic_file_request_kind(kind: &str) -> bool {
             | "file_list"
             | "file_project_overview"
             | "file_delete_project_files"
+            | "file_delete_directory"
             | "file_skill_list_packages"
             | "file_skill_read_file"
     )
@@ -87,6 +88,9 @@ pub(crate) fn handle_basic_file_request(
         RunnerFileOperation::ProjectOverview(_) => handle_project_overview_request(request, start),
         RunnerFileOperation::DeleteProjectFiles(_) => {
             handle_delete_project_files_request(request, resolved, start)
+        }
+        RunnerFileOperation::DeleteDirectory(_) => {
+            handle_delete_directory_request(request, resolved, start)
         }
         _ => CommandResult {
             exit_code: None,
@@ -231,6 +235,275 @@ fn handle_delete_project_files_request(
 
     let output = serde_json::json!({
         "deleted_paths": payload.paths,
+    });
+    CommandResult {
+        exit_code: Some(0),
+        stdout: Some(output.to_string()),
+        stderr: Some(String::new()),
+        duration_ms: Some(start.elapsed().as_millis() as u64),
+        error: None,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteDirectoryPayload {
+    path: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct DeleteDirectorySummary {
+    files_deleted: u64,
+    directories_deleted: u64,
+    bytes_deleted: u64,
+}
+
+fn validate_delete_directory_path(path: &str) -> bool {
+    if path.trim().is_empty()
+        || path == "."
+        || path.contains('\0')
+        || path.contains('*')
+        || path.contains('?')
+    {
+        return false;
+    }
+    let raw = Path::new(path);
+    if raw.is_absolute() {
+        return false;
+    }
+    let mut saw_component = false;
+    for component in raw.components() {
+        let std::path::Component::Normal(component) = component else {
+            return false;
+        };
+        saw_component = true;
+        let component = component.to_string_lossy();
+        if component.eq_ignore_ascii_case(".git") {
+            return false;
+        }
+        #[cfg(windows)]
+        if component.contains(':') {
+            return false;
+        }
+    }
+    saw_component
+}
+
+fn metadata_is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT_VALUE: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT_VALUE != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+fn canonical_existing_path(path: PathBuf) -> Option<PathBuf> {
+    path.canonicalize().ok()
+}
+
+fn delete_directory_hits_protected_anchor(canonical_root: &Path, canonical_target: &Path) -> bool {
+    let within = webcodex_runner_config::paths::path_is_within;
+
+    if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+        if let Some(product_state) =
+            canonical_existing_path(PathBuf::from(local_appdata).join("dev.codexlink.desktop"))
+        {
+            if within(canonical_target, &product_state) {
+                return true;
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let mut anchors = Vec::new();
+        for name in ["WINDIR", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"] {
+            if let Some(value) = std::env::var_os(name) {
+                if let Some(anchor) = canonical_existing_path(PathBuf::from(value)) {
+                    anchors.push(anchor);
+                }
+            }
+        }
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            let profile = PathBuf::from(profile);
+            if let Some(anchor) = canonical_existing_path(profile.clone()) {
+                anchors.push(anchor);
+            }
+            if let Some(parent) = profile.parent() {
+                if let Some(anchor) = canonical_existing_path(parent.to_path_buf()) {
+                    anchors.push(anchor);
+                }
+            }
+        }
+        if let Some(public) = std::env::var_os("PUBLIC") {
+            let public = PathBuf::from(public);
+            if let Some(parent) = public.parent() {
+                if let Some(anchor) = canonical_existing_path(parent.to_path_buf()) {
+                    anchors.push(anchor);
+                }
+            }
+        }
+        for anchor in anchors {
+            // A project explicitly rooted inside a normally protected anchor may
+            // manage its own descendants. A broader authorization (for example C:\)
+            // may not use bounded deletion to cross into that protected subtree.
+            if within(&anchor, canonical_root) && within(canonical_target, &anchor) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn ensure_delete_directory_path_has_no_reparse(
+    canonical_root: &Path,
+    relative: &Path,
+) -> Result<PathBuf, &'static str> {
+    let mut cursor = canonical_root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("delete_directory request contains a refused path");
+        };
+        cursor.push(component);
+        let metadata = std::fs::symlink_metadata(&cursor)
+            .map_err(|_| "delete_directory target is unavailable")?;
+        if metadata_is_link_or_reparse(&metadata) {
+            return Err("delete_directory refuses symlink, junction, or reparse traversal");
+        }
+    }
+    Ok(cursor)
+}
+
+fn remove_bounded_directory_tree(
+    path: &Path,
+    summary: &mut DeleteDirectorySummary,
+) -> Result<(), &'static str> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| "delete_directory failed while inspecting the target tree")?;
+    if metadata_is_link_or_reparse(&metadata) {
+        return Err("delete_directory refuses symlink, junction, or reparse traversal");
+    }
+    if !metadata.is_dir() {
+        return Err("delete_directory target is not a directory");
+    }
+
+    let entries = std::fs::read_dir(path)
+        .map_err(|_| "delete_directory failed while reading the target tree")?;
+    for entry in entries {
+        let entry = entry.map_err(|_| "delete_directory failed while reading the target tree")?;
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(".git")
+        {
+            return Err("delete_directory refuses repository metadata");
+        }
+        let entry_path = entry.path();
+        let metadata = std::fs::symlink_metadata(&entry_path)
+            .map_err(|_| "delete_directory failed while inspecting the target tree")?;
+        if metadata_is_link_or_reparse(&metadata) {
+            return Err("delete_directory refuses symlink, junction, or reparse traversal");
+        }
+        if metadata.is_dir() {
+            remove_bounded_directory_tree(&entry_path, summary)?;
+        } else if metadata.is_file() {
+            let len = metadata.len();
+            std::fs::remove_file(&entry_path)
+                .map_err(|_| "delete_directory failed while removing a file")?;
+            summary.files_deleted = summary.files_deleted.saturating_add(1);
+            summary.bytes_deleted = summary.bytes_deleted.saturating_add(len);
+        } else {
+            return Err("delete_directory refuses non-file filesystem entries");
+        }
+    }
+    std::fs::remove_dir(path).map_err(|_| "delete_directory failed while removing a directory")?;
+    summary.directories_deleted = summary.directories_deleted.saturating_add(1);
+    Ok(())
+}
+
+fn delete_directory_error(start: Instant, message: &'static str) -> CommandResult {
+    CommandResult {
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        duration_ms: Some(start.elapsed().as_millis() as u64),
+        error: Some(message.to_string()),
+    }
+}
+
+fn handle_delete_directory_request(
+    request: &RunnerFilePayload,
+    resolved_project_root: &Path,
+    start: Instant,
+) -> CommandResult {
+    let Some(payload) = request
+        .content
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<DeleteDirectoryPayload>(raw).ok())
+    else {
+        return delete_directory_error(start, "invalid delete_directory payload");
+    };
+    if !validate_delete_directory_path(&payload.path) {
+        return delete_directory_error(start, "delete_directory request contains a refused path");
+    }
+    let canonical_root = match resolved_project_root.canonicalize() {
+        Ok(root) => root,
+        Err(_) => {
+            return delete_directory_error(start, "delete_directory project root is unavailable")
+        }
+    };
+    let relative = Path::new(&payload.path);
+    let target = match ensure_delete_directory_path_has_no_reparse(&canonical_root, relative) {
+        Ok(target) => target,
+        Err(error) => return delete_directory_error(start, error),
+    };
+    let canonical_target = match target.canonicalize() {
+        Ok(target) => target,
+        Err(_) => return delete_directory_error(start, "delete_directory target is unavailable"),
+    };
+    let within = webcodex_runner_config::paths::path_is_within;
+    if webcodex_runner_config::paths::paths_equal(&canonical_target, &canonical_root)
+        || !within(&canonical_target, &canonical_root)
+    {
+        return delete_directory_error(
+            start,
+            "delete_directory target must be a strict project descendant",
+        );
+    }
+    if delete_directory_hits_protected_anchor(&canonical_root, &canonical_target) {
+        return delete_directory_error(start, "delete_directory target is a protected anchor");
+    }
+    let metadata = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(_) => return delete_directory_error(start, "delete_directory target is unavailable"),
+    };
+    if metadata_is_link_or_reparse(&metadata) {
+        return delete_directory_error(
+            start,
+            "delete_directory refuses symlink, junction, or reparse traversal",
+        );
+    }
+    if !metadata.is_dir() {
+        return delete_directory_error(start, "delete_directory target is not a directory");
+    }
+
+    let mut summary = DeleteDirectorySummary::default();
+    if let Err(error) = remove_bounded_directory_tree(&target, &mut summary) {
+        return delete_directory_error(start, error);
+    }
+    let output = serde_json::json!({
+        "deleted_path": payload.path,
+        "files_deleted": summary.files_deleted,
+        "directories_deleted": summary.directories_deleted,
+        "bytes_deleted": summary.bytes_deleted,
     });
     CommandResult {
         exit_code: Some(0),

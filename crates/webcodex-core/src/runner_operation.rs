@@ -290,6 +290,7 @@ runner_file_operations!(
         "file_delete_project_files",
         "delete_project_files"
     ),
+    (DeleteDirectory, "file_delete_directory", "delete_directory"),
     (
         WriteProjectFile,
         "file_write_project_file",

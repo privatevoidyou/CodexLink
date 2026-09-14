@@ -94,12 +94,14 @@ fn project_doctor_and_hosted_connect_dispatch() {
             "--user-token-file",
             "/tmp/user-token",
             "/tmp/repo-b",
+            "--allow-raw-shell",
             "--json",
         ]),
         CliAction::ProjectActivate(opts)
             if opts.config == std::path::PathBuf::from("/tmp/runner.toml")
                 && opts.user_token_file == std::path::PathBuf::from("/tmp/user-token")
                 && opts.project == std::path::PathBuf::from("/tmp/repo-b")
+                && opts.allow_raw_shell
                 && opts.json
     ));
     assert!(matches!(

@@ -364,6 +364,7 @@ mod tests {
             "apply_patch",
             "apply_unified_diff",
             "delete_project_files",
+            "delete_directory",
             "save_project_artifact",
             "artifact_upload_begin",
             "artifact_upload_chunk",
