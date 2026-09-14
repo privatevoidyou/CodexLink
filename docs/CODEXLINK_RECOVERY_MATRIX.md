@@ -7,6 +7,8 @@
 > 当前产品 checkpoint：Safe Mode `22cab846` → Identity `863d5396` → State/Migration `b191bd85` → License `733b7b54` → Project/Tunnel `e85749d7` → Lifecycle/Installer `7ebab38d`（本地）→ Sandbox POC `c5fa9b50`（研究实验，待普通 revert）。
 >
 > 首版安全策略详见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
+>
+> 首版产品壳与极简配置 UX 详见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
 ## 状态定义
 
@@ -33,6 +35,8 @@
 | Legacy migration | bounded copy-only；旧目录保留回滚 | known-file copy-only + marker + bounded rebase | RESTORE/HARDEN | DONE | 只迁移已知文件；用户项目路径不改 |
 | License | 商业设备激活 | RC5 SignedLicense + DPAPI device identity + offline verification | RESTORE/HARDEN | DONE | 历史 RC5 状态真实验证通过 |
 | Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy | RESTORE | DONE | production bundle 不含不必要实现说明 |
+| Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | NEXT | 逐页视觉/状态/交互与真实 RC 对照 |
+| First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | NEXT | 普通用户无需 Server/Runner/端口/客户端路径配置 |
 | Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
 | Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | NEXT | 明确子目录可 bounded delete；root 本身拒绝 |
 | Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | NEXT | 并发变化 fail closed |
@@ -49,7 +53,7 @@
 | Auto update | 明确不做 | 无 updater / 无检查更新网络请求 | KEEP | DONE | binary / UI 无 update path |
 | Installer RC archive | accepted / rejected / archive 分离 | immutable candidate policy | KEEP | VERIFY | 新 RC 不覆盖历史 installer，记录 SHA |
 | Website | 购买、下载、教程、FAQ、版本、许可、支持 | 完整商业产品站 + 安全边界说明 | RESTORE | LATER | 真实截图 + current OpenAI routes |
-| UI V2 | 更强产品差异化 | 首发稳定后 redesign | LATER | LATER | interactive prototype first |
+| UI V2 | 非首版需求 | 只有未来用户明确决定重新设计时才立项；默认延续 RC5 Product Shell | LATER | LATER | 不自动推翻已敲定首版 UI |
 
 ## 历史 RC5 固定证据
 
@@ -148,6 +152,8 @@ RC5 已接受 copy：
 | 自定义安装目录 | registry InstallLocation 正确；升级复用用户选择 |
 | 首次无 license | 只出现 activation gate；后台 runtime 不偷跑 |
 | 已激活 | 正常进入产品 shell |
+| RC5 Product Shell | 首页/项目/连接/设置恢复已验收视觉心智，状态来自真实 backend |
+| 极简首次配置 | 激活 → 选项目 → 设置保存 Tunnel ID + Runtime Key → ChatGPT 创建/添加 App；无需理解 Server/Runner/端口 |
 | invalid/recovery license | customer-level recovery copy；不暴露内部算法 |
 | 添加具体项目 | exact root ready |
 | 显式磁盘根 | 可读/分析；drive root 本身不可 destructive delete；明确安全子目录按 bounded policy |
@@ -245,16 +251,29 @@ RC5 已接受 copy：
 - [ ] normal shell/process/script focused tests；
 - [ ] 全部通过后才切换 execution policy。
 
-### Batch G — New RC / real-machine acceptance
+### Batch G — RC5 Product Shell & Minimal Setup UX — NEXT AFTER F
+
+完整 UI 契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+
+- [ ] 首页恢复“一切就绪 + 项目大卡片 + 连接链路 + 状态摘要”；
+- [ ] 项目页恢复卡片式项目管理；
+- [ ] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片；
+- [ ] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
+- [ ] 保存 Tunnel 凭据后自动准备或恢复所需 runtime/tunnel；
+- [ ] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；
+- [ ] 用 `D:\Test\CodexLink\Current-RC` 与真实安装程序逐页对照视觉、滚动、hover、focus、状态动效。
+
+### Batch H — New RC / real-machine acceptance
 
 - [ ] unique new RC；
 - [ ] installer SHA + release metadata；
 - [ ] 本机完整 Windows 主链；
 - [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
+- [ ] 验证朋友可以按教程完成“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”，不需要解释底层 runtime；
 - [ ] upgrade/uninstall/reinstall；
 - [ ] 收集问题、修复并重新候选，不覆盖历史 artifact。
 
-### Batch H — Commercial readiness
+### Batch I — Commercial readiness
 
 - [ ] website/tutorial + security boundary copy；
 - [ ] code signing；
@@ -273,5 +292,8 @@ RC5 已接受 copy：
 - 不把 prompt / blacklist 宣传成 OS sandbox；
 - 不覆盖 accepted/rejected RC；
 - 不删除历史证据目录；
+- `D:\Test` 的 Current-RC / Archive / Rejected / Rollback / CodexLink-Test 是首版 UI 与行为证据，只读保留；
+- 首版产品壳以已验收 RC5 为权威基准，不因当前 rebuild frontend 已存在就默认沿用 rebuild Dashboard；
+- 普通用户配置优先减少步骤和概念，Server/Runner/端口/客户端路径等高级实现默认自动隐藏；
 - 不把旧 WebCodex Desktop frontend 当成 CodexLink 产品 UI 的长期上游；
 - 遇到不可逆 migration / credential exposure / 未受控 destructive scope，先停线评审。

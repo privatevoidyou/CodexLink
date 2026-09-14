@@ -7,6 +7,8 @@
 > 原则：保持主线简单、真实、可验证；不为“看起来更安全”堆叠复杂机制。正常开发能力尽量不打扰，真正高破坏性的边界由 typed contract 与 Destructive Guard 硬控制。
 >
 > 首版详细安全规范见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
+>
+> 首版产品壳与极简配置 UX 见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
 ## 0. 2026-09-14 当前已核实状态
 
@@ -40,6 +42,14 @@ Windows Sandbox POC 已完成其研究价值，但首版不采用 OS sandbox 作
 - 下一阶段改为 **Batch F — Destructive Guard & Bounded Recursive Delete**。
 
 在 Batch F hard gate 通过之前，当前 Safe Mode 继续保持 model-authored arbitrary execution 关闭；Guard 通过后再恢复正常 shell / process / script execution。
+
+### 首版 UI / UX 已正式冻结
+
+- 首版恢复并沿用已验收 RC5 产品壳，不使用当前 rebuild Dashboard 作为最终视觉方向；
+- 权威参考是 `D:\Test\CodexLink\Current-RC`、真实安装形态、历史 Archive/Rejected/Rollback、已保存截图和真实行为；
+- RC5 对应 product source commit `0f63d08e...` 当前不在现有 Git object 中，`CodexLink-stable-v1` 也没有可恢复源码；如果以后找到真实源码优先复用，否则按成品行为恢复；
+- 用户主链固定为：激活 → 选项目 → 设置里保存 Tunnel ID + Restricted Runtime Key → 去 ChatGPT 创建/添加 App；Server / Runner / 端口 / tunnel-client / 普通代理配置默认自动处理和隐藏；
+- 详细视觉与交互契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
 ### Git / 远端原则
 
@@ -175,10 +185,11 @@ WebCodex Engine
 | P0 | Lifecycle / installer | **本地完成** | `7ebab38d`；待 GitHub TLS 恢复后 push，真实 upgrade 仍留给新 RC |
 | P0 | Batch F：Destructive Guard & Bounded Delete | **下一阶段** | typed 增删改读 + bounded recursive delete + destructive admission + focused Windows regressions |
 | P0 | 恢复正常 model execution | **等待 Batch F** | Guard 先全绿，再开放 shell/process/script；不做 OS sandbox Gate |
-| P0 | Windows 新 RC 端到端验收 | 待做 | install → activate → project → tunnel → ChatGPT → read/edit/create/delete/shell → guard → restart/upgrade/uninstall |
+| P0 | RC5 Product Shell + 极简配置 UX | **等待 Batch F 后恢复** | 首页/项目/连接/设置恢复已验收 RC 心智；普通用户只填 Tunnel ID + Runtime Key，不接触 Server/Runner/端口 |
+| P0 | Windows 新 RC 端到端验收 | 待做 | install → activate → project → save 2 Tunnel values → ChatGPT App → read/edit/create/delete/shell → guard → restart/upgrade/uninstall |
 | P1 | 商业网站 + 小白图文教程 | 待做 | 真实截图、当前 OpenAI 地址、版本历史、下载/支持、安全边界说明上线 |
 | P1 | 正式商业发布准备 | 待做 | 签名 installer、SHA、归档、第三方许可、发布记录齐全 |
-| P2 | CodexLink UI V2 / 更强产品差异化 | 后置 | 不阻塞首个稳定商业版本 |
+| P2 | UI V2 | **仅在未来明确立项时** | 首版不自动 redesign 已敲定的 RC 产品壳 |
 
 ---
 
@@ -338,7 +349,7 @@ Persistent user-data dir
 
 ### Gate
 
-产品核心恢复 Gate 已基本满足；Batch E 只剩 remote backup 与真实 RC upgrade 证据。新的视觉大改版继续后置，不阻塞 Batch F、RC 和商业发布。
+产品核心恢复 Gate 已基本满足；Batch E 只剩 remote backup 与真实 RC upgrade 证据。首版不做新的视觉 redesign，但**已验收 RC5 Product Shell 的恢复属于首发 P0**，在 Batch F 后、新 RC 前完成。
 
 ---
 
@@ -380,6 +391,40 @@ Batch F 通过必须证明：正常 build/test/script 能运行，而 obvious re
 
 ---
 
+## 7.5 Stage 3.5 — 恢复 RC5 Product Shell 与极简配置链
+
+详细规范：[`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+
+### 首版恢复目标
+
+- 首页：`一切就绪`、当前项目大卡片、连接链路、接下来做什么、系统状态；
+- 项目：`此电脑上的项目` 卡片式管理；
+- 连接：`ChatGPT 连接` 步骤链、当前状态、Secure Tunnel 卡片；
+- 设置：语言、登录启动、Tunnel ID、Restricted Runtime Key、必要时才出现的高级网络设置；
+- 保留 RC 成品的克制动效、卡片、状态点和页面节奏；
+- 不把当前 rebuild Dashboard 的底层 runtime 信息直接推给普通用户。
+
+### 极简配置 Gate
+
+普通客户首次使用只需要：
+
+```text
+激活
+→ 选择项目
+→ 设置中保存 Tunnel ID + Restricted Runtime Key
+→ CodexLink 自动准备 Engine / Runner / Secure Link
+→ 在 ChatGPT 创建/添加 App
+→ 使用
+```
+
+Server URL、Runner enrollment、loopback 端口、tunnel-client path、health URL、正常情况下的代理选择都不得成为首用步骤。
+
+### 历史证据
+
+`D:\Test` 下的 Current-RC / Archive / Rejected / Rollback / CodexLink-Test 继续作为只读恢复证据。若后续找到 RC5 原始 UI 源码，优先直接复用；当前未找到时，以真实 RC 行为和截图恢复。
+
+---
+
 ## 8. Stage 4 — Windows 真实机端到端验收
 
 每个候选必须在真实 Windows 上验证，不只跑单元测试。
@@ -390,10 +435,10 @@ Batch F 通过必须证明：正常 build/test/script 能运行，而 obvious re
 2. custom install path；
 3. activation；
 4. 选择真实项目；
-5. Server / Runner ready；
-6. 配置 Tunnel ID / Runtime Key；
-7. 启动 Secure Link；
-8. ChatGPT Developer Mode / App 连接；
+5. 在设置中只填写并保存 Tunnel ID + Restricted Runtime Key；
+6. CodexLink 自动把 Server / Runner / Secure Link 准备到 ready，不要求用户配置底层组件；
+7. ChatGPT Developer Mode / 创建或添加 App；
+8. App 连接后首页与连接页进入真实 ready/verified 状态；
 9. typed read / search；
 10. typed create + guarded edit + Git diff；
 11. single-file delete；
@@ -401,7 +446,7 @@ Batch F 通过必须证明：正常 build/test/script 能运行，而 obvious re
 13. normal shell / build / test；
 14. destructive raw shell 被 Guard 拒绝且没有 child spawn；
 15. project root / parent / reparse destructive regression；
-16. 重启 CodexLink；
+16. 重启 CodexLink 后项目、激活和 Tunnel 凭据自动恢复；
 17. Windows 登录 autostart（启用时）；
 18. upgrade 覆盖安装并复用正确状态；
 19. uninstall 后验证持久用户数据策略；
@@ -521,27 +566,18 @@ CodexLink 当前商业策略：
 
 ---
 
-## 11. Stage 7 — 首发以后再做的 UI V2
+## 11. Stage 7 — 首发以后可选的 UI V2
 
-首个商业版稳定后，再用真正的 CodexLink 产品心智重做信息架构，例如：
+首版已经正式选定 RC5 Product Shell 作为产品心智，不再默认安排一次“大改版”。
 
-```text
-工作台
-工作区
-AI 接入
-运行中心
-设置
-```
+首发以后先根据真实客户反馈微调：
 
-目标不是“把 WebCodex UI 改颜色”，而是围绕客户真正关心的问题：
+- 哪些状态仍然难懂；
+- 哪个首次配置步骤还可以消失；
+- 项目/连接页是否需要更少文字；
+- 动效、键盘、高 DPI 和可访问性是否需要改进。
 
-- AI 现在能不能工作？
-- 哪个项目被授权？
-- ChatGPT 连接到哪里？
-- 刚才发生了什么？
-- 下一步该做什么？
-
-先做可交互 HTML/CSS 原型，用户选择方向后再集成 Tauri。这个阶段不阻塞安全、安装、激活、Tunnel、网站和首发。
+只有用户以后明确决定重做信息架构时，才单独立项 UI V2。默认继续保持 `首页 / 项目 / 连接 / 设置` 与 RC5 的核心交互模型。
 
 ---
 
@@ -549,17 +585,17 @@ AI 接入
 
 从本次安全决策文档 checkpoint 开始，严格按以下顺序推进：
 
-1. **文档收口**：把路线图、recovery matrix 与安全边界规范统一并提交；继续保留 `.codexlink-c087.diff` 历史证据。
+1. **UI/UX 决策入档**：RC5 Product Shell 与极简配置链作为首版权威基线；`D:\Test` 历史证据继续只读保留。
 2. **移除 Sandbox POC 产品主线**：对 `c5fa9b50` 做普通 revert；保留历史，不 reset / 不重写。
-3. **推送本地 checkpoint**：GitHub TLS 恢复后把 `7ebab38d`、POC revert、文档 checkpoint 用普通 push 备份到 `origin/codexlink-rebuild`。
+3. **推送本地 checkpoint**：GitHub TLS 恢复后把本地 checkpoint 用普通 push 备份到 `origin/codexlink-rebuild`。
 4. **实现 Batch F**：typed 增删改读、Bounded Recursive Delete、lightweight preflight、reparse fail-closed、protected anchors、raw-shell Destructive Guard、safe audit。
 5. **Batch F focused gate**：保持 Safe Mode 直到上述安全测试全绿；不得提前恢复 execution。
 6. **恢复 normal execution**：允许正常 shell/process/script/build/test，不做 interpreter approval，不做 OS sandbox Gate。
-7. **生成新的唯一 RC**：Windows 真机执行完整 install → activate → project → tunnel → ChatGPT → files → execution → guard → restart/upgrade/uninstall 链。
-8. **外部 clean-machine 测试**：至少一台从未安装过 CodexLink 的朋友/测试机复跑首次安装和核心链路，记录真实 UX / 环境问题。
-9. **修正 RC 反馈并重新候选**：发现问题就修，不覆盖 accepted/rejected 历史 artifact。
-10. **完成网站 + 图文教程 + 安全边界说明**。
-11. **签名、归档、第三方许可、正式发布**。
-12. **首发稳定后再推进 UI V2 / 可选高级安全能力**。
+7. **恢复 RC5 Product Shell**：按首页/项目/连接/设置逐页恢复成品 UI、状态逻辑与动效节奏，同时把首次使用收敛为“激活 → 选项目 → 保存两项 Tunnel 凭据 → ChatGPT App”。
+8. **生成新的唯一 RC**：Windows 真机执行完整 install → activate → project → save credentials → ChatGPT App → files → execution → guard → restart/upgrade/uninstall 链。
+9. **外部 clean-machine 测试**：至少一台从未安装过 CodexLink 的朋友/测试机复跑首次安装和核心链路，重点验证“无需理解 Server/Runner/端口”。
+10. **修正 RC 反馈并重新候选**：发现问题就修，不覆盖 accepted/rejected 历史 artifact。
+11. **完成网站 + 图文教程 + 安全边界说明**。
+12. **签名、归档、第三方许可、正式发布**；UI V2 只有以后明确立项才推进。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆迁移时，立即 stop-the-line，先解决边界再继续。
