@@ -4,7 +4,7 @@
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
-> 实施状态：**Batch G 已完成本地 Product Shell / 首用流程恢复；真实新 RC 与历史 RC5 的逐页视觉、动效和高 DPI 对照仍属于真机发布验收。**
+> 实施状态：**Batch G 已形成 `cafc0b7e` + `09c48060` checkpoint；Smoke 2 已完成第二轮 RC5 视觉/原图标恢复和本地自动化 Gate，真实 Windows 逐页视觉、动效、高 DPI 与 Tunnel 连接仍需真机验收。**
 >
 > 目标：用户只理解“项目”和“ChatGPT 连接”，Server、Runner、端口、进程、Tunnel client 等实现细节由 CodexLink 自动处理。
 
@@ -45,6 +45,7 @@
 5. `D:\Test\CodexLink\Rollback`：旧稳定回滚候选；
 6. 本项目会话中保存的 RC5 首页、项目、连接、设置截图；
 7. release metadata 中记录的 RC5 Product source：`0f63d08ed91c085584ebea2d3a8413d2b79af10f`。
+8. `D:\Test\CodexLink-Test\CodexLink\CodexLink.exe` 中的 Windows icon resources：2026-09-15 已从真实 RC5 EXE 提取 16/24/32/48/64/128/256px 图标，作为当前产品图标恢复的字节级证据。
 
 当前已核实：
 
@@ -269,6 +270,23 @@ Restricted Runtime Key
 - 不为了“更炫”增加新的动画语言。
 
 RC5 是视觉基准，不要求旧实现技术栈逐字节复刻。
+
+---
+
+## 9.5 2026-09-15 Smoke 2 恢复证据
+
+当前 source checkpoint：`09c48060 — CodexLink: harden Tunnel routing and restore RC5 visuals`。
+
+本轮不是把“差不多的图标/布局”当完成，而是继续按 RC5 成品反推：
+
+- Windows EXE / installer / taskbar icon 与左上角 brand 已切回从真实 RC5 EXE 提取的资源；Smoke 2 新 EXE 再次抽出的 32px / 256px PNG 哈希与 RC5 原图完全一致；
+- 首页项目卡恢复左上 availability、右侧双端点连接图与更接近 RC5 的链路节点；
+- 项目页回到小卡片网格；连接页回到纵向步骤链；设置页补回 Tunnel route / Windows proxy 状态表达；
+- Tunnel Auto 不再展示未经验证的第一候选代理为“有效路线”，只有实际通过 control-plane transport probe 的 route 才能成为有效值；
+- TypeScript、51/51 Vitest、form-control CSS contract 与 production build 通过；Rust 串行完整套件 105/105 passed（5 ignored），focused Auto proxy 4/4；
+- Smoke 2 unsigned installer SHA256：`35CBB972A8439D03184AD10BAB4E66714EA2C52E64D773DEB111A3EBDF3F9D71`。构建产物保留在本机 `target/`，不提交 Git、不覆盖历史 RC。
+
+仍未宣称完成的部分：用户真机逐页视觉、高 DPI、hover/focus/滚动、真实 Tunnel 自动选路与 ChatGPT 访问。Smoke 2 的目的就是暴露这些剩余差异，不以本地单测替代产品验收。
 
 ---
 

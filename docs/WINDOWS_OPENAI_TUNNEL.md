@@ -183,6 +183,23 @@ If the host requires an HTTP proxy, first verify that the proxy can reach `api.o
 
 After changing the route, require both local readiness and healthy control-plane metadata/poll behavior before retrying Connector creation. The 2026-08-30 historical section below records the concrete Clash failure that established this troubleshooting rule.
 
+### CodexLink Desktop automatic proxy selection (2026-09-15)
+
+The CodexLink product layer must not hard-code `7890`, `7897`, or any other proxy port, and it must not treat a listening loopback port as proof that the OpenAI control plane is reachable.
+
+Current Desktop Auto mode follows this product rule:
+
+1. collect usable HTTP(S) proxy candidates inherited through `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, and their lowercase variants;
+2. collect the current Windows system HTTP proxy;
+3. keep direct access as the final candidate;
+4. deduplicate candidates and run a short, credential-free transport probe to `api.openai.com` for each route;
+5. select the first route that can actually reach the control plane, then let the existing `doctor`, control-plane probe, and `/readyz` checks remain the authoritative Tunnel-readiness gates;
+6. when the user explicitly chooses Custom or Direct, keep that choice deterministic and do not silently fall back to another route.
+
+A real Windows smoke on 2026-09-15 had several simultaneous local proxy endpoints: the Desktop environment pointed at `127.0.0.1:7897`, another proxy listened on `7891`, and the Windows system proxy was `127.0.0.1:12000`. The 7897/7891 routes could handle some ordinary traffic but failed the `api.openai.com` TLS/control-plane path; 12000 established the HTTPS path to `api.openai.com`; direct access timed out. This is why product auto-detection must validate the **actual control-plane destination** instead of assuming that browser connectivity, a listening port, or a conventional `7890` default proves anything.
+
+Those port numbers are machine-specific evidence, not CodexLink defaults. Manual troubleshooting can still use `--control-plane.http-proxy http://127.0.0.1:<proxy-port>`, while normal CodexLink users should not have to understand or guess a proxy port during first-time setup.
+
 ## 6. Create the ChatGPT Connector
 
 In ChatGPT Developer Mode, create a custom MCP app and use:

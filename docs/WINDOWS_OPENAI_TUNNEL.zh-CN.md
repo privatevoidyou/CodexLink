@@ -188,6 +188,23 @@ flowchart TD
 
 修改 route 后，应同时确认本地 readiness 与 control-plane metadata/poll 都正常，再重试创建 Connector。文末历史部分保留了 2026-08-30 真实 Clash 故障，它正是这条当前排障规则的证据来源。
 
+### CodexLink Desktop 的 Auto 代理选择（2026-09-15）
+
+CodexLink 产品层不能把 `7890`、`7897` 或任何其他端口写死，也不能仅因为某个本机端口正在监听，就把它当成 OpenAI control plane 可用路线。
+
+当前 Desktop Auto 模式的产品规则是：
+
+1. 收集 Desktop 继承的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` 等可用 HTTP(S) proxy 候选；
+2. 收集 Windows 当前系统 HTTP proxy；
+3. 最后保留 direct 候选；
+4. 候选去重后，逐条对 `api.openai.com` 做短时、无凭据的传输可达性探针；
+5. 选择第一条真正可达 control plane 的 route，再交给既有 `doctor`、control-plane probe 和 `/readyz` 做权威 Tunnel readiness 验证；
+6. 用户明确选择 Custom 或 Direct 时保持确定性，不暗中 fallback 到其他路线。
+
+2026-09-15 一台真实 Windows 测试机同时存在多个本机代理：Desktop 环境代理 `127.0.0.1:7897`、另一个监听 `7891`、Windows 系统代理 `127.0.0.1:12000`。其中 7897/7891 能处理部分普通网络请求，但访问 `api.openai.com` 的 TLS/control-plane 路径失败；12000 可以建立到 `api.openai.com` 的 HTTPS 路径；direct 超时。因此产品必须验证**目标 control-plane 路径**，不能用“浏览器能上网”“端口活着”或“默认大家都是 7890”代替探测。
+
+这些端口只是真机故障证据，不是 CodexLink 默认值。手工排障仍可使用上面的 `--control-plane.http-proxy http://127.0.0.1:<proxy-port>`，但普通 CodexLink 用户不应为了首次连接先理解或猜测代理端口。
+
 ## 6. 在 ChatGPT Developer Mode 创建 Connector
 
 在 ChatGPT 的新插件/custom MCP app 页面：

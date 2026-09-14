@@ -1,6 +1,6 @@
 # CodexLink Delivery Roadmap
 
-> 状态：**2026-09-14 首个商业版本的统一执行路线图，安全、UI 与商业激活方向已正式冻结。**
+> 状态：**2026-09-15 首个商业版本统一执行路线图；安全、UI、商业激活与 Smoke 2 网络恢复路径已经形成可回滚 checkpoint。**
 >
 > 目标：把 CodexLink 从 WebCodex 0.4.1 Engine 基线恢复成可商业交付、可维护、可回滚、可长期跟随上游 Engine 的 Windows 产品。
 >
@@ -21,6 +21,7 @@
 - Windows Runner / WebCodex 开发链路当前可用。
 - 工作目录：`D:\GitHub\CodexLink`。
 - 分支：`codexlink-rebuild`。
+- 当前产品代码 checkpoint：`09c48060`（Tunnel Auto routing + RC5 visual/icon restore）；该 commit 已包含在 `origin/codexlink-rebuild` 的远端历史中。
 - 旧 RC / test installation / VPS 继续作为受保护证据，不在本轮文档整理中修改。
 
 ### 已完成 checkpoint
@@ -30,10 +31,15 @@
 - `b191bd85` — bounded state migration；
 - `733b7b54` — RC5 device activation；
 - `e85749d7` — secure Tunnel handoff（已推远端）；
-- `7ebab38d` — Windows installer lifecycle（本地完成，待 GitHub TLS 恢复后普通 push）；
+- `7ebab38d` — Windows installer lifecycle（已推远端）；
+- `930583bd` — first-release safety boundary；
+- `7e4dd301` — first-release Product Shell / setup UX contract；
+- `8eb04943` — commercial activation flow contract；
 - `c5fa9b50` — Windows Sandbox isolation POC（**研究实验，不是产品方向**）；
 - `65a97891` — 普通 revert Sandbox POC，保留历史且从产品主线移除；
-- Batch F — Destructive Guard & Bounded Recursive Delete（本地 focused Gate 已通过；本路线图随 Batch F checkpoint 固化）。
+- `19775012` — Destructive Guard & Bounded Recursive Delete；
+- `cafc0b7e` — first-release Product Shell implementation；
+- `09c48060` — Tunnel Auto routing + RC5 visual/icon restore（Smoke 2 source checkpoint）。
 
 ### 当前正式产品决策
 
@@ -55,6 +61,15 @@ CodexLink-managed Runner 现在通过受控 `project activate --allow-raw-shell`
 - 用户主链固定为：激活 → 选项目 → 设置里保存 Tunnel ID + Restricted Runtime Key → 去 ChatGPT 创建/添加 App；Server / Runner / 端口 / tunnel-client / 普通代理配置默认自动处理和隐藏；
 - 详细视觉与交互契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
+### 2026-09-15 Smoke 2 已核实证据
+
+- Auto Tunnel route 不再把“第一个代理字符串”直接当成可用路线；候选按 Desktop 环境代理 → Windows 系统代理 → direct 收集，并对 `api.openai.com` 做短时无凭据传输探针后再选择；Custom / Direct 模式不做隐式 fallback；
+- 当前测试机证明端口不能写死：`127.0.0.1:7897` 与 `127.0.0.1:7891` 对 OpenAI control plane 失败，Windows 系统代理 `127.0.0.1:12000` 可建立 HTTPS 路径，direct 超时；这些端口只是真机证据，不是产品默认值；
+- RC5 Windows 图标直接从 `D:\Test\CodexLink-Test\CodexLink\CodexLink.exe` 资源提取并重新打包；Smoke 2 新 EXE 的 32px / 256px 图标哈希与 RC5 原图完全一致；
+- 本地前端 Gate：TypeScript、51/51 Vitest、form-control CSS contract、production build 全通过；
+- Rust 串行完整套件：105/105 passed，5 ignored；Auto proxy focused 4/4 与 failed-tunnel no-fake-green Windows real-process test 单独通过；默认并行完整套件仍有一条 Windows real-process timing flaky，属于 CI 并发隔离待办，不通过 ignore 或放宽产品安全断言掩盖；
+- Smoke 2 unsigned installer：`target\CodexLink_0.4.1_RC5-Smoke-2_x64-setup.exe`，SHA256 `35CBB972A8439D03184AD10BAB4E66714EA2C52E64D773DEB111A3EBDF3F9D71`；它是本地冒烟 artifact，不提交 Git、不作为正式 release。
+
 ### 商业激活与销售闭环已正式冻结
 
 - `MYWS-...` 销售激活码不是单纯下载密码，而是 CodexLink 的购买 entitlement + 首次设备激活凭证；
@@ -68,8 +83,8 @@ CodexLink-managed Runner 现在通过受控 `project activate --allow-raw-shell`
 
 - 不 force-push；
 - 不 reset published history；
-- GitHub TLS 故障未恢复时不使用关闭 TLS 校验等绕过；
-- `.codexlink-c087.diff` 继续作为历史证据保留，不 broad clean。
+- 产品代码历史已于 2026-09-15 普通 push 至至少 `09c48060`，后续文档 checkpoint 继续前进同一 `origin/codexlink-rebuild`；HTTPS 上传若遇到 HTTP/2 `408`，允许在保持 TLS 校验的前提下用 HTTP/1.1 重试，不使用关闭 TLS 等绕过；
+- `.codexlink-c087.diff` 已核实与 `c087b474` 的 stable patch-id 完全一致；权威历史由 Git commit 保留，根目录重复补丁已清理。
 
 ### 历史 stable-v1 源码状态
 
@@ -195,10 +210,10 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 | --- | --- | --- | --- |
 | P0 | Engine / 开发链路基线 | **已完成** | Server + Runner 0.4.1 source aligned；安全 baseline 有 checkpoint |
 | P0 | Product identity / state / migration / device activation / Tunnel | **已完成** | Batch A-D focused tests 已通过；设备 Activation Gate 已恢复 |
-| P0 | Lifecycle / installer | **本地完成** | `7ebab38d`；待 GitHub TLS 恢复后 push，真实 upgrade 仍留给新 RC |
-| P0 | Batch F：Destructive Guard & Bounded Delete | **本地完成** | typed 文件合同 + bounded recursive delete + destructive admission + focused Windows regressions 已通过 |
-| P0 | 恢复正常 model execution | **本地完成** | CodexLink-managed Runner 经 checked project activation 开放 shell/process/script；通用 WebCodex 默认不放宽 |
-| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **本地完成** | 四项主导航、Activation Gate、RC5 首页/项目/连接/设置心智与极简 Tunnel 配置已恢复；真机视觉对照留给新 RC |
+| P0 | Lifecycle / installer | **已 checkpoint / 已推远端** | `7ebab38d`；真实 upgrade 仍留给新 RC |
+| P0 | Batch F：Destructive Guard & Bounded Delete | **已 checkpoint / 已推远端** | `19775012`；typed 文件合同 + bounded recursive delete + destructive admission + focused Windows regressions 已通过 |
+| P0 | 恢复正常 model execution | **已 checkpoint / 已推远端** | CodexLink-managed Runner 经 checked project activation 开放 shell/process/script；通用 WebCodex 默认不放宽 |
+| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **CHECKPOINTED / VERIFY** | `cafc0b7e` + `09c48060`；Smoke 2 已完成本地构建/验证，仍需用户真机逐页视觉与 Tunnel 冒烟 |
 | P0 | Batch H：商业激活 / Deployment Center MVP | 待做 | 同一 MYWS 码完成“验证购买并下载 → Desktop 设备激活”；网站验证与设备绑定语义清楚 |
 | P0 | Batch I：Windows 新 RC 商业全链验收 | 待做 | verify purchase → download → install → activate → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall |
 | P1 | 网站内容与小白图文教程收口 | 待做 | 使用真实新 RC 截图、当前 OpenAI 路线、版本历史、支持与安全边界说明 |
@@ -218,8 +233,8 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 
 ### 立即收尾
 
-- [ ] 审阅 `.codexlink-c087.diff`，确认它只是安全 patch 备份还是还有独有内容；在未确认前不删除。
-- [ ] 把本路线图和 recovery matrix 做成一个独立文档 checkpoint。
+- [x] 审阅 `.codexlink-c087.diff`：stable patch-id 与 `c087b474` 完全一致，无独有内容；重复工作区 artifact 已清理。
+- [x] 路线图、recovery matrix、首版 UI 与 Tunnel 排障证据在 2026-09-15 项目整理 checkpoint 中更新。
 - [ ] 明确 `main` 与 `codexlink-rebuild` 的合流方式，不 force、不 reset published history。
 - [ ] 为每个后续阶段保持“小改动 → focused test → Windows 验证（如适用）→ diff review → commit → remote backup”的节奏。
 
@@ -266,9 +281,9 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 
 ---
 
-## 6. Stage 2 — CodexLink 产品核心恢复 — A-D DONE / E LOCAL DONE
+## 6. Stage 2 — CodexLink 产品核心恢复 — A-E CHECKPOINTED
 
-Batch A-D 已完成并形成 checkpoint；Batch E lifecycle / installer 已本地完成，待 GitHub TLS 恢复后普通 push，真实 upgrade 留给新 RC。
+Batch A-E 已形成 checkpoint 并推送到 `origin/codexlink-rebuild`；真实 upgrade / uninstall / reinstall 证据继续留给新 RC 真机验收。
 
 ### 6.1 Product identity
 
@@ -374,7 +389,7 @@ MYWS 销售激活码
 
 ### Gate
 
-产品核心恢复 Gate 已基本满足；Batch E 只剩 remote backup 与真实 RC upgrade 证据。首版不做新的视觉 redesign，但**已验收 RC5 Product Shell 的恢复属于首发 P0**，在 Batch F 后、新 RC 前完成。
+产品核心恢复 Gate 已基本满足；Batch E 的 remote backup 已完成，只剩真实 RC upgrade / uninstall / reinstall 证据。首版不做新的视觉 redesign，但**已验收 RC5 Product Shell 的恢复属于首发 P0**。
 
 ---
 
@@ -382,7 +397,7 @@ MYWS 销售激活码
 
 详细规范：[`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 
-**状态：本地实现与 focused Gate 已完成。** 新 RC 仍需在真实 Windows 上复验 normal execution、Guard 拒绝与大型目录清理。
+**状态：`19775012` 已 checkpoint 并推远端，focused Gate 已完成。** 新 RC 仍需在真实 Windows 上复验 normal execution、Guard 拒绝与大型目录清理。
 
 ### 实现顺序
 
@@ -421,6 +436,8 @@ MYWS 销售激活码
 ## 7.5 Stage 3.5 — 恢复 RC5 Product Shell 与极简配置链
 
 详细规范：[`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+
+**当前 checkpoint：** `cafc0b7e` 恢复首版 Product Shell，`09c48060` 继续修复 Tunnel Auto route、RC5 原图标与第二轮视觉回归。Smoke 2 本地 artifact 已构建并通过静态/自动测试 Gate；下一步是用户真机连接与逐页视觉冒烟，不把本地构建通过误当成最终 UI 验收。
 
 ### 首版恢复目标
 
@@ -649,14 +666,14 @@ CodexLink 当前商业策略：
 1. **已完成：商业 / UI / 安全决策入档。** 安全边界、RC5 Product Shell、极简配置链和“同一 MYWS 码 = 购买 entitlement + Desktop 激活”均为首版权威合同。
 2. **已完成：移除 Sandbox POC 产品主线。** `65a97891` 普通 revert，历史保留，没有 reset / 重写。
 3. **已完成：Batch F + normal execution 本地 focused Gate。** Bounded Recursive Delete、Destructive Guard、model guidance 与 checked activation opt-in 已通过 focused regressions。
-4. **远端备份待网络恢复。** GitHub TLS 恢复后把尚未推送的本地 checkpoint 普通 push 到 `origin/codexlink-rebuild`，不使用 TLS 绕过。
-5. **已完成：Batch G — RC5 Product Shell 本地实现。** 主导航固定为首页/项目/连接/设置；首页、项目、连接、设置恢复 RC5 产品心智；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”；Activity 只保留为诊断入口；真实 RC5 逐页视觉/高 DPI/动效对照留给新 RC 真机验收。
-6. **下一步：Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
-7. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
-8. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
-9. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。
-10. **用最终 RC 截图完成网站内容。** 图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
-11. **Batch J — 正式发布准备。** Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance。
-12. **Stable 首版发布。** UI V2 只有以后明确立项才推进。
+4. **已完成：产品代码 checkpoint 远端备份。** `09c48060` 已进入 `origin/codexlink-rebuild` 远端历史，没有 force、reset 或关闭 TLS 校验。
+5. **已完成：Batch G source checkpoint + Smoke 2 本地候选。** 主导航固定为首页/项目/连接/设置；RC5 原图标恢复；Auto Tunnel route 会验证 control-plane 可达性而不是猜 7890/首个代理；本地自动测试与打包 Gate 已通过。
+6. **当前下一步：Smoke 2 真机冒烟。** 用 Portable 逐页检查 RC5 视觉、原图标、设置页代理状态，并验证 Auto 能从失败候选回退到真正可达 `api.openai.com` 的 route；发现问题继续 Smoke 迭代，不把本地测试当最终验收。
+7. **随后：Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
+8. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
+9. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
+10. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。
+11. **用最终 RC 截图完成网站内容。** 图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
+12. **Batch J / Stable。** Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance；UI V2 只有以后明确立项才推进。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆迁移时，立即 stop-the-line，先解决边界再继续。
