@@ -48,14 +48,6 @@ export function Dashboard({
       aria-busy={refreshing}
       data-webcodex-page="home"
     >
-      <div className="workspace-topline">
-        <span>{t("home.workspace")}</span>
-        <span className={`workspace-state ${allSet ? "ready" : "pending"}`} role="status" aria-live="polite">
-          <i className={`status-dot ${allSet ? "ready" : "pending"}`} aria-hidden="true" />
-          {allSet ? t("common.ready") : canResumeRuntime ? t("common.stopped") : t("home.configuring")}
-        </span>
-      </div>
-
       <div className="page-heading-row rc5-heading-row">
         <div>
           <div className="eyebrow">{t("home.eyebrow")}</div>
@@ -75,14 +67,20 @@ export function Dashboard({
       </div>
 
       <article className="workspace-project rc5-project-card">
+        <span className={`project-availability ${allSet ? "ready" : "pending"}`}>
+          <i className={`status-dot ${allSet ? "ready" : "pending"}`} aria-hidden="true" />
+          {allSet ? t("home.available") : t("home.configuring")}
+        </span>
+        <div className="project-link-graphic" aria-hidden="true"><span /><span /></div>
         <div className="project-emblem" aria-hidden="true"><span className="nav-icon nav-projects" /></div>
         <div className="workspace-project-copy">
           <span className="section-kicker">{t("workspace.currentProject")}</span>
           <h2>{projectName}</h2>
           <p>{state.project?.path ?? t("setup.projectRequired")}</p>
           <div className="project-status-row">
+            <StatusPill ready={secureLinkReady} label={t("home.aiConnection")} value={chatgptObserved ? t("common.connected") : secureLinkReady ? t("common.ready") : t("home.notConnected")} />
             <StatusPill ready={runtimeReady} label={t("home.runtimeStatus")} value={runtimeReady ? t("common.ready") : t("common.stopped")} />
-            <StatusPill ready={secureLinkReady} label={t("home.aiConnection")} value={chatgptObserved ? t("common.connected") : secureLinkReady ? t("connection.waitingForChatGptShort") : t("home.notConnected")} />
+            <StatusPill ready={Boolean(state.project)} label={t("home.projects")} value={state.project ? "1" : "0"} />
           </div>
         </div>
         <div className="project-card-actions">
@@ -94,18 +92,19 @@ export function Dashboard({
       <section className="connection-chain-card" aria-labelledby="connection-chain-title">
         <div className="section-heading-row">
           <div>
-            <span className="section-kicker">{t("home.connectionPath")}</span>
-            <h2 id="connection-chain-title">{t("home.connection")}</h2>
+            <span className="section-kicker">{t("home.overall")}</span>
+            <h2 id="connection-chain-title">{t("home.connectionPath")}</h2>
           </div>
+          {allSet && <span className="connection-chain-summary">{t("home.chainSummaryReady")}</span>}
         </div>
         <div className="connection-chain" role="list">
-          <ChainNode label={t("home.localMachine")} ready={Boolean(state.project)} />
+          <ChainNode label={t("home.localMachine")} ready={Boolean(state.project)} status={state.project ? t("common.ready") : t("home.configuring")} />
           <span className={`chain-line ${runtimeReady ? "ready" : ""}`} aria-hidden="true" />
-          <ChainNode label="Engine" ready={runtimeReady} />
+          <ChainNode label="Engine" ready={runtimeReady} status={runtimeReady ? t("common.ready") : t("common.stopped")} />
           <span className={`chain-line ${secureLinkReady ? "ready" : ""}`} aria-hidden="true" />
-          <ChainNode label="Secure Link" ready={secureLinkReady} />
+          <ChainNode label="Secure Link" ready={secureLinkReady} status={secureLinkReady ? t("common.ready") : t("home.configuring")} />
           <span className={`chain-line ${chatgptObserved ? "ready" : ""}`} aria-hidden="true" />
-          <ChainNode label="ChatGPT" ready={chatgptObserved} />
+          <ChainNode label="ChatGPT" ready={chatgptObserved} status={chatgptObserved ? t("common.ready") : t("home.configuring")} />
         </div>
       </section>
 
@@ -156,11 +155,12 @@ function StatusPill({ ready, label, value }: { ready: boolean; label: string; va
   );
 }
 
-function ChainNode({ label, ready }: { label: string; ready: boolean }) {
+function ChainNode({ label, ready, status }: { label: string; ready: boolean; status: string }) {
   return (
     <div className={`chain-node ${ready ? "ready" : "pending"}`} role="listitem" aria-label={label}>
-      <span className="chain-node-mark" aria-hidden="true">{ready ? "✓" : "·"}</span>
+      <span className="chain-node-mark" aria-hidden="true"><i /></span>
       <strong>{label}</strong>
+      <small>{status}</small>
     </div>
   );
 }

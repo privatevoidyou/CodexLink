@@ -99,7 +99,7 @@ export function TunnelConfigDiagnostics({
       <div className="tunnel-credentials-heading">
         <div>
           <span className="section-kicker">OpenAI Tunnel</span>
-          <h3>{t("tunnelConfig.title")}</h3>
+          <h3>{state.openai_tunnel_configured ? t("tunnelConfig.configuredTitle") : t("tunnelConfig.title")}</h3>
         </div>
         <span className={`credential-state ${state.openai_tunnel_configured ? "ready" : "pending"}`}>
           <i className={`status-dot ${state.openai_tunnel_configured ? "ready" : "pending"}`} aria-hidden="true" />

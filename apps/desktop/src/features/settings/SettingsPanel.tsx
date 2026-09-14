@@ -22,6 +22,12 @@ export function SettingsPanel({
   const [savingLaunchAtLogin, setSavingLaunchAtLogin] = useState(false);
   const [launchAtLoginError, setLaunchAtLoginError] = useState<DesktopError | null>(null);
   const operationBusy = Boolean(state.current_operation);
+  const effectiveTunnelRoute = state.tunnel_proxy.effective_url
+    ?? (state.tunnel_proxy.mode === "direct"
+      ? t("settings.tunnelProxyDirectValue")
+      : state.tunnel_proxy.mode === "auto"
+        ? t("settings.tunnelProxyAutoPending")
+        : state.tunnel_proxy.custom_url ?? "—");
 
   useEffect(() => {
     let cancelled = false;
@@ -62,12 +68,12 @@ export function SettingsPanel({
   return (
     <section className="page-section rc5-page settings-page" aria-labelledby="settings-title" data-webcodex-page="settings">
       <div className="eyebrow">{t("settings.eyebrow")}</div>
-      <h1 id="settings-title">{t("settings.title")}</h1>
+      <h1 id="settings-title" aria-label={t("settings.eyebrow")}>{t("settings.title")}</h1>
       <p className="lede">{t("settings.description")}</p>
 
       <section className="settings-group" aria-labelledby="settings-general-title">
         <div className="settings-group-heading">
-          <h2 id="settings-general-title">{t("settings.general")}</h2>
+          <h2 id="settings-general-title">{t("settings.interface")}</h2>
         </div>
         <div className="settings-surface">
           <div className="setting-line">
@@ -86,13 +92,14 @@ export function SettingsPanel({
           </div>
           <div className="setting-line">
             <div>
-              <label htmlFor="desktop-launch-at-login">{t("settings.launchAtLogin")}</label>
+              <label htmlFor="desktop-launch-at-login">{t("settings.launchAtLoginDisplay")}</label>
               <span>{t("settings.launchAtLoginHelp")}</span>
             </div>
             <label className="switch-control" htmlFor="desktop-launch-at-login">
               <input
                 id="desktop-launch-at-login"
                 type="checkbox"
+                aria-label={t("settings.launchAtLogin")}
                 checked={launchAtLogin ?? false}
                 onChange={(event) => void updateLaunchAtLogin(event.target.checked)}
                 disabled={launchAtLogin === null || savingLaunchAtLogin}
@@ -115,9 +122,8 @@ export function SettingsPanel({
         <TunnelConfigDiagnostics state={state} onState={onState} />
       </section>
 
-      <details className="settings-advanced">
+      <details className="settings-advanced settings-network" open>
         <summary>{t("settings.networkAdvanced")}</summary>
-        <p className="settings-advanced-intro">{t("settings.networkAdvancedHelp")}</p>
         <article className="detail-card tunnel-proxy-settings">
           <div className="field-group">
             <label htmlFor="desktop-tunnel-proxy-mode">{t("settings.tunnelProxy")}</label>
@@ -149,6 +155,18 @@ export function SettingsPanel({
               <span className="field-help">{t("settings.tunnelProxyCustomHelp")}</span>
             </div>
           )}
+          <div className="tunnel-proxy-observation" aria-live="polite">
+            <div>
+              <span>{t("settings.tunnelProxyEffective")}</span>
+              <code>{effectiveTunnelRoute}</code>
+            </div>
+            {state.tunnel_proxy.detected_url && (
+              <div>
+                <span>{t("settings.tunnelProxyDetected")}</span>
+                <code>{state.tunnel_proxy.detected_url}</code>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="secondary-button tunnel-proxy-save"

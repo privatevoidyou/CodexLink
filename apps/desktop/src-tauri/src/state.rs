@@ -26,6 +26,7 @@ use serde_json::Value;
 #[cfg(unix)]
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::io::{self, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,8 @@ const RUNNER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const PROJECT_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const QUICK_SHARE_READY_TIMEOUT: Duration = Duration::from_secs(90);
 const REGULAR_TUNNEL_READY_TIMEOUT: Duration = Duration::from_secs(90);
+const TUNNEL_NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const OPENAI_CONTROL_PLANE_PROBE_URL: &str = "https://api.openai.com/v1/models";
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const READINESS_CLEANUP_SLACK: Duration = Duration::from_secs(2);
 const SHUTDOWN_OPERATION_WAIT: Duration = Duration::from_secs(5);
@@ -178,10 +181,8 @@ impl AppState {
         if self.operations.current().is_some() {
             return Ok(self.get_state());
         }
-        let cancellation = CancellationContext::new(
-            CancellationSignal::new(),
-            self.shutdown_signal.clone(),
-        );
+        let cancellation =
+            CancellationContext::new(CancellationSignal::new(), self.shutdown_signal.clone());
         let probe = {
             let slot = self.core.lock().await;
             let Some(core) = slot.as_ref() else {
@@ -612,6 +613,7 @@ pub struct DesktopCore {
     config_path: PathBuf,
     config: StoredDesktopConfig,
     tunnel_config: TunnelConfig,
+    resolved_tunnel_proxy: Option<EffectiveTunnelProxy>,
     snapshot: DesktopStateSnapshot,
     adapter: WebCodexAdapter,
     supervisor: SharedSupervisor,
@@ -659,6 +661,7 @@ impl DesktopCore {
             config,
             tunnel_config,
             snapshot,
+            resolved_tunnel_proxy: None,
             adapter: WebCodexAdapter::new(Some(resource_dir.join("webcodex-runtime"))),
             supervisor,
             activity,
@@ -670,6 +673,9 @@ impl DesktopCore {
         apply_openai_tunnel_configuration(&mut self.snapshot, &self.tunnel_config);
         self.snapshot.regular_tunnel_available = true;
         apply_config_projection(&mut self.snapshot, &self.config);
+        if let Some(proxy) = self.resolved_tunnel_proxy.as_ref() {
+            apply_resolved_tunnel_proxy_projection(&mut self.snapshot, &self.config, proxy);
+        }
         if self.snapshot.regular_tunnel.is_some() {
             let active = self
                 .process_snapshot(ProcessKind::RegularTunnel)
@@ -829,19 +835,18 @@ impl DesktopCore {
             Err(_) => ProjectReadiness::Unknown,
         };
         cancellation.check()?;
-        self.snapshot.chatgpt_activity = if server == ServerReadiness::Ready
-            && project == ProjectReadiness::Ready
-        {
-            match self.adapter.chatgpt_activity(&identity, cancellation).await {
-                Ok(last_meaningful_activity_at_ms) => Some(ChatGptActivitySnapshot {
-                    observed: last_meaningful_activity_at_ms.is_some(),
-                    last_meaningful_activity_at_ms,
-                }),
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
+        self.snapshot.chatgpt_activity =
+            if server == ServerReadiness::Ready && project == ProjectReadiness::Ready {
+                match self.adapter.chatgpt_activity(&identity, cancellation).await {
+                    Ok(last_meaningful_activity_at_ms) => Some(ChatGptActivitySnapshot {
+                        observed: last_meaningful_activity_at_ms.is_some(),
+                        last_meaningful_activity_at_ms,
+                    }),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
         cancellation.check()?;
         let tunnel_active = self
             .process_snapshot(ProcessKind::RegularTunnel)
@@ -1033,6 +1038,7 @@ impl DesktopCore {
             TunnelProxyMode::Auto | TunnelProxyMode::Direct => None,
         };
         self.config.tunnel_proxy = TunnelProxyConfig { mode, custom_url };
+        self.resolved_tunnel_proxy = None;
         self.save_config().await?;
         self.get_state().await
     }
@@ -1799,8 +1805,15 @@ impl DesktopCore {
                 "Stop the current share before starting another one.",
             ));
         }
+        let tunnel_proxy = if provider == "openai" {
+            let selected =
+                resolve_tunnel_proxy_for_start(&self.config.tunnel_proxy, cancellation).await?;
+            self.resolved_tunnel_proxy = Some(selected.clone());
+            selected
+        } else {
+            effective_tunnel_proxy(&self.config.tunnel_proxy)?
+        };
         let deadline = Deadline::after(QUICK_SHARE_READY_TIMEOUT);
-        let tunnel_proxy = effective_tunnel_proxy(&self.config.tunnel_proxy)?;
         let mut command = self.adapter.quick_share_command(
             Path::new(&project.path),
             provider,
@@ -2060,8 +2073,16 @@ impl DesktopCore {
                     "Run Local Setup again.",
                 )
             })?;
+        let tunnel_proxy =
+            match resolve_tunnel_proxy_for_start(&self.config.tunnel_proxy, cancellation).await {
+                Ok(proxy) => proxy,
+                Err(error) => {
+                    self.resolved_tunnel_proxy = None;
+                    return Err(error);
+                }
+            };
+        self.resolved_tunnel_proxy = Some(tunnel_proxy.clone());
         let deadline = Deadline::after(REGULAR_TUNNEL_READY_TIMEOUT);
-        let tunnel_proxy = effective_tunnel_proxy(&self.config.tunnel_proxy)?;
         let mut command = self
             .adapter
             .regular_tunnel_command(&env_file, tunnel_proxy.url.as_deref())?;
@@ -3077,60 +3098,218 @@ fn validate_tunnel_proxy_url(value: &str) -> DesktopResult<String> {
     })
 }
 
-fn environment_tunnel_proxy() -> Option<String> {
-    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
-        .iter()
-        .find_map(|name| {
-            std::env::var(name)
-                .ok()
-                .and_then(|value| crate::platform::normalize_proxy_server(&value))
-        })
+fn environment_tunnel_proxies() -> Vec<String> {
+    let mut proxies = Vec::new();
+    for name in [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        let Some(url) = std::env::var(name)
+            .ok()
+            .and_then(|value| crate::platform::normalize_proxy_server(&value))
+        else {
+            continue;
+        };
+        if !proxies.iter().any(|existing| existing == &url) {
+            proxies.push(url);
+        }
+    }
+    proxies
 }
 
-fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<EffectiveTunnelProxy> {
-    let system = crate::platform::system_http_proxy_candidate();
+fn push_tunnel_proxy_candidate(
+    candidates: &mut Vec<EffectiveTunnelProxy>,
+    candidate: EffectiveTunnelProxy,
+) {
+    if candidates
+        .iter()
+        .any(|existing| existing.url == candidate.url)
+    {
+        return;
+    }
+    candidates.push(candidate);
+}
+
+fn auto_tunnel_proxy_candidates_from(
+    environment: Vec<String>,
+    system: Option<crate::platform::SystemProxyCandidate>,
+) -> Vec<EffectiveTunnelProxy> {
     let detected_url = system.as_ref().map(|candidate| candidate.url.clone());
-    match config.mode {
-        TunnelProxyMode::Direct => Ok(EffectiveTunnelProxy {
+    let mut candidates = Vec::new();
+    for url in environment {
+        push_tunnel_proxy_candidate(
+            &mut candidates,
+            EffectiveTunnelProxy {
+                url: Some(url),
+                source: "environment",
+                detected_url: detected_url.clone(),
+            },
+        );
+    }
+    if let Some(candidate) = system {
+        if candidate.enabled || crate::platform::proxy_is_loopback(&candidate.url) {
+            push_tunnel_proxy_candidate(
+                &mut candidates,
+                EffectiveTunnelProxy {
+                    url: Some(candidate.url),
+                    source: if candidate.enabled {
+                        "windows_system"
+                    } else {
+                        "windows_loopback_candidate"
+                    },
+                    detected_url: detected_url.clone(),
+                },
+            );
+        }
+    }
+    push_tunnel_proxy_candidate(
+        &mut candidates,
+        EffectiveTunnelProxy {
             url: None,
             source: "direct",
             detected_url,
-        }),
-        TunnelProxyMode::Custom => Ok(EffectiveTunnelProxy {
+        },
+    );
+    candidates
+}
+
+fn tunnel_proxy_candidates(config: &TunnelProxyConfig) -> DesktopResult<Vec<EffectiveTunnelProxy>> {
+    let system = crate::platform::system_http_proxy_candidate();
+    let detected_url = system.as_ref().map(|candidate| candidate.url.clone());
+    match config.mode {
+        TunnelProxyMode::Direct => Ok(vec![EffectiveTunnelProxy {
+            url: None,
+            source: "direct",
+            detected_url,
+        }]),
+        TunnelProxyMode::Custom => Ok(vec![EffectiveTunnelProxy {
             url: Some(validate_tunnel_proxy_url(
                 config.custom_url.as_deref().unwrap_or(""),
             )?),
             source: "custom",
             detected_url,
-        }),
-        TunnelProxyMode::Auto => {
-            if let Some(url) = environment_tunnel_proxy() {
-                return Ok(EffectiveTunnelProxy {
-                    url: Some(url),
-                    source: "environment",
-                    detected_url,
-                });
-            }
-            if let Some(candidate) = system {
-                if candidate.enabled || crate::platform::proxy_is_loopback(&candidate.url) {
-                    return Ok(EffectiveTunnelProxy {
-                        url: Some(candidate.url),
-                        source: if candidate.enabled {
-                            "windows_system"
-                        } else {
-                            "windows_loopback_candidate"
-                        },
-                        detected_url,
-                    });
-                }
-            }
-            Ok(EffectiveTunnelProxy {
-                url: None,
-                source: "direct",
-                detected_url,
-            })
+        }]),
+        TunnelProxyMode::Auto => Ok(auto_tunnel_proxy_candidates_from(
+            environment_tunnel_proxies(),
+            system,
+        )),
+    }
+}
+
+fn effective_tunnel_proxy(config: &TunnelProxyConfig) -> DesktopResult<EffectiveTunnelProxy> {
+    tunnel_proxy_candidates(config)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            DesktopError::new(
+                "tunnel_proxy_unavailable",
+                "No Tunnel network route is available",
+                "Open Tunnel network settings and retry.",
+            )
+        })
+}
+
+async fn first_reachable_tunnel_proxy<F, Fut>(
+    candidates: Vec<EffectiveTunnelProxy>,
+    mut probe: F,
+) -> Option<EffectiveTunnelProxy>
+where
+    F: FnMut(EffectiveTunnelProxy) -> Fut,
+    Fut: Future<Output = bool>,
+{
+    for candidate in candidates {
+        if probe(candidate.clone()).await {
+            return Some(candidate);
         }
     }
+    None
+}
+
+async fn tunnel_proxy_candidate_reaches_control_plane(candidate: EffectiveTunnelProxy) -> bool {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(TUNNEL_NETWORK_PROBE_TIMEOUT)
+        .timeout(TUNNEL_NETWORK_PROBE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(url) = candidate.url.as_deref() {
+        let Ok(proxy) = reqwest::Proxy::all(url) else {
+            return false;
+        };
+        builder = builder.proxy(proxy);
+    } else {
+        builder = builder.no_proxy();
+    }
+    let Ok(client) = builder.build() else {
+        return false;
+    };
+    matches!(
+        tokio::time::timeout(
+            TUNNEL_NETWORK_PROBE_TIMEOUT,
+            client.get(OPENAI_CONTROL_PLANE_PROBE_URL).send(),
+        )
+        .await,
+        Ok(Ok(response)) if response.status().as_u16() < 500
+    )
+}
+
+async fn resolve_tunnel_proxy_for_start(
+    config: &TunnelProxyConfig,
+    cancellation: &CancellationContext,
+) -> DesktopResult<EffectiveTunnelProxy> {
+    let candidates = tunnel_proxy_candidates(config)?;
+    if config.mode != TunnelProxyMode::Auto {
+        return candidates.into_iter().next().ok_or_else(|| {
+            DesktopError::new(
+                "tunnel_proxy_unavailable",
+                "No Tunnel network route is available",
+                "Open Tunnel network settings and retry.",
+            )
+        });
+    }
+    cancellation.check()?;
+    let attempted_routes = candidates
+        .iter()
+        .map(|candidate| {
+            serde_json::json!({
+                "source": candidate.source,
+                "url": candidate.url.as_deref().unwrap_or("direct"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let selected = first_reachable_tunnel_proxy(candidates, |candidate| async move {
+        tunnel_proxy_candidate_reaches_control_plane(candidate).await
+    })
+    .await;
+    cancellation.check()?;
+    selected.ok_or_else(|| {
+        DesktopError::new(
+            "tunnel_proxy_unavailable",
+            "Automatic Tunnel networking could not reach the OpenAI control plane",
+            "Open Tunnel network settings to choose a custom proxy or direct connection, then retry.",
+        )
+        .with_details(serde_json::json!({
+            "category": "control_plane_unreachable",
+            "probe_host": "api.openai.com",
+            "attempted_routes": attempted_routes,
+        }))
+    })
+}
+
+fn apply_resolved_tunnel_proxy_projection(
+    snapshot: &mut DesktopStateSnapshot,
+    config: &StoredDesktopConfig,
+    proxy: &EffectiveTunnelProxy,
+) {
+    snapshot.tunnel_proxy = TunnelProxySnapshot {
+        mode: config.tunnel_proxy.mode,
+        custom_url: config.tunnel_proxy.custom_url.clone(),
+        effective_source: proxy.source.to_string(),
+        effective_url: proxy.url.clone(),
+        detected_url: proxy.detected_url.clone(),
+    };
 }
 
 fn runtime_autostart(config: &StoredDesktopConfig) -> bool {
@@ -3172,22 +3351,33 @@ fn preferred_connection(config: &StoredDesktopConfig) -> RegularConnectionPrefer
 fn apply_config_projection(snapshot: &mut DesktopStateSnapshot, config: &StoredDesktopConfig) {
     snapshot.runtime_autostart = runtime_autostart(config);
     snapshot.preferred_connection = preferred_connection(config);
-    snapshot.tunnel_proxy = match effective_tunnel_proxy(&config.tunnel_proxy) {
-        Ok(proxy) => TunnelProxySnapshot {
-            mode: config.tunnel_proxy.mode,
-            custom_url: config.tunnel_proxy.custom_url.clone(),
-            effective_source: proxy.source.to_string(),
-            effective_url: proxy.url,
-            detected_url: proxy.detected_url,
-        },
-        Err(_) => TunnelProxySnapshot {
-            mode: config.tunnel_proxy.mode,
-            custom_url: config.tunnel_proxy.custom_url.clone(),
-            effective_source: "invalid_custom".to_string(),
+    snapshot.tunnel_proxy = if config.tunnel_proxy.mode == TunnelProxyMode::Auto {
+        TunnelProxySnapshot {
+            mode: TunnelProxyMode::Auto,
+            custom_url: None,
+            effective_source: "auto_pending".to_string(),
             effective_url: None,
             detected_url: crate::platform::system_http_proxy_candidate()
                 .map(|candidate| candidate.url),
-        },
+        }
+    } else {
+        match effective_tunnel_proxy(&config.tunnel_proxy) {
+            Ok(proxy) => TunnelProxySnapshot {
+                mode: config.tunnel_proxy.mode,
+                custom_url: config.tunnel_proxy.custom_url.clone(),
+                effective_source: proxy.source.to_string(),
+                effective_url: proxy.url,
+                detected_url: proxy.detected_url,
+            },
+            Err(_) => TunnelProxySnapshot {
+                mode: config.tunnel_proxy.mode,
+                custom_url: config.tunnel_proxy.custom_url.clone(),
+                effective_source: "invalid_custom".to_string(),
+                effective_url: None,
+                detected_url: crate::platform::system_http_proxy_candidate()
+                    .map(|candidate| candidate.url),
+            },
+        }
     };
 }
 
@@ -3320,7 +3510,8 @@ mod tests {
             runtime_project_id: Some("agent:desktop:project-b".to_string()),
         });
 
-        let current_identity = identity_from_config(&core.config).expect("current project identity");
+        let current_identity =
+            identity_from_config(&core.config).expect("current project identity");
         let mut stale_identity = current_identity.clone();
         stale_identity.project_id = "project-a".to_string();
         stale_identity.runtime_project_id = "agent:desktop:project-a".to_string();
@@ -3646,6 +3837,72 @@ mod tests {
         assert_eq!(direct.source, "direct");
 
         assert!(validate_tunnel_proxy_url("http://user:secret@127.0.0.1:7890").is_err());
+    }
+
+    #[test]
+    fn automatic_tunnel_proxy_candidates_preserve_real_ports_and_fallback_order() {
+        let candidates = auto_tunnel_proxy_candidates_from(
+            vec!["http://127.0.0.1:7897".to_string()],
+            Some(crate::platform::SystemProxyCandidate {
+                url: "http://127.0.0.1:12000".to_string(),
+                enabled: true,
+            }),
+        );
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].url.as_deref(), Some("http://127.0.0.1:7897"));
+        assert_eq!(candidates[0].source, "environment");
+        assert_eq!(candidates[1].url.as_deref(), Some("http://127.0.0.1:12000"));
+        assert_eq!(candidates[1].source, "windows_system");
+        assert_eq!(candidates[2].url, None);
+        assert_eq!(candidates[2].source, "direct");
+    }
+
+    #[tokio::test]
+    async fn automatic_tunnel_proxy_falls_back_from_bad_inherited_route() {
+        let candidates = auto_tunnel_proxy_candidates_from(
+            vec!["http://127.0.0.1:7897".to_string()],
+            Some(crate::platform::SystemProxyCandidate {
+                url: "http://127.0.0.1:12000".to_string(),
+                enabled: true,
+            }),
+        );
+        let selected = first_reachable_tunnel_proxy(candidates, |candidate| async move {
+            candidate.url.as_deref() == Some("http://127.0.0.1:12000")
+        })
+        .await
+        .expect("system proxy should be selected after inherited proxy fails");
+        assert_eq!(selected.url.as_deref(), Some("http://127.0.0.1:12000"));
+        assert_eq!(selected.source, "windows_system");
+    }
+
+    #[test]
+    fn automatic_tunnel_proxy_deduplicates_same_environment_and_system_route() {
+        let candidates = auto_tunnel_proxy_candidates_from(
+            vec![
+                "http://127.0.0.1:10809".to_string(),
+                "http://127.0.0.1:10809".to_string(),
+            ],
+            Some(crate::platform::SystemProxyCandidate {
+                url: "http://127.0.0.1:10809".to_string(),
+                enabled: true,
+            }),
+        );
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].url.as_deref(), Some("http://127.0.0.1:10809"));
+        assert_eq!(candidates[1].url, None);
+    }
+
+    #[test]
+    fn automatic_proxy_projection_does_not_claim_an_unverified_route() {
+        let config = StoredDesktopConfig {
+            tunnel_proxy: TunnelProxyConfig::default(),
+            ..StoredDesktopConfig::default()
+        };
+        let mut snapshot = DesktopStateSnapshot::default();
+        apply_config_projection(&mut snapshot, &config);
+        assert_eq!(snapshot.tunnel_proxy.mode, TunnelProxyMode::Auto);
+        assert_eq!(snapshot.tunnel_proxy.effective_source, "auto_pending");
+        assert_eq!(snapshot.tunnel_proxy.effective_url, None);
     }
 
     #[test]

@@ -15,7 +15,7 @@ import { ConnectionPanel } from "./features/connection/ConnectionPanel";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { LANGUAGES, useLocale } from "./i18n/locale";
-import { desktopErrorPresentation, normalizeDesktopError, runtimeLabel, operationLabel } from "./i18n/presentation";
+import { desktopErrorPresentation, normalizeDesktopError, operationLabel } from "./i18n/presentation";
 
 type Navigation = "home" | "projects" | "connection" | "activity" | "settings";
 
@@ -26,7 +26,7 @@ const CHATGPT_ACTIVITY_OBSERVATION_INTERVAL_MS = 30_000;
 const ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS = 1_000;
 
 export default function App() {
-  const { t } = useLocale();
+  const { locale, setLocale, t } = useLocale();
   const [state, setState] = useState<DesktopState | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [navigation, setNavigation] = useState<Navigation>("home");
@@ -367,6 +367,10 @@ export default function App() {
   }
 
   const needsSetup = !state.topology || showSetup;
+  const workspaceName = state.project?.path.split(/[\\/]/).filter(Boolean).pop() ?? t("home.noProject");
+  const workspaceReady = state.readiness.runtime_ready
+    && state.regular_tunnel?.status === "ready"
+    && Boolean(state.regular_tunnel.ready_for_chatgpt);
 
   return (
     <div className="app-shell">
@@ -389,13 +393,41 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-status">
-          <i className={`status-dot ${state.readiness.runtime_ready ? "ready" : "unknown"}`} aria-hidden="true" />
-          <div><strong>{runtimeLabel(state, t)}</strong><span>{sidebarConnectionLabel(state, t)}</span></div>
+        <div className="sidebar-locale">
+          <label htmlFor="desktop-sidebar-locale">{t("locale.label")}</label>
+          <select
+            id="desktop-sidebar-locale"
+            aria-label={t("locale.label")}
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as typeof locale)}
+            data-webcodex-control="sidebar-locale"
+          >
+            {LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.label}</option>)}
+          </select>
         </div>
       </aside>
 
-      <main className="main-content" ref={mainRef} tabIndex={-1}>
+      <div className="workspace-shell">
+        <header className="workspace-header">
+          <div className="workspace-header-project">
+            <span>{t("home.workspace")}</span>
+            <strong>{workspaceName}</strong>
+          </div>
+          <span className={`workspace-header-status ${workspaceReady ? "ready" : "pending"}`} role="status">
+            <i className={`status-dot ${workspaceReady ? "ready" : "pending"}`} aria-hidden="true" />
+            <span aria-hidden="true">{workspaceReady ? t("common.ready") : t("common.error")}</span>
+            <span className="visually-hidden">
+              {!state.readiness.runtime_ready
+                ? t("common.stopped")
+                : state.regular_tunnel?.status === "ready" && !state.chatgpt_activity?.observed
+                  ? t("sidebar.tunnelWaiting")
+                  : workspaceReady ? t("common.ready") : t("common.error")}
+            </span>
+          </span>
+        </header>
+          {!state.readiness.runtime_ready && <span className="visually-hidden">{t("workspace.afterStart")}</span>}
+
+        <main className="main-content" ref={mainRef} tabIndex={-1}>
         {navigation === "home" && chooseSetupMode && state.topology && (
           <button className="back-button" onClick={() => { setShowSetup(false); setChooseSetupMode(false); }}>
             <span aria-hidden="true">← </span>{t("home.backToOverview")}
@@ -468,7 +500,8 @@ export default function App() {
         )}
         {navigation === "activity" && <ActivityPanel activity={activity} />}
         {navigation === "settings" && <SettingsPanel state={state} onState={commitState} />}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
@@ -546,16 +579,6 @@ function ActivationGate({ state, onActivated }: { state: DesktopState; onActivat
       </section>
     </main>
   );
-}
-
-function sidebarConnectionLabel(state: DesktopState, t: ReturnType<typeof useLocale>["t"]) {
-  if (!state.readiness.runtime_ready) return t("workspace.afterStart");
-  if (state.regular_tunnel?.status !== "error" && state.readiness.runtime_ready && state.chatgpt_activity?.observed) {
-    return t("sidebar.chatgptObserved");
-  }
-  if (state.readiness.ready_for_chatgpt) return t("sidebar.chatgptReady");
-  if (state.regular_tunnel?.status === "ready" && state.regular_tunnel.ready_for_chatgpt) return t("sidebar.tunnelWaiting");
-  return t("sidebar.connectionIncomplete");
 }
 
 function shouldStartPreferredTunnel(state: DesktopState) {

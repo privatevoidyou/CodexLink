@@ -25,10 +25,11 @@ export function ProjectsPanel({ state, onChooseProject }: { state: DesktopState;
       </div>
 
       <div className="project-count-row">
-        <span>{t("project.authorized")}</span>
-        <strong>{state.project ? 1 : 0}</strong>
+        <div><strong>{state.project ? 1 : 0}</strong><span>{t("project.authorized")}</span></div>
+        <span className="project-count-hint">{t("project.countHint")}</span>
       </div>
 
+      <div className="project-library-grid">
       {state.project ? (
         <article className="project-library-card" aria-labelledby="configured-project-title">
           <div className="project-library-icon" aria-hidden="true"><span className="nav-icon nav-projects" /></div>
@@ -60,6 +61,7 @@ export function ProjectsPanel({ state, onChooseProject }: { state: DesktopState;
           </button>
         </div>
       )}
+      </div>
     </section>
   );
 }
