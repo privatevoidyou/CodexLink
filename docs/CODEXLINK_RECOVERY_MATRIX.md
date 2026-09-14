@@ -9,6 +9,8 @@
 > 首版安全策略详见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 >
 > 首版产品壳与极简配置 UX 详见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+>
+> 首版购买资格、下载与设备激活合同详见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ## 状态定义
 
@@ -34,7 +36,8 @@
 | Install/data split | 程序目录可自定义；用户状态独立持久 | upgrade/uninstall 不误删持久状态 | RESTORE | LOCAL | installer smoke 已完成；真实 upgrade 留给新 RC |
 | Legacy migration | bounded copy-only；旧目录保留回滚 | known-file copy-only + marker + bounded rebase | RESTORE/HARDEN | DONE | 只迁移已知文件；用户项目路径不改 |
 | License | 商业设备激活 | RC5 SignedLicense + DPAPI device identity + offline verification | RESTORE/HARDEN | DONE | 历史 RC5 状态真实验证通过 |
-| Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy | RESTORE | DONE | production bundle 不含不必要实现说明 |
+| Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy；同一销售码用于 Desktop 首次激活 | RESTORE | DONE/VERIFY | production bundle 不含不必要实现说明；新 Product Shell 复核 |
+| Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
 | Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | NEXT | 逐页视觉/状态/交互与真实 RC 对照 |
 | First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | NEXT | 普通用户无需 Server/Runner/端口/客户端路径配置 |
 | Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
@@ -52,7 +55,7 @@
 | Diagnostics | Product/Engine/Tunnel versions 分开 | customer-safe diagnostics | RESTORE/HARDEN | VERIFY | 可复制、无 credential/内部秘密 |
 | Auto update | 明确不做 | 无 updater / 无检查更新网络请求 | KEEP | DONE | binary / UI 无 update path |
 | Installer RC archive | accepted / rejected / archive 分离 | immutable candidate policy | KEEP | VERIFY | 新 RC 不覆盖历史 installer，记录 SHA |
-| Website | 购买、下载、教程、FAQ、版本、许可、支持 | 完整商业产品站 + 安全边界说明 | RESTORE | LATER | 真实截图 + current OpenAI routes |
+| Website / tutorial content | 购买、下载、教程、FAQ、版本、许可、支持 | Deployment Center MVP 先进入 P0；完整内容使用新 RC 真实截图收口 | RESTORE | NEXT | 商业 Gate 可用 + 真实截图 + current OpenAI routes |
 | UI V2 | 非首版需求 | 只有未来用户明确决定重新设计时才立项；默认延续 RC5 Product Shell | LATER | LATER | 不自动推翻已敲定首版 UI |
 
 ## 历史 RC5 固定证据
@@ -120,9 +123,22 @@ CodexLink release 不允许在 bundled client 缺失时悄悄回退到：
 
 缺失或 SHA mismatch 必须 fail closed，并给客户可理解的修复动作。
 
-## Activation contract
+## Activation / commercial entitlement contract
 
-RC5 已接受 copy：
+同一枚 `MYWS-...` 销售激活码承担两个连续但不同的客户阶段：
+
+```text
+Deployment Center
+  → 验证购买资格 / 查看下载
+  → 不把“查看下载”伪装成设备已激活
+
+CodexLink Desktop
+  → 再次输入同一销售激活码
+  → 设备绑定 / Signed License
+  → 激活成功后才允许 runtime
+```
+
+RC5 已接受 Desktop copy：
 
 - `设备激活`
 - `激活 CodexLink`
@@ -132,15 +148,11 @@ RC5 已接受 copy：
 - `请输入购买后收到的 MYWS 激活码。`
 - button `激活 CodexLink`
 
-普通客户页面不显示：
+Deployment Center 需要明确提示：此码验证购买后仍要保留，用于 CodexLink 首次设备激活。
 
-- Ed25519；
-- offline verification 内部实现；
-- plaintext-storage 实现细节；
-- 内部授权服务细节；
-- 旧 download portal。
+普通客户页面不显示 Ed25519、offline verification、DPAPI、内部授权服务细节或私有签名实现。
 
-这只是信息最小化，不等于安全边界。真正的安全仍来自 private signing key 不出客户端、签名验证、secret protection、signed binaries、最小诊断泄漏。
+详细合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ## Windows real-machine regression matrix
 
@@ -150,6 +162,9 @@ RC5 已接受 copy：
 | --- | --- |
 | 默认安装目录 | 安装、启动正常 |
 | 自定义安装目录 | registry InstallLocation 正确；升级复用用户选择 |
+| Deployment Center 有效码 | 验证购买后看到正确推荐下载 / 版本 / SHA，并提示保留该码用于 Desktop 激活 |
+| Deployment Center 无效码 | 不进入受保护下载入口；网络错误与无效码文案可区分 |
+| 同码设备激活 | 网站验证过的同一销售激活码可在 fresh install 完成 Desktop activation |
 | 首次无 license | 只出现 activation gate；后台 runtime 不偷跑 |
 | 已激活 | 正常进入产品 shell |
 | RC5 Product Shell | 首页/项目/连接/设置恢复已验收视觉心智，状态来自真实 backend |
@@ -256,6 +271,7 @@ RC5 已接受 copy：
 完整 UI 契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
 - [ ] 首页恢复“一切就绪 + 项目大卡片 + 连接链路 + 状态摘要”；
+- [ ] 首次无 License 时恢复 RC5 简洁 Activation Gate；激活成功前不进入可工作 Product Shell；
 - [ ] 项目页恢复卡片式项目管理；
 - [ ] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片；
 - [ ] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
@@ -263,19 +279,30 @@ RC5 已接受 copy：
 - [ ] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；
 - [ ] 用 `D:\Test\CodexLink\Current-RC` 与真实安装程序逐页对照视觉、滚动、hover、focus、状态动效。
 
-### Batch H — New RC / real-machine acceptance
+### Batch H — Commercial Entitlement / Deployment Center MVP — NEXT AFTER G
+
+完整商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
+
+- [ ] 销售激活码验证购买资格；
+- [ ] 有效码展示当前推荐下载、版本与 SHA；
+- [ ] 页面明确说明同一激活码还用于 Desktop 首次激活；
+- [ ] 网站验证不伪装成设备绑定；
+- [ ] Quick Start 覆盖购买验证 → 下载 → 同码设备激活；
+- [ ] invalid / network failure customer copy 可区分。
+
+### Batch I — New RC / real-machine commercial acceptance
 
 - [ ] unique new RC；
 - [ ] installer SHA + release metadata；
-- [ ] 本机完整 Windows 主链；
+- [ ] 本机从 Deployment Center 开始跑完整 Windows 商业主链；
 - [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
-- [ ] 验证朋友可以按教程完成“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”，不需要解释底层 runtime；
+- [ ] 朋友按网站完成“验证购买 → 下载 → 同码激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”，不解释底层 runtime；
 - [ ] upgrade/uninstall/reinstall；
 - [ ] 收集问题、修复并重新候选，不覆盖历史 artifact。
 
-### Batch I — Commercial readiness
+### Batch J — Commercial readiness / Stable
 
-- [ ] website/tutorial + security boundary copy；
+- [ ] 用最终 RC 截图完成 website/tutorial + security boundary copy；
 - [ ] code signing；
 - [ ] third-party notices；
 - [ ] final clean-machine acceptance；
@@ -295,5 +322,7 @@ RC5 已接受 copy：
 - `D:\Test` 的 Current-RC / Archive / Rejected / Rollback / CodexLink-Test 是首版 UI 与行为证据，只读保留；
 - 首版产品壳以已验收 RC5 为权威基准，不因当前 rebuild frontend 已存在就默认沿用 rebuild Dashboard；
 - 普通用户配置优先减少步骤和概念，Server/Runner/端口/客户端路径等高级实现默认自动隐藏；
+- 销售激活码是购买 entitlement 与 Desktop 首次激活凭证，不降级成单纯下载密码；
+- Deployment Center 验证购买与 Desktop 设备激活必须使用同一条客户主线，但不能混淆“查看下载”和“设备已激活”；
 - 不把旧 WebCodex Desktop frontend 当成 CodexLink 产品 UI 的长期上游；
 - 遇到不可逆 migration / credential exposure / 未受控 destructive scope，先停线评审。

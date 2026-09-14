@@ -6,7 +6,7 @@
 >
 > 目标：用户只理解“项目”和“ChatGPT 连接”，Server、Runner、端口、进程、Tunnel client 等实现细节由 CodexLink 自动处理。
 
-本文是首版 CodexLink 产品壳与首次配置体验的权威规范。安全边界仍以 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md) 为准。
+本文是首版 CodexLink 产品壳与首次配置体验的权威规范。安全边界仍以 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md) 为准；购买资格与设备激活合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ---
 
@@ -56,6 +56,35 @@
 > 若以后找到真实 RC5 UI 源码，优先复用；否则以 RC5 真实程序 + 截图 + 行为观察为准，在当前 React/Tauri 架构内恢复，不凭空 redesign。
 
 所有 `D:\Test` 历史目录继续只读保留，不因首版恢复而清理或覆盖。
+
+---
+
+## 2.5 首次启动 Activation Gate
+
+RC5 Product Shell 之前必须先经过商业设备激活状态机。
+
+用户从 Deployment Center 下载并安装后，首次打开看到的是简洁激活页，而不是直接进入首页：
+
+```text
+设备激活
+激活 CodexLink
+首次使用时，请完成设备激活。
+
+销售激活码
+[ MYWS-XXXXX-XXXXX-XXXXX-XXXXX ]
+
+[ 激活 CodexLink ]
+```
+
+要求：
+
+- 使用购买后收到的**同一枚** `MYWS-...` 销售激活码；
+- 未激活时不启动 Server / Runner / Tunnel runtime；
+- 激活成功后才进入项目选择 / Product Shell；
+- 客户页面不显示签名算法、DPAPI、Device ID、内部授权 endpoint 等实现细节；
+- 激活失败只给客户可理解的重试 / 支持动作，不提供绕过 Activation Gate 的高级开关。
+
+详细商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ---
 
@@ -180,9 +209,11 @@ Restricted Runtime Key
 
 用户主流程目标冻结为：
 
+用户已经通过 Deployment Center 验证购买并取得 installer 后，Desktop 内主流程固定为：
+
 ```text
 安装 CodexLink
-→ 激活
+→ 用购买时的同一枚 MYWS 销售激活码激活设备
 → 选择项目
 → 在“设置”填 Tunnel ID + Restricted Runtime Key
 → 保存
@@ -242,6 +273,9 @@ RC5 是视觉基准，不要求旧实现技术栈逐字节复刻。
 ## 10. 首版 UI Gate
 
 进入新 RC 前至少证明：
+
+- 首次无有效 License 时只显示 Activation Gate，后台 runtime 不偷跑；
+- 销售激活码页面保持 RC5 简洁 customer copy，并与 Deployment Center 使用同一商业词汇；
 
 - 首页视觉心智恢复为 RC5 的“一切就绪 + 项目卡 + 连接链路”；
 - 项目页恢复卡片式项目管理；

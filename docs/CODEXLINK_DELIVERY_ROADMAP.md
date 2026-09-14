@@ -1,6 +1,6 @@
 # CodexLink Delivery Roadmap
 
-> 状态：**2026-09-14 首个商业版本的统一执行路线图，安全方向已正式冻结。**
+> 状态：**2026-09-14 首个商业版本的统一执行路线图，安全、UI 与商业激活方向已正式冻结。**
 >
 > 目标：把 CodexLink 从 WebCodex 0.4.1 Engine 基线恢复成可商业交付、可维护、可回滚、可长期跟随上游 Engine 的 Windows 产品。
 >
@@ -9,6 +9,8 @@
 > 首版详细安全规范见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 >
 > 首版产品壳与极简配置 UX 见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+>
+> 首版购买资格、下载与设备激活合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ## 0. 2026-09-14 当前已核实状态
 
@@ -50,6 +52,15 @@ Windows Sandbox POC 已完成其研究价值，但首版不采用 OS sandbox 作
 - RC5 对应 product source commit `0f63d08e...` 当前不在现有 Git object 中，`CodexLink-stable-v1` 也没有可恢复源码；如果以后找到真实源码优先复用，否则按成品行为恢复；
 - 用户主链固定为：激活 → 选项目 → 设置里保存 Tunnel ID + Restricted Runtime Key → 去 ChatGPT 创建/添加 App；Server / Runner / 端口 / tunnel-client / 普通代理配置默认自动处理和隐藏；
 - 详细视觉与交互契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
+
+### 商业激活与销售闭环已正式冻结
+
+- `MYWS-...` 销售激活码不是单纯下载密码，而是 CodexLink 的购买 entitlement + 首次设备激活凭证；
+- Deployment Center 先用激活码验证购买资格并展示下载 / 教程，网站验证本身不等于设备绑定；
+- 安装后首次启动继续使用**同一枚激活码**完成设备激活；
+- 未获得有效本机 Signed License 前，不启动 Server / Runner / Tunnel 等可工作 runtime；
+- 已激活设备通过本地 Signed License 验证，正常启动不依赖网站持续在线；
+- 商业合同与网站 Gate 见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ### Git / 远端原则
 
@@ -181,14 +192,15 @@ WebCodex Engine
 | 优先级 | 工作 | 当前状态 | 完成门槛 |
 | --- | --- | --- | --- |
 | P0 | Engine / 开发链路基线 | **已完成** | Server + Runner 0.4.1 source aligned；安全 baseline 有 checkpoint |
-| P0 | Product identity / state / migration / license / Tunnel | **已完成** | Batch A-D focused tests 已通过 |
+| P0 | Product identity / state / migration / device activation / Tunnel | **已完成** | Batch A-D focused tests 已通过；设备 Activation Gate 已恢复 |
 | P0 | Lifecycle / installer | **本地完成** | `7ebab38d`；待 GitHub TLS 恢复后 push，真实 upgrade 仍留给新 RC |
 | P0 | Batch F：Destructive Guard & Bounded Delete | **下一阶段** | typed 增删改读 + bounded recursive delete + destructive admission + focused Windows regressions |
 | P0 | 恢复正常 model execution | **等待 Batch F** | Guard 先全绿，再开放 shell/process/script；不做 OS sandbox Gate |
-| P0 | RC5 Product Shell + 极简配置 UX | **等待 Batch F 后恢复** | 首页/项目/连接/设置恢复已验收 RC 心智；普通用户只填 Tunnel ID + Runtime Key，不接触 Server/Runner/端口 |
-| P0 | Windows 新 RC 端到端验收 | 待做 | install → activate → project → save 2 Tunnel values → ChatGPT App → read/edit/create/delete/shell → guard → restart/upgrade/uninstall |
-| P1 | 商业网站 + 小白图文教程 | 待做 | 真实截图、当前 OpenAI 地址、版本历史、下载/支持、安全边界说明上线 |
-| P1 | 正式商业发布准备 | 待做 | 签名 installer、SHA、归档、第三方许可、发布记录齐全 |
+| P0 | Batch G：RC5 Product Shell + 极简配置 UX | **等待 Batch F 后恢复** | Activation Gate + 首页/项目/连接/设置恢复已验收 RC 心智；普通用户不接触底层 runtime 配置 |
+| P0 | Batch H：商业激活 / Deployment Center MVP | 待做 | 同一 MYWS 码完成“验证购买并下载 → Desktop 设备激活”；网站验证与设备绑定语义清楚 |
+| P0 | Batch I：Windows 新 RC 商业全链验收 | 待做 | verify purchase → download → install → activate → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall |
+| P1 | 网站内容与小白图文教程收口 | 待做 | 使用真实新 RC 截图、当前 OpenAI 路线、版本历史、支持与安全边界说明 |
+| P1 | Batch J：正式商业发布准备 | 待做 | 签名 installer、SHA、归档、第三方许可、最终 clean-machine 验收 |
 | P2 | UI V2 | **仅在未来明确立项时** | 首版不自动 redesign 已敲定的 RC 产品壳 |
 
 ---
@@ -304,14 +316,25 @@ Persistent user-data dir
 
 ### 6.4 License / Activation
 
-已恢复商业激活流程，同时保留 RC5 已接受的简化 customer copy：
+客户端设备激活已经恢复；首版商业合同进一步固定为“同一销售激活码，两阶段使用”：
 
-- 页面只显示客户需要知道的激活信息；
-- 继续保留 `MYWS-...` prefix，除非以后单独做产品决策；
-- 不在普通 UI 暴露 Ed25519、offline verification、明文/内部存储实现等细节；
+```text
+MYWS 销售激活码
+├─ Deployment Center：验证购买资格 / 查看下载
+└─ CodexLink Desktop：首次设备激活 / 获得 Signed License
+```
+
+约束：
+
+- `MYWS-...` 是产品 entitlement，不只是下载密码；
+- 网站验证购买资格不应伪装成设备已激活，也不应因为查看下载页就自动完成设备绑定；
+- 首次启动使用同一枚销售激活码进入 Activation Gate；
+- 未激活时 Server / Runner / Tunnel runtime 不偷跑；
+- 激活码提交后不长期保存到普通 Desktop state；
+- 已激活设备通过 Signed License 本地验证，不要求每次启动都在线；
+- 页面只显示客户需要知道的信息，不暴露 Ed25519、DPAPI、签名 payload、内部 endpoint 等实现；
 - 私有签名 key 永不进入客户端；
-- 本地验证和错误路径 fail closed；
-- 技术细节只进入受控 support diagnostics。
+- 详细商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
 ### 6.5 Project authority
 
@@ -425,32 +448,63 @@ Server URL、Runner enrollment、loopback 端口、tunnel-client path、health U
 
 ---
 
+## 7.6 Stage 3.6 — 商业激活与 Deployment Center MVP
+
+详细合同：[`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
+
+新 RC 外测前，先把真实客户会走的购买 / 下载 / 激活入口收口到可验收状态：
+
+```text
+销售激活码
+→ deploy.syzdq.xyz 验证购买资格
+→ 查看并下载当前推荐 CodexLink
+→ 安装
+→ Desktop 使用同一枚激活码完成设备激活
+```
+
+### MVP Gate
+
+- 有效 `MYWS-...` 码可以看到正确推荐下载、版本和 SHA；
+- 无效码不能进入受保护的购买下载入口；
+- 页面明确说明该激活码还要用于 CodexLink 首次设备激活；
+- 网站验证购买资格不等于设备绑定；
+- Desktop 未激活时不启动可工作 runtime；
+- 同一枚有效销售码能完成 fresh-machine Desktop 激活；
+- 已激活设备正常启动不依赖 Deployment Center 持续在线；
+- 网站 / Desktop / 教程使用一致的“销售激活码 / 激活 CodexLink”产品词汇。
+
+这个阶段只要求商业主链真实可用，不先引入账号系统、自动更新、CDN 或复杂下载 token 体系。
+
+---
+
 ## 8. Stage 4 — Windows 真实机端到端验收
 
 每个候选必须在真实 Windows 上验证，不只跑单元测试。
 
 ### 最小全链
 
-1. clean/fresh install；
-2. custom install path；
-3. activation；
-4. 选择真实项目；
-5. 在设置中只填写并保存 Tunnel ID + Restricted Runtime Key；
-6. CodexLink 自动把 Server / Runner / Secure Link 准备到 ready，不要求用户配置底层组件；
-7. ChatGPT Developer Mode / 创建或添加 App；
-8. App 连接后首页与连接页进入真实 ready/verified 状态；
-9. typed read / search；
-10. typed create + guarded edit + Git diff；
-11. single-file delete；
-12. bounded recursive `delete_directory`（使用 disposable test tree）；
-13. normal shell / build / test；
-14. destructive raw shell 被 Guard 拒绝且没有 child spawn；
-15. project root / parent / reparse destructive regression；
-16. 重启 CodexLink 后项目、激活和 Tunnel 凭据自动恢复；
-17. Windows 登录 autostart（启用时）；
-18. upgrade 覆盖安装并复用正确状态；
-19. uninstall 后验证持久用户数据策略；
-20. reinstall / downgrade（在兼容范围内）。
+1. 使用一枚有效测试销售激活码进入 Deployment Center；
+2. 验证购买资格并取得当前推荐 installer / SHA；
+3. clean/fresh install（另测 custom install path）；
+4. 首次启动使用**同一枚销售激活码**完成 Desktop activation；
+5. 验证未激活状态下 Server / Runner / Tunnel 不偷跑；
+6. 选择真实项目；
+7. 在设置中只填写并保存 Tunnel ID + Restricted Runtime Key；
+8. CodexLink 自动把 Server / Runner / Secure Link 准备到 ready，不要求用户配置底层组件；
+9. ChatGPT Developer Mode / 创建或添加 App；
+10. App 连接后首页与连接页进入真实 ready/verified 状态；
+11. typed read / search；
+12. typed create + guarded edit + Git diff；
+13. single-file delete；
+14. bounded recursive `delete_directory`（使用 disposable test tree）；
+15. normal shell / build / test；
+16. destructive raw shell 被 Guard 拒绝且没有 child spawn；
+17. project root / parent / reparse destructive regression；
+18. 重启 CodexLink 后项目、激活和 Tunnel 凭据自动恢复；
+19. Windows 登录 autostart（启用时）；
+20. upgrade 覆盖安装并复用正确状态；
+21. uninstall 后验证持久用户数据策略；
+22. reinstall / downgrade（在兼容范围内）。
 
 在本机通过后，再让至少一台**从未部署过 CodexLink 的朋友/测试机**重复 clean-install 主链，专门找安装环境、依赖、权限和首次使用体验问题。
 
@@ -482,16 +536,19 @@ Server URL、Runner enrollment、loopback 端口、tunnel-client path、health U
 ### Quick Start 教程顺序
 
 ```text
-01 下载与安装
-→ 02 激活 CodexLink
-→ 03 添加本地项目
-→ 04 创建 OpenAI Tunnel
-→ 05 创建 Runtime/API Key
-→ 06 在 CodexLink 中连接
-→ 07 开启 ChatGPT Developer Mode
-→ 08 创建 CodexLink App
-→ 09 Scan Tools / 首次使用
+01 输入销售激活码，验证购买并查看下载
+→ 02 下载并安装 CodexLink
+→ 03 首次启动，用同一枚激活码激活 CodexLink
+→ 04 添加本地项目
+→ 05 创建 OpenAI Tunnel
+→ 06 创建 Restricted Runtime Key
+→ 07 在 CodexLink 保存两项 Tunnel 凭据
+→ 08 开启 ChatGPT Developer Mode
+→ 09 创建/添加 CodexLink App
+→ 10 Scan Tools / 首次使用
 ```
+
+网站必须明确告诉用户：**销售激活码不要在下载后丢弃，它还用于 CodexLink 首次设备激活。**
 
 ### 截图规则
 
@@ -585,17 +642,19 @@ CodexLink 当前商业策略：
 
 从本次安全决策文档 checkpoint 开始，严格按以下顺序推进：
 
-1. **UI/UX 决策入档**：RC5 Product Shell 与极简配置链作为首版权威基线；`D:\Test` 历史证据继续只读保留。
+1. **商业 / UI 决策入档**：安全边界、RC5 Product Shell、极简配置链和“同一 MYWS 码 = 购买 entitlement + Desktop 激活”全部作为首版权威合同。
 2. **移除 Sandbox POC 产品主线**：对 `c5fa9b50` 做普通 revert；保留历史，不 reset / 不重写。
 3. **推送本地 checkpoint**：GitHub TLS 恢复后把本地 checkpoint 用普通 push 备份到 `origin/codexlink-rebuild`。
 4. **实现 Batch F**：typed 增删改读、Bounded Recursive Delete、lightweight preflight、reparse fail-closed、protected anchors、raw-shell Destructive Guard、safe audit。
 5. **Batch F focused gate**：保持 Safe Mode 直到上述安全测试全绿；不得提前恢复 execution。
 6. **恢复 normal execution**：允许正常 shell/process/script/build/test，不做 interpreter approval，不做 OS sandbox Gate。
-7. **恢复 RC5 Product Shell**：按首页/项目/连接/设置逐页恢复成品 UI、状态逻辑与动效节奏，同时把首次使用收敛为“激活 → 选项目 → 保存两项 Tunnel 凭据 → ChatGPT App”。
-8. **生成新的唯一 RC**：Windows 真机执行完整 install → activate → project → save credentials → ChatGPT App → files → execution → guard → restart/upgrade/uninstall 链。
-9. **外部 clean-machine 测试**：至少一台从未安装过 CodexLink 的朋友/测试机复跑首次安装和核心链路，重点验证“无需理解 Server/Runner/端口”。
-10. **修正 RC 反馈并重新候选**：发现问题就修，不覆盖 accepted/rejected 历史 artifact。
-11. **完成网站 + 图文教程 + 安全边界说明**。
-12. **签名、归档、第三方许可、正式发布**；UI V2 只有以后明确立项才推进。
+7. **实现 Batch G — RC5 Product Shell**：恢复 Activation Gate、首页/项目/连接/设置、状态逻辑和动效；首次产品配置收敛为“激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”。
+8. **实现 Batch H — Deployment Center 商业 MVP**：销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
+9. **实现 Batch I — 新 RC 商业全链**：verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
+10. **外部 clean-machine 测试**：至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
+11. **修正 RC 反馈并重新候选**：发现问题就修，不覆盖 accepted/rejected 历史 artifact。
+12. **用最终 RC 截图完成网站内容**：图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
+13. **Batch J — 正式发布准备**：Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance。
+14. **Stable 首版发布**；UI V2 只有以后明确立项才推进。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆迁移时，立即 stop-the-line，先解决边界再继续。

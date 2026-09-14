@@ -70,3 +70,4 @@ These are internal delivery documents for the CodexLink Windows product fork rat
 - [CodexLink recovery matrix](CODEXLINK_RECOVERY_MATRIX.md) — RC5-to-rebuild capability mapping and implementation status
 - [CodexLink first-release security boundary](CODEXLINK_SECURITY_BOUNDARY.md) — authoritative Destructive Guard, typed filesystem, bounded recursive-delete, and non-sandbox threat model
 - [CodexLink first-release product shell & setup UX](CODEXLINK_FIRST_RELEASE_UI.md) — accepted RC5 visual baseline and the minimal activation → project → Tunnel credentials → ChatGPT App flow
+- [CodexLink commercial entitlement & activation flow](CODEXLINK_COMMERCIAL_FLOW.md) — authoritative MYWS purchase entitlement, download gate, same-code Desktop activation, and commercial acceptance flow
