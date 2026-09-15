@@ -38,6 +38,7 @@
 | License | 商业设备激活 | RC5 SignedLicense + DPAPI device identity + offline verification | RESTORE/HARDEN | DONE | 历史 RC5 状态真实验证通过 |
 | Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy；同一销售码用于 Desktop 首次激活 | RESTORE | DONE/VERIFY | production bundle 不含不必要实现说明；新 Product Shell 复核 |
 | Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
+| Admin License Operator | 历史上人工/本地 Codex 通过 SSH 调用授权服务器签发 | Windows 本地 GUI 通过管理员 SSH key 固定调用 `issue --json`；私钥留在服务器；销售码不落盘；签发绝不自动重试 | HARDEN | CHECKPOINTED | source/installed self-test + shortcut validation + real SSH probe + 用户真实一键签发体验均已通过 |
 | Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | CHECKPOINTED/VERIFY | `cafc0b7e` + `09c48060`；Smoke 2 已恢复原 RC5 图标并完成第二轮首页/项目/连接/设置视觉回归；仍需用户真机逐页对照 |
 | First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Restricted Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | CHECKPOINTED/VERIFY | fresh setup 直达本机项目；保存凭据自动准备 Secure Link；高级拓扑不占首用主链；Smoke 2 继续验证真实连接行为 |
 | Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
@@ -282,6 +283,21 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] Smoke 2 unsigned installer 构建成功，SHA256 `35CBB972A8439D03184AD10BAB4E66714EA2C52E64D773DEB111A3EBDF3F9D71`；Portable runtime 四个文件逐 SHA 与 staging metadata 一致；
 - [ ] 默认并行 Rust 全套下 `windows_failed_regular_tunnel_child_cannot_leave_fake_green_readiness` 存在并发 timing flaky；串行全套和单测均通过。后续作为 CI isolation hygiene 单独修，不 ignore、不降低安全断言；
 - [ ] 用 Smoke 2 Portable 与 `D:\Test\CodexLink\Current-RC` / 真实 RC5 逐页对照视觉、滚动、hover、focus、状态动效与高 DPI，并完成 Auto Tunnel route 真机连接冒烟。
+
+### Batch H.0 — Local License Operator — USER VERIFIED / CHECKPOINT
+
+完整管理员合同见 [`CODEXLINK_LICENSE_OPERATOR.md`](CODEXLINK_LICENSE_OPERATOR.md)。
+
+- [x] Windows 本地 GUI；
+- [x] SSH private-key path only，不复制私钥；
+- [x] 固定远端 `/usr/local/bin/myws-license-admin issue --json`；
+- [x] 严格解析唯一 `MYWS-...` JSON；
+- [x] 成功后显示并复制剪贴板，不保存销售码历史；
+- [x] `issue` 非幂等，任何失败路径都不自动重试；
+- [x] Windows PowerShell 5.1 UTF-8 BOM 兼容；
+- [x] 安装副本 self-test / shortcut / icon / config / SSH probe；
+- [x] 2026-09-15 用户人工点击 GUI 完成一次实际销售码签发体验验收；
+- [ ] 服务端未来如增加 `list / inspect / revoke`，再另批扩展，不直接读写 `licenses.db`。
 
 ### Batch H — Commercial Entitlement / Deployment Center MVP — NEXT AFTER SMOKE 2 REAL-MACHINE PASS
 

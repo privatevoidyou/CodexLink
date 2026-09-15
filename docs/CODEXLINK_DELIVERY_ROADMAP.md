@@ -214,6 +214,7 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 | P0 | Batch F：Destructive Guard & Bounded Delete | **已 checkpoint / 已推远端** | `19775012`；typed 文件合同 + bounded recursive delete + destructive admission + focused Windows regressions 已通过 |
 | P0 | 恢复正常 model execution | **已 checkpoint / 已推远端** | CodexLink-managed Runner 经 checked project activation 开放 shell/process/script；通用 WebCodex 默认不放宽 |
 | P0 | Batch G：RC5 Product Shell + 极简配置 UX | **CHECKPOINTED / VERIFY** | `cafc0b7e` + `09c48060`；Smoke 2 已完成本地构建/验证，仍需用户真机逐页视觉与 Tunnel 冒烟 |
+| P0 | Batch H.0：本地 License Operator | **USER VERIFIED / CHECKPOINT** | Windows GUI 已完成真实一键签发体验验收；管理员 SSH key 只留本机；私钥留在服务器；签发不自动重试 |
 | P0 | Batch H：商业激活 / Deployment Center MVP | 待做 | 同一 MYWS 码完成“验证购买并下载 → Desktop 设备激活”；网站验证与设备绑定语义清楚 |
 | P0 | Batch I：Windows 新 RC 商业全链验收 | 待做 | verify purchase → download → install → activate → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall |
 | P1 | 网站内容与小白图文教程收口 | 待做 | 使用真实新 RC 截图、当前 OpenAI 路线、版本历史、支持与安全边界说明 |
@@ -469,6 +470,23 @@ Server URL、Runner enrollment、loopback 端口、tunnel-client path、health U
 
 ---
 
+## 7.55 Stage 3.55 — 管理员本地 License Operator
+
+详细合同：[`CODEXLINK_LICENSE_OPERATOR.md`](CODEXLINK_LICENSE_OPERATOR.md)。
+
+当前 v1 已在 Windows 本机实现并安装：
+
+- 一键 SSH 到现有授权 VPS；
+- 固定调用 `/usr/local/bin/myws-license-admin issue --json`；
+- 解析唯一 `MYWS-...`，显示并复制；
+- 不保存销售码历史，不复制 SSH 私钥，不接触服务器签名私钥；
+- `issue` 非幂等，因此超时/exit 异常不做自动重试；
+- 当前只做 `issue`，等服务端以后真正增加 `list / inspect / revoke` 再扩展 Operator。
+
+本机已经完成 PowerShell self-test、安装副本 self-test、快捷方式核验和真实 SSH probe；2026-09-15 用户已实际打开 GUI 完成一键销售码签发体验验收。该批可以独立 checkpoint，不与后续 Smoke 3 UI/行为改动混合。
+
+---
+
 ## 7.6 Stage 3.6 — 商业激活与 Deployment Center MVP
 
 详细合同：[`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
@@ -668,12 +686,13 @@ CodexLink 当前商业策略：
 3. **已完成：Batch F + normal execution 本地 focused Gate。** Bounded Recursive Delete、Destructive Guard、model guidance 与 checked activation opt-in 已通过 focused regressions。
 4. **已完成：产品代码 checkpoint 远端备份。** `09c48060` 已进入 `origin/codexlink-rebuild` 远端历史，没有 force、reset 或关闭 TLS 校验。
 5. **已完成：Batch G source checkpoint + Smoke 2 本地候选。** 主导航固定为首页/项目/连接/设置；RC5 原图标恢复；Auto Tunnel route 会验证 control-plane 可达性而不是猜 7890/首个代理；本地自动测试与打包 Gate 已通过。
-6. **当前下一步：Smoke 2 真机冒烟。** 用 Portable 逐页检查 RC5 视觉、原图标、设置页代理状态，并验证 Auto 能从失败候选回退到真正可达 `api.openai.com` 的 route；发现问题继续 Smoke 迭代，不把本地测试当最终验收。
-7. **随后：Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
-8. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
-9. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
-10. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。
-11. **用最终 RC 截图完成网站内容。** 图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
-12. **Batch J / Stable。** Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance；UI V2 只有以后明确立项才推进。
+6. **已完成并人工验收：Batch H.0 本地 License Operator v1。** 本机管理员 GUI、SSH key 路径配置、固定 `issue --json`、无自动重试和 SSH probe 已完成，用户已真实点击签发并确认可用；独立 checkpoint 后继续产品主线。
+7. **当前产品下一步：Smoke 2 真机冒烟。** 用 Portable 逐页检查 RC5 视觉、原图标、设置页代理状态，并验证 Auto 能从失败候选回退到真正可达 `api.openai.com` 的 route；发现问题继续 Smoke 迭代，不把本地测试当最终验收。
+8. **随后：Batch H — Deployment Center 商业 MVP。** 销售激活码验证购买、下载入口、版本/SHA、同码设备激活说明和最小 Quick Start 真正可用。
+9. **Batch I — 新 RC 商业全链。** verify purchase → download → install → same-code activation → project → Tunnel → ChatGPT App → files/execution/guard → restart/upgrade/uninstall。
+10. **外部 clean-machine 测试。** 至少一台从未安装 CodexLink 的朋友/测试机按网站教程从下载资格开始全程复跑，不使用内部捷径。
+11. **修正 RC 反馈并重新候选。** 发现问题就修，不覆盖 accepted/rejected 历史 artifact。
+12. **用最终 RC 截图完成网站内容。** 图文教程、FAQ、版本历史、支持、安全边界和真实 OpenAI 路线收口。
+13. **Batch J / Stable。** Windows 签名、SHA、归档、第三方许可、最终 clean-machine acceptance；UI V2 只有以后明确立项才推进。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆迁移时，立即 stop-the-line，先解决边界再继续。

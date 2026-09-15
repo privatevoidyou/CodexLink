@@ -1,6 +1,6 @@
 # CodexLink First-Release Commercial Entitlement & Activation Flow
 
-> 状态：**2026-09-14 正式敲定，首个商业版本的购买资格、下载与设备激活合同。**
+> 状态：**2026-09-15 正式敲定，首个商业版本的购买资格、下载、管理员签发与设备激活合同。**
 >
 > 核心决策：**同一枚 `MYWS-...` 销售激活码既是购买资格凭证，也是 CodexLink 首次设备激活凭证；它不是单纯的下载密码。**
 >
@@ -150,6 +150,29 @@ CodexLink Desktop
 - 安全边界与第三方许可入口。
 
 下载文件可以托管在现有人工管理渠道；网站不需要为了首版引入自动 updater、CDN 或复杂账号系统。
+
+### 6.5 管理员销售码签发工具
+
+销售码签发属于管理员侧能力，不进入客户 Desktop，也不新增公网管理 API。当前 v1 采用本地 License Operator：
+
+```text
+管理员 Windows GUI
+→ 使用管理员自己的 SSH key 登录授权 VPS
+→ 固定调用 /usr/local/bin/myws-license-admin issue --json
+→ 返回一枚新的 MYWS 销售激活码
+→ 显示并复制到剪贴板
+```
+
+关键边界：
+
+- 服务器签名私钥永不离开授权服务器；
+- 本地只保存 SSH host / user / port / private-key path，不复制私钥内容；
+- 销售码不写入 Operator 配置或本地历史；
+- `issue` 是非幂等操作，Operator **绝不自动重试签发请求**；
+- stdout 已收到有效 `MYWS-...` 时，即使 SSH 收尾异常也必须认定本次已经签发，不能再次自动 issue；
+- 当前服务端没有销售码专用 `revoke` / `list` / `inspect`，v1 不伪造这些能力。
+
+实现与运维合同见 [`CODEXLINK_LICENSE_OPERATOR.md`](CODEXLINK_LICENSE_OPERATOR.md)。
 
 ---
 
