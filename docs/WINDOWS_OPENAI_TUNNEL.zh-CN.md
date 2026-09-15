@@ -205,11 +205,24 @@ CodexLink 产品层不能把 `7890`、`7897` 或任何其他端口写死，也�
 
 这些端口只是真机故障证据，不是 CodexLink 默认值。手工排障仍可使用上面的 `--control-plane.http-proxy http://127.0.0.1:<proxy-port>`，但普通 CodexLink 用户不应为了首次连接先理解或猜测代理端口。
 
+### CodexLink 产品 fork 拓扑说明（2026-09-15）
+
+当前 CodexLink dogfood Desktop 内置 source-aligned 的 WebCodex `0.4.1` CLI / Server / Runner，build identity 为 `ae858f5360ff / dirty=false`。这和开发机上为了迁移回退而暂时保留的旧 WebCodexLauncher `0.7.2` / WebCodex `0.3.9` 链路是两套东西。
+
+CodexLink 当前原生支持两种长期拓扑：
+
+- **在此电脑使用 CodexLink**：Desktop 管理本机 Server、本机 Runner 与 OpenAI Secure Tunnel；
+- **连接现有 Server**：Server 保持远端，Desktop 使用一次性 `wc_pair_...` 完成本机 Runner enrollment，保存并复用 identity，后续只监管本机 Runner。
+
+Existing Server 页面不是空 UI，但它会检查远端 Server revision；如果远端 Server 与 bundled CodexLink CLI build 不兼容，应 fail closed，而不是勉强混跑。因此现在不能因为这个页面已经存在就直接删除旧 Launcher。正确顺序是：先把公网 Server 部署成 source-compatible 的 CodexLink fork build，再完成 pairing → 重启复用 → 项目读写 → Guard smoke，最后才退休旧 `0.3.9` 链路。
+
+当前 `tunnel-test` 已能访问 CodexLink 管理的 `0.4.1` Runner，下一阶段会用它做 Destructive Guard 真机专项。所有 destructive 负面测试必须放在一次性 disposable 授权目录，不使用真实源码仓库或历史证据目录。
+
 ## 6. 在 ChatGPT Developer Mode 创建 Connector
 
 在 ChatGPT 的新插件/custom MCP app 页面：
 
-1. 名称：任意，例如 `WebCodex Windows`；
+1. 名称：任意产品名，例如 `CodexLink`；
 2. 连接选择 **隧道 / Tunnel**；
 3. 从可用 Tunnel 中选择对应的 WebCodex Tunnel；
 4. 身份验证选择 **无身份验证 / No authentication**；

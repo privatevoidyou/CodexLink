@@ -1,7 +1,8 @@
 use super::cli::{run_json, run_json_until, run_project_activation_json, ResolvedBinaries};
 use super::models::{
     LegacyProjectRegisterOutput, LoginOutput, OpsProjectsOutput, OpsWindowsOutput,
-    PairingCreateOutput, ProjectActivationOutput, RunnerStatusOutput, ServerStatusOutput,
+    PairingCreateOutput, ProjectActivationOutput, ProjectRemovalOutput, RunnerStatusOutput,
+    ServerStatusOutput,
 };
 use crate::deadline::Deadline;
 use crate::error::{DesktopError, DesktopResult};
@@ -76,7 +77,7 @@ impl WebCodexAdapter {
         self.binaries.as_ref().ok_or_else(|| {
             DesktopError::new(
                 "binaries_not_checked",
-                "WebCodex binaries have not been verified yet",
+                "CodexLink binaries have not been verified yet",
                 "Refresh Desktop diagnostics or start setup.",
             )
         })
@@ -216,7 +217,7 @@ impl WebCodexAdapter {
         {
             return Err(DesktopError::new(
                 "binary_version_mismatch",
-                "The running Server does not match this Desktop WebCodex CLI build",
+                "The running Server does not match this Desktop CodexLink CLI build",
                 "Stop the old Server or point Desktop at a matching Server before continuing.",
             ));
         }
@@ -551,6 +552,36 @@ impl WebCodexAdapter {
         })
     }
 
+    pub async fn remove_project(
+        &mut self,
+        identity: &ProjectRuntimeIdentity,
+        project: &ProjectSelection,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<()> {
+        let webcodex = self.ensure_binaries(cancellation).await?.webcodex.clone();
+        let args = [
+            "project".into(),
+            "remove".into(),
+            "--config".into(),
+            identity.runner_config.to_string_lossy().to_string(),
+            "--user-token-file".into(),
+            identity.user_token_file.to_string_lossy().to_string(),
+            project.path.clone(),
+            "--json".into(),
+        ];
+        let output: ProjectRemovalOutput =
+            run_json(&webcodex, &args, None, false, cancellation).await?;
+        if !same_path(&output.project.path, &project.path)
+            || !matches!(
+                output.outcome.as_str(),
+                "unregistered" | "already_unregistered"
+            )
+        {
+            return Err(invalid_contract("project removal"));
+        }
+        Ok(())
+    }
+
     pub async fn legacy_register_project(
         &mut self,
         identity: &ProjectRuntimeIdentity,
@@ -789,7 +820,7 @@ pub fn validate_server_url(value: &str) -> DesktopResult<String> {
         DesktopError::new(
             "server_url_invalid",
             "Server URL is not a valid absolute URL",
-            "Enter a WebCodex Server URL such as https://webcodex.example.com.",
+            "Enter a CodexLink Server URL such as https://webcodex.example.com.",
         )
     })?;
     if !matches!(parsed.scheme(), "http" | "https")
@@ -803,7 +834,7 @@ pub fn validate_server_url(value: &str) -> DesktopResult<String> {
         return Err(DesktopError::new(
             "server_url_invalid",
             "Server URL must be a plain http(s) origin without credentials, path, query, or fragment",
-            "Enter only the WebCodex Server origin.",
+            "Enter only the CodexLink Server origin.",
         ));
     }
     Ok(value.to_string())
@@ -907,8 +938,8 @@ fn display_path(path: &Path) -> String {
 fn invalid_contract(operation: &str) -> DesktopError {
     DesktopError::new(
         "webcodex_contract_invalid",
-        format!("WebCodex returned an incomplete {operation} identity"),
-        "Verify that Desktop and the WebCodex binaries come from the same source baseline.",
+        format!("CodexLink returned an incomplete {operation} identity"),
+        "Verify that Desktop and the CodexLink runtime binaries come from the same source baseline.",
     )
 }
 

@@ -16,6 +16,8 @@ export const desktopApi = {
   getLaunchAtLogin: () => invoke<boolean>("get_launch_at_login"),
   setLaunchAtLogin: (enabled: boolean) =>
     invoke<boolean>("set_launch_at_login", { request: { enabled } }),
+  setUiLocale: (locale: string) =>
+    invoke<void>("set_ui_locale", { request: { locale } }),
   refresh: () => invoke<DesktopState>("refresh_runtime_status"),
   observeChatgptActivity: () => invoke<DesktopState>("observe_chatgpt_activity"),
   resumeSavedRuntime: () => invoke<DesktopState>("resume_saved_runtime"),
@@ -33,6 +35,10 @@ export const desktopApi = {
     }),
   activateLocalProject: (projectPath: string) =>
     invoke<DesktopState>("activate_local_project", {
+      request: { projectPath },
+    }),
+  removeLocalProject: (projectPath: string) =>
+    invoke<DesktopState>("remove_local_project", {
       request: { projectPath },
     }),
   configureRemote: (

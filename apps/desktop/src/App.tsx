@@ -15,7 +15,7 @@ import { ConnectionPanel } from "./features/connection/ConnectionPanel";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { LANGUAGES, useLocale } from "./i18n/locale";
-import { desktopErrorPresentation, normalizeDesktopError, operationLabel } from "./i18n/presentation";
+import { activationErrorMessage, desktopErrorPresentation, normalizeDesktopError, operationLabel } from "./i18n/presentation";
 
 type Navigation = "home" | "projects" | "connection" | "activity" | "settings";
 
@@ -24,6 +24,7 @@ const NAVIGATION: Navigation[] = ["home", "projects", "connection", "settings"];
 const REGULAR_TUNNEL_OBSERVATION_INTERVAL_MS = 1_500;
 const CHATGPT_ACTIVITY_OBSERVATION_INTERVAL_MS = 30_000;
 const ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS = 1_000;
+const AUTO_REPAIR_RETRY_INTERVAL_MS = 10_000;
 
 export default function App() {
   const { locale, setLocale, t } = useLocale();
@@ -38,6 +39,8 @@ export default function App() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
   const stateVersionRef = useRef(0);
+  const autoRepairInFlightRef = useRef(false);
+  const autoRepairNotBeforeRef = useRef(0);
   const mainRef = useRef<HTMLElement>(null);
   const hasRegularTunnel = Boolean(state?.regular_tunnel);
   const hasCurrentOperation = Boolean(state?.current_operation);
@@ -49,6 +52,13 @@ export default function App() {
       && !refreshing
       && windowFocused,
   );
+
+  useEffect(() => {
+    void desktopApi.setUiLocale(locale).catch(() => {
+      // Tray localization is presentation-only; the in-window UI remains usable
+      // even if the native shell cannot refresh its menu.
+    });
+  }, [locale]);
 
   useEffect(() => {
     const onFocus = () => setWindowFocused(true);
@@ -110,6 +120,13 @@ export default function App() {
     setState(next);
   }, []);
 
+  const commitActivatedState = useCallback((next: DesktopState) => {
+    commitState(next);
+    setShowSetup(false);
+    setChooseSetupMode(false);
+    setStartupAttempt((attempt) => attempt + 1);
+  }, [commitState]);
+
   const commitChatgptActivity = useCallback((next: DesktopState) => {
     stateVersionRef.current += 1;
     setState((current) => {
@@ -125,33 +142,24 @@ export default function App() {
       try {
         const initial = await desktopApi.getState();
         if (cancelled) return;
-        // Keep ordinary first-run setup mounted through intermediate topology
-        // snapshots. The separate chooseSetupMode flag stays false here, so a
-        // fresh install still goes directly to local project selection.
-        if (!initial.topology) setShowSetup(true);
         commitState(initial);
         if (initial.license.status !== "activated") return;
         if (initial.current_operation) return;
+        const shouldPrepareLocalRuntime = !initial.topology;
         const resumeExisting = Boolean(
-          initial.topology
-          && initial.runtime_autostart
-          && initial.topology.experience === "full",
+          shouldPrepareLocalRuntime
+          || (initial.topology
+            && initial.runtime_autostart
+            && initial.topology.experience === "full"),
         );
-        // A fresh Desktop must stay in product setup until the user chooses
-        // the real project and runtime topology. Silently bootstrapping the
-        // Desktop workspace creates a fake "configured" happy path and makes
-        // users configure the product twice before ChatGPT can use their code.
         if (!resumeExisting) return;
 
         setRefreshing(true);
         try {
-          let next = await desktopApi.resumeSavedRuntime();
+          const next = await restoreManagedConnection();
           if (cancelled) return;
           commitState(next);
-          if (shouldStartPreferredTunnel(next)) {
-            next = await desktopApi.startRegularTunnel();
-            if (!cancelled) commitState(next);
-          }
+          setShowSetup(false);
         } catch (value) {
           if (!cancelled) setError(normalizeDesktopError(value));
         } finally {
@@ -183,6 +191,26 @@ export default function App() {
             const next = await desktopApi.getState();
             if (!cancelled && stateVersionRef.current === observedVersion) {
               commitState(next);
+              if (
+                shouldAutoRepairConnection(next)
+                && !autoRepairInFlightRef.current
+                && Date.now() >= autoRepairNotBeforeRef.current
+              ) {
+                autoRepairInFlightRef.current = true;
+                autoRepairNotBeforeRef.current = Date.now() + AUTO_REPAIR_RETRY_INTERVAL_MS;
+                try {
+                  const repaired = await restoreManagedConnection();
+                  if (!cancelled) {
+                    commitState(repaired);
+                    setError(null);
+                  }
+                } catch {
+                  // Automatic healing is best-effort. Keep the degraded state visible
+                  // so the unified manual recovery action remains available.
+                } finally {
+                  autoRepairInFlightRef.current = false;
+                }
+              }
             }
           } catch {
             // Observation is best-effort. A transient invoke failure must not
@@ -261,7 +289,6 @@ export default function App() {
         topology
         && topology.experience === "full"
         && topology.server.kind === "local"
-        && state.project
         && state.readiness.runtime_ready,
       );
       if (!canSwitchInPlace) {
@@ -304,12 +331,7 @@ export default function App() {
     setRefreshing(true);
     setError(null);
     try {
-      let next = await desktopApi.resumeSavedRuntime();
-      commitState(next);
-      if (shouldStartPreferredTunnel(next)) {
-        next = await desktopApi.startRegularTunnel();
-        commitState(next);
-      }
+      commitState(await restoreManagedConnection());
     } catch (value) {
       setError(normalizeDesktopError(value));
     } finally {
@@ -361,16 +383,12 @@ export default function App() {
     return (
       <ActivationGate
         state={state}
-        onActivated={commitState}
+        onActivated={commitActivatedState}
       />
     );
   }
 
-  const needsSetup = !state.topology || showSetup;
-  const workspaceName = state.project?.path.split(/[\\/]/).filter(Boolean).pop() ?? t("home.noProject");
-  const workspaceReady = state.readiness.runtime_ready
-    && state.regular_tunnel?.status === "ready"
-    && Boolean(state.regular_tunnel.ready_for_chatgpt);
+  const needsSetup = showSetup;
 
   return (
     <div className="app-shell">
@@ -408,24 +426,6 @@ export default function App() {
       </aside>
 
       <div className="workspace-shell">
-        <header className="workspace-header">
-          <div className="workspace-header-project">
-            <span>{t("home.workspace")}</span>
-            <strong>{workspaceName}</strong>
-          </div>
-          <span className={`workspace-header-status ${workspaceReady ? "ready" : "pending"}`} role="status">
-            <i className={`status-dot ${workspaceReady ? "ready" : "pending"}`} aria-hidden="true" />
-            <span aria-hidden="true">{workspaceReady ? t("common.ready") : t("common.error")}</span>
-            <span className="visually-hidden">
-              {!state.readiness.runtime_ready
-                ? t("common.stopped")
-                : state.regular_tunnel?.status === "ready" && !state.chatgpt_activity?.observed
-                  ? t("sidebar.tunnelWaiting")
-                  : workspaceReady ? t("common.ready") : t("common.error")}
-            </span>
-          </span>
-        </header>
-          {!state.readiness.runtime_ready && <span className="visually-hidden">{t("workspace.afterStart")}</span>}
 
         <main className="main-content" ref={mainRef} tabIndex={-1}>
         {navigation === "home" && chooseSetupMode && state.topology && (
@@ -489,7 +489,11 @@ export default function App() {
           />
         ))}
         {navigation === "projects" && (
-          <ProjectsPanel state={state} onChooseProject={() => void chooseLocalProject()} />
+          <ProjectsPanel
+            state={state}
+            onChooseProject={() => void chooseLocalProject()}
+            onRemoveProject={(projectPath) => void runStateOperation(() => desktopApi.removeLocalProject(projectPath))}
+          />
         )}
         {navigation === "connection" && (
           <ConnectionPanel
@@ -525,7 +529,7 @@ function ActivationGate({ state, onActivated }: { state: DesktopState; onActivat
     } catch (value) {
       const normalized = normalizeDesktopError(value);
       setActivationCode("");
-      setActivationError(normalized.next_action || t("activation.error"));
+      setActivationError(activationErrorMessage(normalized, t));
     } finally {
       setSubmitting(false);
     }
@@ -581,6 +585,23 @@ function ActivationGate({ state, onActivated }: { state: DesktopState; onActivat
   );
 }
 
+async function restoreManagedConnection(): Promise<DesktopState> {
+  let next = await desktopApi.resumeSavedRuntime();
+  if (shouldStartPreferredTunnel(next)) {
+    next = await desktopApi.startRegularTunnel();
+  }
+  return next;
+}
+
+function shouldAutoRepairConnection(state: DesktopState) {
+  return state.license.status === "activated"
+    && !state.current_operation
+    && state.runtime_autostart
+    && state.topology?.experience === "full"
+    && state.topology.server.kind === "local"
+    && (!state.readiness.runtime_ready || shouldStartPreferredTunnel(state));
+}
+
 function shouldStartPreferredTunnel(state: DesktopState) {
   return state.license.status === "activated" &&
     state.preferred_connection === "open_ai_tunnel" &&
@@ -588,7 +609,7 @@ function shouldStartPreferredTunnel(state: DesktopState) {
     state.topology.server.kind === "local" &&
     state.readiness.runtime_ready &&
     state.openai_tunnel_configured &&
-    !state.regular_tunnel;
+    state.regular_tunnel?.status !== "ready";
 }
 
 function AppError({ error }: { error: DesktopError }) {

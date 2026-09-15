@@ -109,6 +109,17 @@ Options:\n\
   -h, --help                 Print help and exit\n"
 }
 
+pub(crate) fn project_remove_usage() -> &'static str {
+    "Usage: webcodex project remove --config PATH --user-token-file PATH <PROJECT> [OPTIONS]\n\n\
+Remove one exact local project authorization from the existing Runner without deleting project files.\n\
+The command narrows allowed_roots first, hot-reloads that narrower policy with generation fencing, then unregisters the exact Project once using its observed revision.\n\n\
+Options:\n\
+  --config PATH              Active Runner configuration created by login/init\n\
+  --user-token-file PATH     Existing user API token for operator Server calls\n\
+  --json                     Print machine-readable output\n\
+  -h, --help                 Print help and exit\n"
+}
+
 pub(crate) fn pairing_usage() -> &'static str {
     "Usage: webcodex pairing <COMMAND>\n\n\
      Commands:\n\

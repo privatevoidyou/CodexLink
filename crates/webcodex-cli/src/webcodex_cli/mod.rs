@@ -89,8 +89,8 @@ pub(crate) use profiles::{
     runner_service_file_for_scope, validate_client_profile, validate_service_file_scope,
 };
 pub(crate) use project::{
-    register_existing_project, run_project_activate, run_project_register, ProjectActivateOptions,
-    ProjectRegisterOptions, ProjectRegistration,
+    register_existing_project, run_project_activate, run_project_register, run_project_remove,
+    ProjectActivateOptions, ProjectRegisterOptions, ProjectRegistration, ProjectRemoveOptions,
 };
 #[cfg(all(test, unix))]
 pub(crate) use runner_service::render_runner_systemd_unit;
@@ -127,9 +127,9 @@ pub(crate) use usage::{
     connect_usage, disconnect_usage, login_usage, logout_usage, ops_projects_usage,
     ops_runner_usage, ops_runners_usage, ops_smoke_preflight_usage, ops_status_usage, ops_usage,
     ops_windows_usage, pairing_create_usage, pairing_usage, project_activate_usage,
-    project_register_usage, runner_init_usage, runner_install_service_usage, runner_status_usage,
-    runner_usage, server_init_usage, server_install_service_usage, server_status_usage,
-    server_tunnel_usage, server_usage, status_usage, usage,
+    project_register_usage, project_remove_usage, runner_init_usage, runner_install_service_usage,
+    runner_status_usage, runner_usage, server_init_usage, server_install_service_usage,
+    server_status_usage, server_tunnel_usage, server_usage, status_usage, usage,
 };
 
 #[cfg(test)]

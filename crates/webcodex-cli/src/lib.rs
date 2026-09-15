@@ -41,11 +41,12 @@ use webcodex_cli::{
     is_effective_root, login_usage, logout_usage, ops_projects_usage, ops_runner_usage,
     ops_runners_usage, ops_smoke_preflight_usage, ops_status_usage, ops_usage, ops_windows_usage,
     pairing_create_usage, pairing_usage, project_activate_usage, project_register_usage,
-    read_env_file_value, render_token_generate, run_connect, run_disconnect, run_hosted_log_writer,
-    run_internal_binary, run_login, run_logout, run_ops_command, run_pairing_create,
-    run_project_activate, run_project_register, run_runner_install_service, run_runner_service,
-    run_runner_status, run_runner_token_create_local, run_server_init, run_server_install_service,
-    run_server_service, run_server_status, run_server_tunnel, run_status, run_token_create_local,
+    project_remove_usage, read_env_file_value, render_token_generate, run_connect, run_disconnect,
+    run_hosted_log_writer, run_internal_binary, run_login, run_logout, run_ops_command,
+    run_pairing_create, run_project_activate, run_project_register, run_project_remove,
+    run_runner_install_service, run_runner_service, run_runner_status,
+    run_runner_token_create_local, run_server_init, run_server_install_service, run_server_service,
+    run_server_status, run_server_tunnel, run_status, run_token_create_local,
     runner_config_for_scope, runner_init_usage, runner_install_service_usage,
     runner_service_file_for_scope, runner_status_usage, runner_usage, server_init_usage,
     server_install_service_usage, server_status_usage, server_tunnel_usage, server_usage,
@@ -53,8 +54,9 @@ use webcodex_cli::{
     validate_client_profile, validate_service_file_scope, write_connect_result, ConnectAuth,
     ConnectOptions, DisconnectOptions, LoginOptions, LogoutOptions, OpsCommand, OpsCommonOptions,
     OpsRunnerOptions, OpsSmokePreflightOptions, OpsWindowsOptions, ProjectActivateOptions,
-    ProjectRegisterOptions, ServerStatusOptions, ServiceControl, StatusOptions, DEFAULT_LOG_LINES,
-    RUNNER_SERVICE_UNIT, SERVER_SERVICE_FILE, SERVER_SERVICE_UNIT,
+    ProjectRegisterOptions, ProjectRemoveOptions, ServerStatusOptions, ServiceControl,
+    StatusOptions, DEFAULT_LOG_LINES, RUNNER_SERVICE_UNIT, SERVER_SERVICE_FILE,
+    SERVER_SERVICE_UNIT,
 };
 const SETUP_GPT_SCOPES: &[&str] = &[
     "runtime:read",
@@ -106,6 +108,7 @@ enum CliAction {
     Project(Vec<String>),
     ProjectRegister(ProjectRegisterOptions),
     ProjectActivate(ProjectActivateOptions),
+    ProjectRemove(ProjectRemoveOptions),
     Connect(ConnectOptions),
     Disconnect(DisconnectOptions),
     HostedLogWriter(PathBuf),
@@ -713,6 +716,67 @@ fn parse_project_subcommand(args: &[String]) -> CliAction {
                 allow_raw_shell,
             })
         }
+        Some("remove") => {
+            if args[1..]
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+            {
+                return CliAction::Exit {
+                    code: 0,
+                    stdout: project_remove_usage().to_string(),
+                    stderr: String::new(),
+                };
+            }
+            let mut config = None;
+            let mut user_token_file = None;
+            let mut project = None;
+            let mut json = false;
+            let mut index = 1;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--config" => {
+                        index += 1;
+                        match args.get(index) {
+                            Some(value) => config = Some(PathBuf::from(value)),
+                            None => return cli_parse_error("--config requires a value".to_string()),
+                        }
+                    }
+                    "--user-token-file" => {
+                        index += 1;
+                        match args.get(index) {
+                            Some(value) => user_token_file = Some(PathBuf::from(value)),
+                            None => return cli_parse_error("--user-token-file requires a value".to_string()),
+                        }
+                    }
+                    "--json" => json = true,
+                    other if other.starts_with('-') => {
+                        return cli_parse_error(format!("unknown project remove option: {other}"))
+                    }
+                    value => {
+                        if project.is_some() {
+                            return cli_parse_error(format!("unexpected project remove argument: {value}"));
+                        }
+                        project = Some(PathBuf::from(value));
+                    }
+                }
+                index += 1;
+            }
+            let Some(config) = config else {
+                return cli_parse_error("project remove requires --config PATH".to_string());
+            };
+            let Some(user_token_file) = user_token_file else {
+                return cli_parse_error("project remove requires --user-token-file PATH".to_string());
+            };
+            let Some(project) = project else {
+                return cli_parse_error("project remove requires an existing workspace path".to_string());
+            };
+            CliAction::ProjectRemove(ProjectRemoveOptions {
+                config,
+                user_token_file,
+                project,
+                json,
+            })
+        }
         Some("register") => {
             if args[1..]
                 .iter()
@@ -770,7 +834,7 @@ fn parse_project_subcommand(args: &[String]) -> CliAction {
         }
         Some("--help" | "-h") => CliAction::Exit {
             code: 0,
-            stdout: "Usage: webcodex project <COMMAND>\n\nCommands:\n  activate    Activate a project on the current Runner without restarting it\n  register    Add a project for a stopped/legacy Runner\n".to_string(),
+            stdout: "Usage: webcodex project <COMMAND>\n\nCommands:\n  activate    Activate a project on the current Runner without restarting it\n  remove      Remove one exact project authorization from the current Runner\n  register    Add a project for a stopped/legacy Runner\n".to_string(),
             stderr: String::new(),
         },
         Some(other) => cli_parse_error(format!("unknown project subcommand: {other}")),
@@ -2612,6 +2676,19 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         CliAction::ProjectActivate(opts) => match run_project_activate(opts).await {
+            Ok(stdout) => {
+                print!("{}", stdout);
+                if !stdout.ends_with('\n') {
+                    println!();
+                }
+                std::process::exit(0);
+            }
+            Err(stderr) => {
+                eprintln!("{}", stderr);
+                std::process::exit(1);
+            }
+        },
+        CliAction::ProjectRemove(opts) => match run_project_remove(opts).await {
             Ok(stdout) => {
                 print!("{}", stdout);
                 if !stdout.ends_with('\n') {

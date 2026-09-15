@@ -61,7 +61,15 @@ describe("LocaleProvider", () => {
       for (const key of productBrandKeys) {
         const text = messages[locale][key];
         expect(text, `${locale}: ${key}`).toContain("CodexLink");
-        expect(text, `${locale}: ${key}`).not.toContain("WebCodex");
+        expect(text, `${locale}: ${key}`).not.toMatch(/webcodex/i);
+      }
+    }
+  });
+
+  it("contains no legacy WebCodex branding in user-visible catalogs", () => {
+    for (const locale of Object.keys(messages) as Locale[]) {
+      for (const [key, text] of Object.entries(messages[locale])) {
+        expect(text, `${locale}: ${key}`).not.toMatch(/webcodex/i);
       }
     }
   });

@@ -14,6 +14,8 @@ const LICENSE_VERSION: u32 = 1;
 const LICENSE_PRODUCT: &str = "webcodex-deployment";
 const LICENSE_FILE_NAME: &str = "license.json";
 const DEVICE_IDENTITY_FILE_NAME: &str = "device_identity.dpapi";
+const WINDOWS_DEVICE_ACTIVATION_DIR_NAME: &str = "CodexLinkSecretKey";
+const WINDOWS_PREVIOUS_DEVICE_ACTIVATION_DIR_NAME: &str = "CodexLink.DeviceActivation.v1";
 const DEVICE_IDENTITY_MAGIC: &[u8; 6] = b"WCDL1\0";
 const DEVICE_SECRET_BYTES: usize = 32;
 const DEVICE_ID_PREFIX: &str = "wcd-";
@@ -69,15 +71,20 @@ struct DeviceIdentity {
 }
 
 pub(crate) struct LicenseManager {
-    data_dir: PathBuf,
+    license_dir: PathBuf,
     snapshot: LicenseSnapshot,
 }
 
 impl LicenseManager {
     pub fn load(data_dir: &Path) -> Self {
+        let license_dir = persistent_license_dir(data_dir);
+        let snapshot = match migrate_legacy_license_if_needed(data_dir, &license_dir) {
+            Ok(()) => inspect_saved_license(&license_dir),
+            Err(_) => invalid_snapshot("license_state_unavailable"),
+        };
         Self {
-            data_dir: data_dir.to_path_buf(),
-            snapshot: inspect_saved_license(data_dir),
+            license_dir,
+            snapshot,
         }
     }
 
@@ -87,7 +94,7 @@ impl LicenseManager {
 
     pub async fn activate(&mut self, raw_code: &str) -> DesktopResult<LicenseSnapshot> {
         let code = normalize_activation_code(raw_code)?;
-        let identity = load_or_create_identity(&self.data_dir)?;
+        let identity = load_or_create_identity(&self.license_dir)?;
         let verifying_key = production_verifying_key().map_err(|_| license_response_invalid())?;
 
         let client = reqwest::Client::builder()
@@ -118,7 +125,7 @@ impl LicenseManager {
             .map_err(|_| license_response_invalid())?;
         verify_signed_license(&success.license, &identity.device_id, &verifying_key)
             .map_err(|_| license_response_invalid())?;
-        persist_signed_license(&self.data_dir, &success.license)
+        persist_signed_license(&self.license_dir, &success.license)
             .map_err(|_| license_store_failed())?;
 
         self.snapshot = LicenseSnapshot {
@@ -129,8 +136,7 @@ impl LicenseManager {
     }
 }
 
-fn inspect_saved_license(data_dir: &Path) -> LicenseSnapshot {
-    let license_dir = data_dir.join("license");
+fn inspect_saved_license(license_dir: &Path) -> LicenseSnapshot {
     let dir_metadata = match fs::symlink_metadata(&license_dir) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -263,11 +269,95 @@ fn production_verifying_key() -> Result<[u8; 32], ()> {
         .map_err(|_| ())
 }
 
-fn load_or_create_identity(data_dir: &Path) -> DesktopResult<DeviceIdentity> {
-    let license_dir = data_dir.join("license");
-    ensure_real_directory(data_dir).map_err(|_| device_identity_unavailable())?;
-    ensure_real_directory(&license_dir).map_err(|_| device_identity_unavailable())?;
-    match load_identity(&license_dir) {
+#[cfg(windows)]
+fn persistent_license_dir(data_dir: &Path) -> PathBuf {
+    data_dir
+        .parent()
+        .map(|parent| parent.join(WINDOWS_DEVICE_ACTIVATION_DIR_NAME))
+        .unwrap_or_else(|| data_dir.join("license"))
+}
+
+#[cfg(not(windows))]
+fn persistent_license_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("license")
+}
+
+#[cfg(windows)]
+fn migrate_legacy_license_if_needed(data_dir: &Path, license_dir: &Path) -> io::Result<()> {
+    if let Some(parent) = data_dir.parent() {
+        migrate_license_dir_if_needed(
+            &parent.join(WINDOWS_PREVIOUS_DEVICE_ACTIVATION_DIR_NAME),
+            license_dir,
+        )?;
+    }
+    migrate_license_dir_if_needed(&data_dir.join("license"), license_dir)
+}
+
+#[cfg(windows)]
+fn migrate_license_dir_if_needed(legacy_dir: &Path, license_dir: &Path) -> io::Result<()> {
+    if legacy_dir == license_dir {
+        return Ok(());
+    }
+
+    match fs::symlink_metadata(legacy_dir) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "legacy license state is not a real directory",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    }
+
+    let identity = read_optional_regular_file(
+        &legacy_dir.join(DEVICE_IDENTITY_FILE_NAME),
+        DEVICE_IDENTITY_MAX_BYTES,
+    )?;
+    let license =
+        read_optional_regular_file(&legacy_dir.join(LICENSE_FILE_NAME), LICENSE_FILE_MAX_BYTES)?;
+    let (Some(identity), Some(license)) = (identity, license) else {
+        return Ok(());
+    };
+
+    let existing_identity = read_optional_regular_file(
+        &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
+        DEVICE_IDENTITY_MAX_BYTES,
+    )?;
+    let existing_license =
+        read_optional_regular_file(&license_dir.join(LICENSE_FILE_NAME), LICENSE_FILE_MAX_BYTES)?;
+    ensure_license_directory(license_dir)?;
+    match (existing_identity, existing_license) {
+        (None, None) => {
+            crate::state::write_atomic_file(&license_dir.join(LICENSE_FILE_NAME), &license)?;
+            crate::state::write_atomic_file(
+                &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
+                &identity,
+            )?;
+        }
+        (Some(existing_identity), None) if existing_identity == identity => {
+            crate::state::write_atomic_file(&license_dir.join(LICENSE_FILE_NAME), &license)?;
+        }
+        (None, Some(existing_license)) if existing_license == license => {
+            crate::state::write_atomic_file(
+                &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
+                &identity,
+            )?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn migrate_legacy_license_if_needed(_data_dir: &Path, _license_dir: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn load_or_create_identity(license_dir: &Path) -> DesktopResult<DeviceIdentity> {
+    ensure_license_directory(license_dir).map_err(|_| device_identity_unavailable())?;
+    match load_identity(license_dir) {
         Ok(Some(identity)) => Ok(identity),
         Ok(None) => {
             let secret = generate_device_secret().map_err(|_| device_identity_unavailable())?;
@@ -326,7 +416,7 @@ fn persist_identity(license_dir: &Path, secret: &[u8; DEVICE_SECRET_BYTES]) -> i
     crate::state::write_atomic_file(&destination, &encoded)
 }
 
-fn persist_signed_license(data_dir: &Path, signed: &SignedLicense) -> io::Result<()> {
+fn persist_signed_license(license_dir: &Path, signed: &SignedLicense) -> io::Result<()> {
     let encoded = serde_json::to_vec_pretty(signed)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "license serialization failed"))?;
     if encoded.len() as u64 > LICENSE_FILE_MAX_BYTES {
@@ -335,9 +425,7 @@ fn persist_signed_license(data_dir: &Path, signed: &SignedLicense) -> io::Result
             "license exceeds bounded size",
         ));
     }
-    ensure_real_directory(data_dir)?;
-    let license_dir = data_dir.join("license");
-    ensure_real_directory(&license_dir)?;
+    ensure_license_directory(license_dir)?;
     let destination = license_dir.join(LICENSE_FILE_NAME);
     reject_non_file_destination(&destination)?;
     crate::state::write_atomic_file(&destination, &encoded)
@@ -353,6 +441,32 @@ fn reject_non_file_destination(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+fn ensure_license_directory(path: &Path) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "device activation directory has no parent",
+        )
+    })?;
+    ensure_real_directory(parent)?;
+    ensure_real_directory(path)
+}
+
+fn read_optional_regular_file(path: &Path, limit: u64) -> io::Result<Option<Vec<u8>>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "device activation source is not a bounded regular file",
+        ));
+    }
+    read_bounded_file(path, limit).map(Some)
 }
 
 fn ensure_real_directory(path: &Path) -> io::Result<()> {
@@ -503,7 +617,7 @@ fn license_store_failed() -> DesktopError {
     DesktopError::new(
         "license_store_failed",
         "CodexLink could not save local activation data",
-        "Check access to the CodexLink application data directory and retry.",
+        "Check access to the CodexLink device activation store and retry.",
     )
 }
 
@@ -646,6 +760,91 @@ mod tests {
                 .unwrap(),
             secret
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn device_activation_store_is_outside_bundle_app_data() {
+        let local = PathBuf::from(r"C:\Users\tester\AppData\Local");
+        let app_data = local.join("dev.codexlink.desktop");
+        assert_eq!(
+            persistent_license_dir(&app_data),
+            local.join(WINDOWS_DEVICE_ACTIVATION_DIR_NAME)
+        );
+        assert!(!persistent_license_dir(&app_data).starts_with(&app_data));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_bundle_license_payload_migrates_to_device_activation_store() {
+        let root = std::env::temp_dir().join(format!(
+            "codexlink-license-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let app_data = root.join("dev.codexlink.desktop");
+        let legacy = app_data.join("license");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join(DEVICE_IDENTITY_FILE_NAME), b"legacy-device").unwrap();
+        fs::write(legacy.join(LICENSE_FILE_NAME), b"legacy-license").unwrap();
+
+        let target = persistent_license_dir(&app_data);
+        migrate_legacy_license_if_needed(&app_data, &target).unwrap();
+        assert_eq!(
+            fs::read(target.join(DEVICE_IDENTITY_FILE_NAME)).unwrap(),
+            b"legacy-device"
+        );
+        assert_eq!(
+            fs::read(target.join(LICENSE_FILE_NAME)).unwrap(),
+            b"legacy-license"
+        );
+
+        fs::remove_dir_all(&app_data).unwrap();
+        assert_eq!(
+            fs::read(target.join(DEVICE_IDENTITY_FILE_NAME)).unwrap(),
+            b"legacy-device"
+        );
+        assert_eq!(
+            fs::read(target.join(LICENSE_FILE_NAME)).unwrap(),
+            b"legacy-license"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn previous_device_activation_store_migrates_to_codexlink_secret_key_store() {
+        let root = std::env::temp_dir().join(format!(
+            "codexlink-secret-key-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let app_data = root.join("dev.codexlink.desktop");
+        let previous = root.join(WINDOWS_PREVIOUS_DEVICE_ACTIVATION_DIR_NAME);
+        fs::create_dir_all(&previous).unwrap();
+        fs::write(previous.join(DEVICE_IDENTITY_FILE_NAME), b"previous-device").unwrap();
+        fs::write(previous.join(LICENSE_FILE_NAME), b"previous-license").unwrap();
+
+        let target = persistent_license_dir(&app_data);
+        migrate_legacy_license_if_needed(&app_data, &target).unwrap();
+        assert_eq!(target, root.join("CodexLinkSecretKey"));
+        assert_eq!(
+            fs::read(target.join(DEVICE_IDENTITY_FILE_NAME)).unwrap(),
+            b"previous-device"
+        );
+        assert_eq!(
+            fs::read(target.join(LICENSE_FILE_NAME)).unwrap(),
+            b"previous-license"
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

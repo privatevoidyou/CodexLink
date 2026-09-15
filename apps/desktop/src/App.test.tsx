@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   activity: vi.fn(),
   configureLocal: vi.fn(),
   activateLocalProject: vi.fn(),
+  removeLocalProject: vi.fn(),
   configureRemote: vi.fn(),
   startQuickShare: vi.fn(),
   stopQuickShare: vi.fn(),
@@ -25,6 +26,7 @@ const api = vi.hoisted(() => ({
   inspectProject: vi.fn(),
   getLaunchAtLogin: vi.fn(),
   setLaunchAtLogin: vi.fn(),
+  setUiLocale: vi.fn(),
 }));
 
 const clipboard = vi.hoisted(() => ({ writeText: vi.fn() }));
@@ -77,6 +79,12 @@ const readyState: DesktopState = {
     is_git_repository: true,
     runtime_project_id: "agent:desktop:repo",
   },
+  projects: [{
+    path: "C:\\fixture\\repo",
+    allowed_root: "C:\\fixture",
+    is_git_repository: true,
+    runtime_project_id: "agent:desktop:repo",
+  }],
   binaries: {
     directory: "C:\\fixture\\bin",
     version: "0.3.9",
@@ -107,6 +115,7 @@ const readyState: DesktopState = {
 
 const firstRunState: DesktopState = {
   license: { status: "activated" },
+  projects: [],
   readiness: {
     server: "unknown",
     runner: "unknown",
@@ -114,9 +123,9 @@ const firstRunState: DesktopState = {
     project: "none",
     runtime_ready: false,
     ready_for_chatgpt: false,
-    summary: "WebCodex Service needs attention",
+    summary: "CodexLink Service needs attention",
     summary_kind: "service_needs_attention",
-    next_action: "Start or reconnect the WebCodex Service.",
+    next_action: "Start or reconnect the CodexLink Service.",
     next_action_kind: "start_or_reconnect_service",
   },
   activity_sequence: 0,
@@ -160,9 +169,9 @@ function setupState(): DesktopState {
       project: "configured",
       runtime_ready: false,
       ready_for_chatgpt: false,
-      summary: "WebCodex Service needs attention",
+      summary: "CodexLink Service needs attention",
       summary_kind: "service_needs_attention",
-      next_action: "Start or reconnect the WebCodex Service.",
+      next_action: "Start or reconnect the CodexLink Service.",
       next_action_kind: "start_or_reconnect_service",
     },
     current_operation: null,
@@ -216,6 +225,7 @@ describe("semantic Desktop UI", () => {
     api.activity.mockResolvedValue([]);
     api.getLaunchAtLogin.mockResolvedValue(false);
     api.openPowerShellInstallGuide.mockResolvedValue(undefined);
+    api.setUiLocale.mockResolvedValue(undefined);
     api.activateLicense.mockResolvedValue(readyState);
     api.setLaunchAtLogin.mockImplementation(async (enabled: boolean) => enabled);
     api.resumeSavedRuntime.mockResolvedValue(readyState);
@@ -225,19 +235,18 @@ describe("semantic Desktop UI", () => {
     api.stopRegularTunnel.mockResolvedValue(readyState);
   });
 
-  it("shows device activation first and never resumes a saved runtime before activation", async () => {
+  it("shows device activation first, then bootstraps the local runtime only after activation", async () => {
     const unactivated: DesktopState = {
-      ...readyState,
+      ...firstRunState,
       license: { status: "not_activated" },
-      runtime_autostart: true,
     };
     const activated: DesktopState = {
       ...unactivated,
       license: { status: "activated" },
-      runtime_autostart: false,
     };
-    api.getState.mockResolvedValue(unactivated);
+    api.getState.mockResolvedValueOnce(unactivated).mockResolvedValueOnce(activated);
     api.activateLicense.mockResolvedValue(activated);
+    api.resumeSavedRuntime.mockResolvedValue(readyState);
 
     renderApp();
 
@@ -252,7 +261,28 @@ describe("semantic Desktop UI", () => {
 
     await waitFor(() => expect(api.activateLicense).toHaveBeenCalledWith("MYWS-ABCDE-12345-FGHIJ-67890"));
     await findHomeHeading();
-    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+    expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("localizes activation failures instead of showing backend English", async () => {
+    const unactivated: DesktopState = {
+      ...firstRunState,
+      license: { status: "not_activated" },
+    };
+    api.getState.mockResolvedValue(unactivated);
+    api.activateLicense.mockRejectedValue({
+      code: "activation_code_bound_elsewhere",
+      message: "This activation code is already bound to another device",
+      next_action: "Use the device that was first activated, or contact support.",
+    });
+
+    renderApp();
+    const input = await screen.findByLabelText("销售激活码");
+    fireEvent.change(input, { target: { value: "MYWS-ABCDE-12345-FGHIJ-67890" } });
+    fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("此激活码已绑定到另一台设备");
+    expect(screen.queryByText(/Use the device that was first activated/i)).not.toBeInTheDocument();
   });
 
   it("shows customer-level recovery without exposing licensing internals", async () => {
@@ -279,14 +309,14 @@ describe("semantic Desktop UI", () => {
     api.refresh.mockResolvedValue(stopped);
     renderApp();
     await findHomeHeading();
-    expect(screen.getByRole("status")).toHaveTextContent("已停止");
-    expect(screen.getByRole("button", { name: "启动" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^启动/ })).toBeEnabled();
+    expect(screen.queryByText("当前工作区")).not.toBeInTheDocument();
     expect(screen.queryByText(/运行环境正常/)).not.toBeInTheDocument();
     expect(screen.queryByText(/服务需要处理/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(api.refresh).toHaveBeenCalledOnce());
-    expect(screen.getByRole("status")).toHaveTextContent("已停止");
-    expect(screen.getByText("启动后继续")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^启动/ })).toBeEnabled();
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
   });
 
   it("shows the active Tunnel ID without exposing the Restricted Runtime Key", async () => {
@@ -354,16 +384,19 @@ describe("semantic Desktop UI", () => {
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
   });
 
-  it("shows the current project prominently and handles project picker errors", async () => {
+  it("shows authorized paths without inventing a primary workspace and handles picker errors", async () => {
     api.getState.mockResolvedValue(readyState);
     vi.mocked(open).mockRejectedValueOnce({ code: "project_invalid", message: "Picker unavailable", next_action: "Retry." });
     renderApp();
-    await screen.findByRole("heading", { level: 2, name: "repo" });
+    await findHomeHeading();
+    expect(screen.getByText("已授权 1 个本地路径供 ChatGPT App 访问。")).toBeInTheDocument();
+    expect(screen.queryByText("当前工作区")).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "查看项目" })[0]);
     expect(screen.getByRole("heading", { level: 1, name: "此电脑上的项目" })).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "选择其他项目" })[0]);
+    expect(screen.getByRole("heading", { level: 2, name: "repo" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /添加项目/ })[0]);
     expect(await screen.findByRole("alert")).toHaveTextContent("Picker unavailable");
-    expect(screen.getByRole("heading", { level: 1, name: "此电脑上的项目" })).toBeInTheDocument();
+    expect(api.activateLocalProject).not.toHaveBeenCalled();
     expect(api.configureLocal).not.toHaveBeenCalled();
   });
 
@@ -442,7 +475,7 @@ describe("semantic Desktop UI", () => {
     expect(screen.getByRole("main")).toHaveFocus();
   });
 
-  it("switches a local project in place while preserving an active Tunnel", async () => {
+  it("adds another authorized local path in place while preserving an active Tunnel", async () => {
     const tunneledState: DesktopState = {
       ...readyState,
       topology: { ...readyState.topology!, exposure: { kind: "open_ai_tunnel" } },
@@ -461,7 +494,11 @@ describe("semantic Desktop UI", () => {
       is_git_repository: true,
       runtime_project_id: "agent:desktop:next",
     };
-    const switched: DesktopState = { ...tunneledState, project: projectC };
+    const switched: DesktopState = {
+      ...tunneledState,
+      project: projectC,
+      projects: [...tunneledState.projects, projectC],
+    };
     api.getState.mockResolvedValue(tunneledState);
     api.observeChatgptActivity.mockResolvedValue(tunneledState);
     api.activateLocalProject.mockResolvedValue(switched);
@@ -469,32 +506,59 @@ describe("semantic Desktop UI", () => {
 
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
-    expect(screen.getByRole("heading", { level: 1, name: "此电脑上的项目" })).toBeInTheDocument();
-    expect(screen.getByRole("main")).toHaveFocus();
-    fireEvent.click(screen.getAllByRole("button", { name: "选择其他项目" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /添加项目/ })[0]);
 
     await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(projectC.path));
     expect(api.configureLocal).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 2, name: "repo" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "next" })).toBeInTheDocument();
     expect(screen.getByText(projectC.path)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /在此电脑使用 CodexLink/ })).not.toBeInTheDocument();
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
   });
 
-  it("adds a first local project directly without reopening topology choices", async () => {
-    const noProject: DesktopState = { ...readyState, project: null };
-    const configured = { ...readyState, project: readyState.project };
-    api.getState.mockResolvedValue(noProject);
-    api.observeChatgptActivity.mockResolvedValue(noProject);
-    api.configureLocal.mockResolvedValue(configured);
+  it("removes one authorized path through the Desktop backend instead of hiding only the card", async () => {
+    const secondProject = {
+      path: "D:\\Mina_UE",
+      allowed_root: "D:\\Mina_UE",
+      is_git_repository: true,
+      runtime_project_id: "agent:desktop:mina-ue",
+    };
+    const multiProject: DesktopState = {
+      ...readyState,
+      projects: [...readyState.projects, secondProject],
+    };
+    const afterRemoval: DesktopState = {
+      ...readyState,
+      projects: [...readyState.projects],
+    };
+    api.getState.mockResolvedValue(multiProject);
+    api.observeChatgptActivity.mockResolvedValue(multiProject);
+    api.removeLocalProject.mockResolvedValue(afterRemoval);
+
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: "项目" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Mina_UE" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "移除项目" })[1]);
+
+    await waitFor(() => expect(api.removeLocalProject).toHaveBeenCalledWith(secondProject.path));
+    expect(screen.queryByRole("heading", { level: 2, name: "Mina_UE" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "repo" })).toBeInTheDocument();
+  });
+
+  it("adds a first authorized path on an already-ready local runtime without reopening topology choices", async () => {
+    const noAuthorizedPaths: DesktopState = { ...readyState, projects: [] };
+    const configured: DesktopState = { ...readyState, projects: [readyState.project!] };
+    api.getState.mockResolvedValue(noAuthorizedPaths);
+    api.observeChatgptActivity.mockResolvedValue(noAuthorizedPaths);
+    api.activateLocalProject.mockResolvedValue(configured);
     vi.mocked(open).mockResolvedValue(readyState.project!.path);
 
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
     fireEvent.click(screen.getAllByRole("button", { name: /添加项目/ })[0]);
 
-    await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(readyState.project!.path));
-    expect(api.activateLocalProject).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(readyState.project!.path));
+    expect(api.configureLocal).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /连接现有 Server/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /快速共享项目/ })).not.toBeInTheDocument();
   });
@@ -513,7 +577,7 @@ describe("semantic Desktop UI", () => {
       preferred_connection: "open_ai_tunnel",
     };
     const projectC = { ...readyState.project!, path: "C:\\work\\legacy", allowed_root: "C:\\work\\legacy" };
-    const switched: DesktopState = { ...tunneledState, project: projectC };
+    const switched: DesktopState = { ...tunneledState, project: projectC, projects: [...tunneledState.projects, projectC] };
     api.getState.mockResolvedValue(tunneledState);
     api.observeChatgptActivity.mockResolvedValue(tunneledState);
     api.activateLocalProject.mockRejectedValue({
@@ -526,12 +590,11 @@ describe("semantic Desktop UI", () => {
 
     renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "项目" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "选择其他项目" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /添加项目/ })[0]);
 
     await waitFor(() => expect(api.activateLocalProject).toHaveBeenCalledWith(projectC.path));
     await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(projectC.path));
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
-    expect(screen.getByText("Tunnel 已就绪，等待 ChatGPT")).toBeInTheDocument();
   });
 
   it("does not start a duplicate Tunnel when local setup runs while one is already active", async () => {
@@ -553,7 +616,7 @@ describe("semantic Desktop UI", () => {
 
     renderApp();
     await findHomeHeading();
-    fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     expect(screen.queryByRole("checkbox", { name: "配置完成后连接 ChatGPT" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
@@ -585,26 +648,52 @@ describe("semantic Desktop UI", () => {
     expect(screen.getByText("Tunnel 凭据已配置")).toBeInTheDocument();
   });
 
-  it("marks ChatGPT ready only after a real observed call over a ready Secure Link", async () => {
-    const observed: DesktopState = {
+  it("marks ChatGPT accessible when the verified Secure Link is ready without requiring observed activity", async () => {
+    const accessible: DesktopState = {
       ...readyState,
       regular_tunnel: { provider: "openai", status: "ready", clipboard_state: "unavailable", clipboard_contains: "tunnel_id", ready_for_chatgpt: true },
-      chatgpt_activity: { observed: true, last_meaningful_activity_at_ms: 1_234 },
+      chatgpt_activity: null,
     };
-    api.getState.mockResolvedValue(observed);
-    api.refresh.mockResolvedValue(observed);
-    api.observeChatgptActivity.mockResolvedValue(observed);
+    api.getState.mockResolvedValue(accessible);
+    api.refresh.mockResolvedValue(accessible);
+    api.observeChatgptActivity.mockResolvedValue(accessible);
     renderApp();
 
     await findHomeHeading();
     expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
-    const chatgptStep = screen.getByRole("listitem", { name: "ChatGPT 已访问" });
-    expect(chatgptStep).toHaveClass("complete");
-    expect(screen.getByText("连接已建立")).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "ChatGPT 可访问" })).toHaveClass("complete");
+    expect(screen.getAllByText("ChatGPT 可访问").length).toBeGreaterThan(0);
   });
 
-  it("does not equate a ready Secure Link with observed ChatGPT access", async () => {
+  it("keeps the connection path healthy with zero authorized projects and guides the user to add one", async () => {
+    const connectedWithoutProjects: DesktopState = {
+      ...readyState,
+      projects: [],
+      regular_tunnel: { provider: "openai", status: "ready", clipboard_state: "unavailable", clipboard_contains: "tunnel_id", ready_for_chatgpt: true },
+      chatgpt_activity: null,
+    };
+    api.getState.mockResolvedValue(connectedWithoutProjects);
+    api.refresh.mockResolvedValue(connectedWithoutProjects);
+    api.observeChatgptActivity.mockResolvedValue(connectedWithoutProjects);
+    renderApp();
+
+    await findHomeHeading();
+    expect(screen.getByRole("listitem", { name: "本机" })).toHaveClass("ready");
+    expect(screen.getByRole("listitem", { name: "Engine" })).toHaveClass("ready");
+    expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
+    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
+    const nextActions = screen.getByRole("heading", { level: 2, name: "接下来做什么" }).closest("section") as HTMLElement | null;
+    expect(nextActions).not.toBeNull();
+    expect(within(nextActions!).getByRole("button", { name: /^添加项目/ })).toBeEnabled();
+    const systemStatus = screen.getByRole("heading", { level: 2, name: "系统状态" }).closest("section");
+    expect(systemStatus).not.toBeNull();
+    const chatgptStatus = within(systemStatus!).getByText("ChatGPT 连接").closest(".system-status-line") as HTMLElement | null;
+    expect(chatgptStatus).not.toBeNull();
+    expect(within(chatgptStatus!).getByText("已连接")).toBeInTheDocument();
+  });
+
+  it("treats a verified ready Secure Link as customer-facing ChatGPT accessibility", async () => {
     const linkReady: DesktopState = {
       ...readyState,
       regular_tunnel: { provider: "openai", status: "ready", clipboard_state: "unavailable", clipboard_contains: "tunnel_id", ready_for_chatgpt: true },
@@ -617,13 +706,12 @@ describe("semantic Desktop UI", () => {
 
     await findHomeHeading();
     expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
-    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("pending");
+    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
-    expect(screen.getByText("等待 ChatGPT")).toBeInTheDocument();
-    expect(screen.getByRole("listitem", { name: "ChatGPT 已访问" })).toHaveClass("pending");
+    expect(screen.getByRole("listitem", { name: "ChatGPT 可访问" })).toHaveClass("complete");
   });
 
-  it("rechecks ChatGPT use when the user returns to an already-open Desktop", async () => {
+  it("keeps ChatGPT activity observation as background evidence when the user returns", async () => {
     vi.useFakeTimers();
     try {
       const observed: DesktopState = {
@@ -658,7 +746,7 @@ describe("semantic Desktop UI", () => {
       });
 
       expect(api.observeChatgptActivity).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
+      expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("pending");
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
@@ -737,22 +825,42 @@ describe("semantic Desktop UI", () => {
     await waitFor(() => expect(launchAtLogin).toBeChecked());
   });
 
-  it("keeps a fresh Desktop on the direct local-project path without exposing topology choices", async () => {
-    api.getState.mockResolvedValue(firstRunState);
+  it("bootstraps a fresh activated Desktop on its internal runtime anchor without asking for a user path", async () => {
+    const freshWithoutTunnel: DesktopState = {
+      ...firstRunState,
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+    };
+    const bootstrapped: DesktopState = {
+      ...readyState,
+      projects: [],
+      openai_tunnel_configured: false,
+      openai_tunnel_config: freshWithoutTunnel.openai_tunnel_config,
+      preferred_connection: "no_chat_gpt",
+    };
+    api.getState.mockResolvedValue(freshWithoutTunnel);
+    api.resumeSavedRuntime.mockResolvedValue(bootstrapped);
     renderApp();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "选择文件夹" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /连接现有 Server/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /快速共享项目/ })).not.toBeInTheDocument();
+    await findHomeHeading();
+    expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
     expect(api.configureLocal).not.toHaveBeenCalled();
-    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+    expect(api.startRegularTunnel).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "项目" }));
+    expect(await screen.findByText("0")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /添加项目/ }).every((button) => !button.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("guides Windows users to PowerShell 7 without blocking the 5.1 fallback", async () => {
+  it("keeps PowerShell guidance available only in the explicit local setup flow", async () => {
     const missingPwsh: DesktopState = {
-      ...firstRunState,
+      ...readyState,
       powershell_runtime: {
         pwsh_available: false,
         windows_powershell_available: true,
@@ -767,71 +875,40 @@ describe("semantic Desktop UI", () => {
     };
     api.getState.mockResolvedValueOnce(missingPwsh).mockResolvedValueOnce(detectedPwsh);
     renderApp();
+    await findHomeHeading();
+    expect(screen.queryByText("建议安装 PowerShell 7")).not.toBeInTheDocument();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
+    fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     fireEvent.click(screen.getByText("诊断"));
     const guidance = screen.getByText("建议安装 PowerShell 7").closest("article");
     expect(guidance).not.toBeNull();
     expect(guidance).toHaveTextContent("Windows PowerShell 5.1");
     expect(guidance).toHaveTextContent("winget install --id Microsoft.PowerShell --source winget");
-    expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeDisabled();
-
-    vi.mocked(open).mockResolvedValue(readyState.project!.path);
-    api.inspectProject.mockResolvedValue(readyState.project);
-    fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "配置 CodexLink" })).toBeEnabled());
 
     fireEvent.click(within(guidance!).getByRole("button", { name: "打开 Microsoft 安装说明" }));
     await waitFor(() => expect(api.openPowerShellInstallGuide).toHaveBeenCalledTimes(1));
     fireEvent.click(within(guidance!).getByRole("button", { name: "重新检测" }));
     await waitFor(() => expect(screen.queryByText("建议安装 PowerShell 7")).not.toBeInTheDocument());
-    expect(api.configureLocal).not.toHaveBeenCalled();
   });
 
-  it("keeps first-run errors and the selected project through intermediate polling and setup retry", async () => {
-    vi.useFakeTimers();
-    try {
-      const setupResult = deferred<DesktopState>();
-      api.getState.mockResolvedValue(firstRunState);
-      api.configureLocal.mockReturnValueOnce(setupResult.promise).mockResolvedValue(readyState);
-      vi.mocked(open).mockResolvedValue(readyState.project!.path);
-      api.inspectProject.mockResolvedValue(readyState.project);
-      const view = renderApp();
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "选择文件夹" }));
-      await act(async () => {});
-      fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
-      expect(api.configureLocal).toHaveBeenCalledWith(readyState.project!.path);
+  it("keeps a fresh internal-runtime bootstrap failure visible without forcing a project choice", async () => {
+    const bootstrapError = {
+      code: "server_unreachable",
+      message: "CodexLink Service did not become ready",
+      next_action: "Retry the local runtime.",
+    };
+    api.getState.mockResolvedValue(firstRunState);
+    api.resumeSavedRuntime.mockRejectedValueOnce(bootstrapError).mockResolvedValueOnce(readyState);
+    renderApp();
 
-      api.getState.mockResolvedValue(localSetupOperationState());
-      await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
-      expect(screen.getByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "更改文件夹" })).toBeDisabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("server_unreachable");
+    expect(api.configureLocal).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "选择文件夹" })).not.toBeInTheDocument();
 
-      api.getState.mockResolvedValue(setupState());
-      await act(async () => {
-        setupResult.reject({ code: "project_not_loaded", message: "Project failed", next_action: "Retry." });
-        await vi.advanceTimersByTimeAsync(1_000);
-      });
-      expect(screen.getByRole("alert")).toHaveTextContent("project_not_loaded");
-      fireEvent.click(screen.getByRole("button", { name: "重新激活项目" }));
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(api.configureLocal).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole("heading", { level: 1, name: /一切就绪|再完成一步即可使用/ })).toBeInTheDocument();
-      expect(api.startRegularTunnel).not.toHaveBeenCalled();
-      view.unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
+    expect(api.configureLocal).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "其他配置方式" })).toBeEnabled();
   });
 
   it("shows an initial status failure and retries the complete fresh-start bootstrap", async () => {
@@ -860,9 +937,9 @@ describe("semantic Desktop UI", () => {
     await act(async () => {
       retryState.resolve(firstRunState);
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "在此电脑配置 CodexLink" })).toBeInTheDocument();
+    await findHomeHeading();
     expect(api.configureLocal).not.toHaveBeenCalled();
-    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+    expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -903,12 +980,12 @@ describe("semantic Desktop UI", () => {
     api.refresh.mockResolvedValue(setupState);
     api.resumeSavedRuntime.mockRejectedValue({
       code: "server_unreachable",
-      message: "WebCodex Service did not become ready",
+      message: "CodexLink Service did not become ready",
       next_action: "Check diagnostics.",
     });
 
     renderApp();
-    const submit = await screen.findByRole("button", { name: "启动" });
+    const submit = await screen.findByRole("button", { name: /^启动/ });
     fireEvent.click(submit);
 
     const alert = await screen.findByRole("alert");
@@ -927,7 +1004,7 @@ describe("semantic Desktop UI", () => {
       .mockResolvedValueOnce(readyState);
     renderApp();
     await findHomeHeading();
-    fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
 
@@ -1034,7 +1111,7 @@ describe("semantic Desktop UI", () => {
         await Promise.resolve();
       });
 
-      fireEvent.click(screen.getByRole("button", { name: "启动" }));
+      fireEvent.click(screen.getByRole("button", { name: /^启动/ }));
       expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
 
       await act(async () => {
@@ -1132,7 +1209,7 @@ describe("semantic Desktop UI", () => {
     }
   });
 
-  it("never promotes a locally ready Regular Tunnel to ChatGPT-observed state", async () => {
+  it("drops ChatGPT accessibility immediately when a verified Regular Tunnel degrades", async () => {
     vi.useFakeTimers();
     try {
       const locallyReadyTunnel: DesktopState = {
@@ -1181,7 +1258,7 @@ describe("semantic Desktop UI", () => {
       });
 
       expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
-      expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("pending");
+      expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
       expect(api.getState).toHaveBeenCalledTimes(1);
 
       await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
@@ -1199,6 +1276,81 @@ describe("semantic Desktop UI", () => {
     }
   });
 
+  it("automatically repairs a remembered Tunnel that drops after launch", async () => {
+    vi.useFakeTimers();
+    try {
+      const connected: DesktopState = {
+        ...readyState,
+        topology: { ...readyState.topology!, exposure: { kind: "open_ai_tunnel" } },
+        runtime_autostart: true,
+        preferred_connection: "open_ai_tunnel",
+        readiness: {
+          ...readyState.readiness,
+          exposure: "local_ready",
+          ready_for_chatgpt: true,
+          summary: "Ready to use with ChatGPT",
+          summary_kind: "ready_for_chat_gpt",
+          next_action: null,
+          next_action_kind: null,
+        },
+        regular_tunnel: {
+          provider: "openai",
+          status: "ready",
+          clipboard_state: "copied",
+          clipboard_contains: "tunnel_id",
+          ready_for_chatgpt: true,
+        },
+      };
+      const failedTunnel: DesktopState = {
+        ...connected,
+        readiness: {
+          ...connected.readiness,
+          exposure: "error",
+          ready_for_chatgpt: false,
+          summary: "ChatGPT connection is not verified",
+          summary_kind: "connection_unverified",
+          next_action: "Restart the secure tunnel.",
+          next_action_kind: "restart_secure_tunnel",
+        },
+        regular_tunnel: {
+          ...connected.regular_tunnel!,
+          status: "error",
+          ready_for_chatgpt: false,
+        },
+      };
+
+      api.getState
+        .mockResolvedValueOnce(connected)
+        .mockResolvedValueOnce(failedTunnel)
+        .mockResolvedValue(connected);
+      api.resumeSavedRuntime
+        .mockResolvedValueOnce(connected)
+        .mockResolvedValueOnce(failedTunnel);
+      api.startRegularTunnel.mockResolvedValue(connected);
+
+      const view = renderApp();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
+      expect(api.startRegularTunnel).toHaveBeenCalledTimes(0);
+      api.resumeSavedRuntime.mockClear();
+      api.startRegularTunnel.mockClear();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+      expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
+      expect(api.startRegularTunnel).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
+      expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
+
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps regular tunnel controls off a remote Server connection page", async () => {
     const remote: DesktopState = {
       ...readyState,
@@ -1209,6 +1361,7 @@ describe("semantic Desktop UI", () => {
         exposure: { kind: "existing_https", url: "https://server.example.test" },
         enrollment: { kind: "managed_pairing" },
       },
+      runtime_autostart: false,
       readiness: {
         ...readyState.readiness,
         exposure: "unknown",
@@ -1223,7 +1376,7 @@ describe("semantic Desktop UI", () => {
     await findHomeHeading();
 
     fireEvent.click(screen.getByRole("button", { name: "连接" }));
-    expect(await screen.findByRole("heading", { level: 2, name: "远程 WebCodex Server" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 2, name: "远程 CodexLink Server" })).toBeInTheDocument();
     expect(screen.getByText("由远程 Server 管理")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "启动安全隧道" })).not.toBeInTheDocument();
   });
@@ -1294,7 +1447,7 @@ describe("semantic Desktop UI", () => {
     renderApp();
     await findHomeHeading();
 
-    fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
     expect(screen.getByText("将复用现有连接")).toBeInTheDocument();
     expect(screen.queryByLabelText("一次性登录码")).not.toBeInTheDocument();
@@ -1342,7 +1495,7 @@ describe("semantic Desktop UI", () => {
     api.configureRemote
       .mockRejectedValueOnce({
         code: "pairing_code_invalid",
-        message: "The saved Runner identity is not reusable and no new WebCodex pairing code was provided",
+        message: "The saved Runner identity is not reusable and no new CodexLink pairing code was provided",
         next_action: "Refresh this Runner connection with a new code.",
       })
       .mockResolvedValueOnce({
@@ -1353,7 +1506,7 @@ describe("semantic Desktop UI", () => {
     renderApp();
     await findHomeHeading();
 
-    fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
     fireEvent.click(screen.getByRole("button", { name: "更改文件夹" }));
     await waitFor(() => expect(api.inspectProject).toHaveBeenCalledWith(projectB.path));
@@ -1384,7 +1537,7 @@ describe("semantic Desktop UI", () => {
     renderApp();
     await findHomeHeading();
 
-    fireEvent.click(screen.getByRole("button", { name: "更改运行方式" }));
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
 
     expect(await screen.findByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();

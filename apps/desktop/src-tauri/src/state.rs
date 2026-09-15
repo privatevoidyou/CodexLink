@@ -99,8 +99,44 @@ impl AppState {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        if snapshot.regular_tunnel.is_some() {
-            if let Ok(mut supervisor) = self.supervisor.try_lock() {
+        if let Ok(mut supervisor) = self.supervisor.try_lock() {
+            let managed_local_runtime = snapshot.runtime_autostart
+                && snapshot.topology.as_ref().is_some_and(|topology| {
+                    topology.experience == Experience::Full
+                        && matches!(topology.server, ServerTopology::Local)
+                });
+            if managed_local_runtime {
+                let server_stopped =
+                    supervisor
+                        .snapshot(ProcessKind::LocalServer)
+                        .is_some_and(|process| {
+                            matches!(process.phase, ProcessPhase::Exited | ProcessPhase::Failed)
+                        });
+                let runner_stopped =
+                    supervisor
+                        .snapshot(ProcessKind::LocalRunner)
+                        .is_some_and(|process| {
+                            matches!(process.phase, ProcessPhase::Exited | ProcessPhase::Failed)
+                        });
+                if server_stopped || runner_stopped {
+                    snapshot.readiness = aggregate_readiness(
+                        if server_stopped {
+                            ServerReadiness::Stopped
+                        } else {
+                            snapshot.readiness.server.clone()
+                        },
+                        if runner_stopped {
+                            RunnerReadiness::Stopped
+                        } else {
+                            snapshot.readiness.runner.clone()
+                        },
+                        snapshot.readiness.exposure.clone(),
+                        snapshot.readiness.project.clone(),
+                    );
+                }
+            }
+
+            if snapshot.regular_tunnel.is_some() {
                 let active =
                     supervisor
                         .snapshot(ProcessKind::RegularTunnel)
@@ -294,6 +330,18 @@ impl AppState {
         let result = core
             .activate_local_project(project_path, &cancellation)
             .await;
+        self.finish_operation(operation, cancellation, core, baseline, result)
+            .await
+    }
+
+    pub async fn remove_local_project(
+        &self,
+        project_path: &str,
+    ) -> DesktopResult<DesktopStateSnapshot> {
+        let (operation, cancellation, mut core, baseline) = self
+            .begin_operation(DesktopOperationKind::LocalProjectRemove, true)
+            .await?;
+        let result = core.remove_local_project(project_path, &cancellation).await;
         self.finish_operation(operation, cancellation, core, baseline, result)
             .await
     }
@@ -545,6 +593,7 @@ fn operation_requires_license(kind: DesktopOperationKind) -> bool {
         kind,
         DesktopOperationKind::LocalSetup
             | DesktopOperationKind::LocalProjectActivate
+            | DesktopOperationKind::LocalProjectRemove
             | DesktopOperationKind::RemoteSetup
             | DesktopOperationKind::QuickShareStart
             | DesktopOperationKind::RegularTunnelStart
@@ -626,7 +675,8 @@ impl DesktopCore {
         let activity = ActivityLog::default();
         let default_project_dir = default_management_project_dir(&data_dir, &resource_dir);
         let config_path = data_dir.join("desktop-state.json");
-        let config = load_config(&config_path, &activity)?;
+        let mut config = load_config(&config_path, &activity)?;
+        migrate_legacy_authorized_projects(&mut config, &default_project_dir, &resource_dir);
         let secrets_dir = data_dir.join("secrets");
         let tunnel_config = TunnelConfig::load(
             config.openai_tunnel_id.clone(),
@@ -636,12 +686,13 @@ impl DesktopCore {
         let mut snapshot = DesktopStateSnapshot::default();
         snapshot.topology = config.topology.clone();
         snapshot.project = project_snapshot(&config);
+        snapshot.projects = projects_snapshot(&config);
         if config.topology.is_some() && config.runtime_autostart == Some(false) {
             snapshot.readiness = aggregate_readiness(
                 ServerReadiness::Stopped,
                 RunnerReadiness::Stopped,
                 ExposureReadiness::Disabled,
-                if config.project.is_some() {
+                if runtime_identity_project(&config).is_some() {
                     ProjectReadiness::Configured
                 } else {
                     ProjectReadiness::None
@@ -673,6 +724,8 @@ impl DesktopCore {
         apply_openai_tunnel_configuration(&mut self.snapshot, &self.tunnel_config);
         self.snapshot.regular_tunnel_available = true;
         apply_config_projection(&mut self.snapshot, &self.config);
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.projects = projects_snapshot(&self.config);
         if let Some(proxy) = self.resolved_tunnel_proxy.as_ref() {
             apply_resolved_tunnel_proxy_projection(&mut self.snapshot, &self.config, proxy);
         }
@@ -887,6 +940,8 @@ impl DesktopCore {
         self.snapshot.regular_tunnel_available = true;
         self.snapshot.powershell_runtime = crate::platform::powershell_runtime_snapshot();
         apply_config_projection(&mut self.snapshot, &self.config);
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.projects = projects_snapshot(&self.config);
         let snapshot = self.snapshot.clone();
         *self
             .published
@@ -997,29 +1052,22 @@ impl DesktopCore {
     ) -> DesktopResult<DesktopStateSnapshot> {
         cancellation.check()?;
         let Some(topology) = self.config.topology.clone() else {
-            return self.get_state().await;
+            return self.configure_local_setup(None, cancellation).await;
         };
         if topology.experience != Experience::Full {
             return self.get_state().await;
         }
-        let project_path = self
-            .config
-            .project
-            .as_ref()
-            .map(|project| project.path.clone());
         match topology.server {
-            ServerTopology::Local => {
-                self.configure_local_setup(project_path.as_deref(), cancellation)
-                    .await
-            }
+            ServerTopology::Local => self.configure_local_setup(None, cancellation).await,
             ServerTopology::Remote { url } => {
-                let project_path = project_path.ok_or_else(|| {
-                    DesktopError::new(
-                        "project_not_ready",
-                        "The saved remote Desktop runtime no longer has a project selection",
-                        "Choose a project or change the Desktop runtime setup.",
-                    )
-                })?;
+                let project_path =
+                    customer_authorized_anchor_path(&self.config).ok_or_else(|| {
+                        DesktopError::new(
+                            "project_not_ready",
+                            "The saved remote Desktop runtime no longer has a project selection",
+                            "Choose a project or change the Desktop runtime setup.",
+                        )
+                    })?;
                 self.configure_remote_setup(&url, "", &project_path, cancellation)
                     .await
             }
@@ -1108,16 +1156,7 @@ impl DesktopCore {
         let previous_snapshot = self.snapshot.clone();
         let mut committed_project = project;
         committed_project.runtime_project_id = Some(identity.runtime_project_id.clone());
-        let runtime = self.config.runtime.as_mut().ok_or_else(|| {
-            DesktopError::new(
-                "runtime_not_ready",
-                "The local runtime disappeared during project activation",
-                "Restore the local runtime, then choose the project again.",
-            )
-        })?;
-        runtime.project_id = Some(identity.project_id);
-        runtime.runtime_project_id = Some(identity.runtime_project_id);
-        self.config.project = Some(committed_project.clone());
+        upsert_authorized_project(&mut self.config, committed_project.clone());
         if let Err(error) = self.save_config().await {
             self.config = previous_config;
             self.snapshot = previous_snapshot;
@@ -1134,7 +1173,6 @@ impl DesktopCore {
                 .unwrap_or_default()
                 .to_string_lossy(),
         );
-        self.snapshot.project = Some(committed_project);
         self.snapshot.chatgpt_activity = None;
         self.snapshot.readiness = aggregate_readiness(
             self.snapshot.readiness.server.clone(),
@@ -1145,37 +1183,81 @@ impl DesktopCore {
         self.get_state().await
     }
 
+    pub async fn remove_local_project(
+        &mut self,
+        project_path: &str,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<DesktopStateSnapshot> {
+        cancellation.check()?;
+        let project = self
+            .config
+            .projects
+            .iter()
+            .find(|project| project_paths_equal(&project.path, project_path))
+            .cloned()
+            .ok_or_else(|| {
+                DesktopError::new(
+                    "project_not_registered",
+                    "This local path is not currently authorized for CodexLink",
+                    "Refresh the Projects page and retry.",
+                )
+            })?;
+        let identity = identity_from_config(&self.config).ok_or_else(|| {
+            DesktopError::new(
+                "runtime_not_ready",
+                "The saved local Runner identity is incomplete",
+                "Restore the local runtime before removing project access.",
+            )
+        })?;
+
+        if let Err(error) = self
+            .adapter
+            .remove_project(&identity, &project, cancellation)
+            .await
+        {
+            self.stop_process(ProcessKind::RegularTunnel).await;
+            self.snapshot.regular_tunnel = None;
+            self.stop_process(ProcessKind::LocalRunner).await;
+            return Err(error);
+        }
+        cancellation.check()?;
+
+        remove_authorized_project(&mut self.config, &project.path);
+        self.save_config().await?;
+        self.activity.push(
+            ActivityEventKind::ProjectActivated,
+            "desktop",
+            ActivityLevel::Info,
+            format!("Removed local project access: {}", project.path),
+        );
+        self.get_state().await
+    }
+
     pub async fn configure_local_setup(
         &mut self,
         project_path: Option<&str>,
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
         cancellation.check()?;
-        let project = match project_path.map(str::trim).filter(|path| !path.is_empty()) {
-            Some(path) => self.adapter.inspect_project(path).await?,
-            None => {
-                tokio::fs::create_dir_all(&self.default_project_dir)
-                    .await
-                    .map_err(|error| {
-                        DesktopError::new(
-                            "default_project_unavailable",
-                            "Desktop could not prepare its default management project",
-                            "Check that the CodexLink install directory is writable, or choose another project from Change runtime mode.",
-                        )
-                        .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
-                    })?;
-                let mut project = self
-                    .adapter
-                    .inspect_project(&self.default_project_dir.to_string_lossy())
-                    .await?;
-                // The automatically registered management project should not
-                // also grant authority to register sibling installation folders.
-                // Equality is a valid allowed-root boundary, so keep this
-                // implicit setup scoped to the installation directory itself.
-                project.allowed_root = project.path.clone();
-                project
-            }
-        };
+        let requested_user_project = project_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(str::to_string);
+        tokio::fs::create_dir_all(&self.default_project_dir)
+            .await
+            .map_err(|error| {
+                DesktopError::new(
+                    "default_project_unavailable",
+                    "Desktop could not prepare its internal runtime anchor",
+                    "Check the current-user app-data permissions and retry.",
+                )
+                .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
+            })?;
+        let mut project = self
+            .adapter
+            .inspect_project(&self.default_project_dir.to_string_lossy())
+            .await?;
+        project.allowed_root = project.path.clone();
         cancellation.check()?;
         let binaries = self.adapter.ensure_binaries(cancellation).await?.clone();
         self.snapshot.binaries = Some(binaries.info());
@@ -1183,7 +1265,7 @@ impl DesktopCore {
             ActivityEventKind::LocalSetupPreparing,
             "desktop",
             ActivityLevel::Info,
-            "Preparing WebCodex on this computer",
+            "Preparing CodexLink on this computer",
         );
         self.snapshot.topology = Some(RuntimeTopology {
             experience: Experience::Full,
@@ -1250,7 +1332,7 @@ impl DesktopCore {
             if server_deadline.is_elapsed() {
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -1443,7 +1525,7 @@ impl DesktopCore {
                         RunnerReadiness::Stopped,
                         exposure_readiness(self.config.topology.as_ref()),
                         self.config
-                            .project
+                            .runtime_anchor
                             .as_ref()
                             .map(|_| ProjectReadiness::Configured)
                             .unwrap_or(ProjectReadiness::None),
@@ -1454,14 +1536,16 @@ impl DesktopCore {
             }
         };
 
-        // Commit the visible/saved project only after the new Runner and exact
-        // project have both reached readiness. Until this point the previous
-        // stored project remains the recovery authority.
+        // Commit the internal runtime anchor only after the owned Runner and
+        // anchor project have both reached readiness. Customer-authorized roots
+        // are stored independently in `projects[]` and never replace this
+        // identity.
         let previous_config = self.config.clone();
-        let mut committed_project = project.clone();
-        committed_project.runtime_project_id = Some(identity.runtime_project_id.clone());
+        let mut committed_anchor = project.clone();
+        committed_anchor.runtime_project_id = Some(identity.runtime_project_id.clone());
         self.config.topology = self.snapshot.topology.clone();
-        self.config.project = Some(committed_project.clone());
+        self.config.runtime_anchor = Some(committed_anchor.clone());
+        self.config.project = None;
         self.config.runtime_autostart = Some(true);
         self.config.runtime = Some(StoredRuntime {
             server_url: identity.server_url.clone(),
@@ -1503,7 +1587,7 @@ impl DesktopCore {
                 },
                 ExposureReadiness::Disabled,
                 self.config
-                    .project
+                    .runtime_anchor
                     .as_ref()
                     .map(|_| ProjectReadiness::Configured)
                     .unwrap_or(ProjectReadiness::None),
@@ -1511,20 +1595,107 @@ impl DesktopCore {
             self.publish_snapshot();
             return Err(error);
         }
-        self.snapshot.project = Some(committed_project);
+
+        self.snapshot.project = Some(committed_anchor);
         self.snapshot.readiness = aggregate_readiness(
             ServerReadiness::Ready,
             RunnerReadiness::Ready,
             ExposureReadiness::LocalReady,
             ProjectReadiness::Ready,
         );
+
+        if identity_replaced || requested_user_project.is_some() {
+            self.reconcile_authorized_projects(
+                &identity,
+                &runner_client_id,
+                requested_user_project.as_deref(),
+                identity_replaced,
+                cancellation,
+            )
+            .await?;
+            self.save_config().await?;
+        }
+
         self.activity.push(
             ActivityEventKind::LocalRuntimeReady,
             "desktop",
             ActivityLevel::Info,
-            "Local WebCodex runtime is ready",
+            "Local CodexLink runtime is ready",
         );
         self.get_state().await
+    }
+
+    async fn reconcile_authorized_projects(
+        &mut self,
+        anchor_identity: &ProjectRuntimeIdentity,
+        runner_client_id: &str,
+        requested_user_project: Option<&str>,
+        authority_rebuilt_from_anchor: bool,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<()> {
+        let mut paths = self
+            .config
+            .projects
+            .iter()
+            .map(|project| project.path.clone())
+            .collect::<Vec<_>>();
+        if let Some(requested) = requested_user_project {
+            if !paths
+                .iter()
+                .any(|path| project_paths_equal(path, requested))
+            {
+                paths.push(requested.to_string());
+            }
+        }
+
+        let mut reconciled = Vec::with_capacity(paths.len());
+        for path in paths {
+            cancellation.check()?;
+            let project = match self.adapter.inspect_project(&path).await {
+                Ok(project) => project,
+                Err(error)
+                    if requested_user_project
+                        .is_some_and(|requested| project_paths_equal(requested, &path)) =>
+                {
+                    return Err(error);
+                }
+                Err(_) if authority_rebuilt_from_anchor => {
+                    self.activity.push(
+                        ActivityEventKind::ProjectActivated,
+                        "desktop",
+                        ActivityLevel::Warning,
+                        format!("Dropped unavailable legacy project authorization: {path}"),
+                    );
+                    continue;
+                }
+                Err(_) => {
+                    if let Some(existing) = self
+                        .config
+                        .projects
+                        .iter()
+                        .find(|existing| project_paths_equal(&existing.path, &path))
+                        .cloned()
+                    {
+                        reconciled.push(existing);
+                    }
+                    continue;
+                }
+            };
+            let activated = self
+                .adapter
+                .activate_project(anchor_identity, runner_client_id, &project, cancellation)
+                .await?;
+            self.wait_for_project(&activated, cancellation).await?;
+            let mut committed = project;
+            committed.runtime_project_id = Some(activated.runtime_project_id);
+            if !reconciled.iter().any(|existing: &ProjectSelection| {
+                project_paths_equal(&existing.path, &committed.path)
+            }) {
+                reconciled.push(committed);
+            }
+        }
+        self.config.projects = reconciled;
+        Ok(())
     }
 
     pub async fn configure_remote_setup(
@@ -1575,7 +1746,7 @@ impl DesktopCore {
             ActivityEventKind::RemoteConnecting,
             "desktop",
             ActivityLevel::Info,
-            "Connecting this computer to the existing WebCodex Server",
+            "Connecting this computer to the existing CodexLink Server",
         );
         self.publish_snapshot();
 
@@ -1603,7 +1774,7 @@ impl DesktopCore {
                 if !pairing_code.starts_with("wc_pair_") {
                     return Err(DesktopError::new(
                             "pairing_code_invalid",
-                            "The saved Runner identity is not reusable and no new WebCodex pairing code was provided",
+                            "The saved Runner identity is not reusable and no new CodexLink pairing code was provided",
                             "Refresh this Runner connection with a new wc_pair_… code.",
                         ));
                 }
@@ -1656,7 +1827,7 @@ impl DesktopCore {
                 if server_deadline.is_elapsed() {
                     return Err(readiness_timeout_error(
                         "server_unreachable",
-                        "The existing WebCodex Server did not respond before the readiness deadline",
+                        "The existing CodexLink Server did not respond before the readiness deadline",
                         "Check the Server URL and network path, then retry.",
                     ));
                 }
@@ -1667,7 +1838,7 @@ impl DesktopCore {
         if !server_status.http_reachable {
             return Err(DesktopError::new(
                 "server_unreachable",
-                "The existing WebCodex Server is not reachable",
+                "The existing CodexLink Server is not reachable",
                 "Check the Server URL and network path, then retry.",
             ));
         }
@@ -1773,7 +1944,7 @@ impl DesktopCore {
             ActivityEventKind::RemoteConnected,
             "desktop",
             ActivityLevel::Info,
-            "This computer is connected to the existing WebCodex Server",
+            "This computer is connected to the existing CodexLink Server",
         );
         self.get_state().await
     }
@@ -1918,7 +2089,7 @@ impl DesktopCore {
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
                     "Quick Share returned an invalid readiness event",
-                    "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+                    "Verify that Desktop and CodexLink binaries come from the same source baseline.",
                 ));
             }
         };
@@ -1932,7 +2103,7 @@ impl DesktopCore {
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
                 "Quick Share readiness identity is incomplete",
-                "Update Desktop and WebCodex together.",
+                "Update Desktop and CodexLink together.",
             ));
         }
         cancellation.check()?;
@@ -1981,7 +2152,7 @@ impl DesktopCore {
         self.stop_process(ProcessKind::QuickShare).await;
         self.snapshot.quick_share = None;
         self.snapshot.topology = self.config.topology.clone();
-        self.snapshot.project = self.config.project.clone();
+        self.snapshot.project = project_snapshot(&self.config);
         self.activity.push(
             ActivityEventKind::QuickShareStopped,
             "quick_share",
@@ -2012,7 +2183,7 @@ impl DesktopCore {
             DesktopError::new(
                 "runtime_not_ready",
                 "Local Full Runtime has not been configured",
-                "Set up WebCodex on this computer before starting the secure tunnel.",
+                "Set up CodexLink on this computer before starting the secure tunnel.",
             )
         })?;
         if topology.experience != Experience::Full
@@ -2020,7 +2191,7 @@ impl DesktopCore {
         {
             return Err(DesktopError::new(
                 "unsupported_topology",
-                "Regular OpenAI Secure Tunnel is only started for a local WebCodex Server",
+                "Regular OpenAI Secure Tunnel is only started for a local CodexLink Server",
                 "Manage external exposure on the remote Server instead.",
             ));
         }
@@ -2052,7 +2223,7 @@ impl DesktopCore {
         if !current.readiness.runtime_ready {
             return Err(DesktopError::new(
                 "runtime_not_ready",
-                "Local WebCodex runtime is not ready",
+                "Local CodexLink runtime is not ready",
                 "Restore the Server and Runner readiness before starting the secure tunnel.",
             ));
         }
@@ -2193,7 +2364,7 @@ impl DesktopCore {
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
                     "Regular Tunnel returned an invalid readiness event",
-                    "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+                    "Verify that Desktop and CodexLink binaries come from the same source baseline.",
                 ));
             }
         };
@@ -2208,7 +2379,7 @@ impl DesktopCore {
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
                 "Regular Tunnel readiness identity is incomplete",
-                "Update Desktop and WebCodex together.",
+                "Update Desktop and CodexLink together.",
             ));
         }
         cancellation.check()?;
@@ -2358,7 +2529,7 @@ impl DesktopCore {
                 .await;
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -2372,7 +2543,7 @@ impl DesktopCore {
                     .await;
                     return Err(DesktopError::new(
                         "server_start_failed",
-                        "The Desktop-owned WebCodex Server exited during startup",
+                        "The Desktop-owned CodexLink Server exited during startup",
                         "Open Activity for safe diagnostics and retry.",
                     ));
                 }
@@ -2401,7 +2572,7 @@ impl DesktopCore {
                 .await;
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -2524,6 +2695,7 @@ impl DesktopCore {
         let mut project = project.clone();
         project.runtime_project_id = Some(identity.runtime_project_id.clone());
         self.config.project = Some(project.clone());
+        upsert_authorized_project(&mut self.config, project.clone());
         self.config.runtime = Some(StoredRuntime {
             server_url: identity.server_url.clone(),
             server_env_file,
@@ -2694,11 +2866,98 @@ fn local_enrollment_directory(data_dir: &Path, config: &StoredDesktopConfig) -> 
 }
 
 fn project_snapshot(config: &StoredDesktopConfig) -> Option<ProjectSelection> {
-    let mut project = config.project.clone()?;
+    let mut project = runtime_identity_project(config)?.clone();
     if identity_from_config(config).is_none() {
         project.runtime_project_id = None;
     }
     Some(project)
+}
+
+fn runtime_identity_project(config: &StoredDesktopConfig) -> Option<&ProjectSelection> {
+    if config.topology.as_ref().is_some_and(|topology| {
+        topology.experience == Experience::Full && matches!(topology.server, ServerTopology::Local)
+    }) {
+        config.runtime_anchor.as_ref()
+    } else {
+        config.project.as_ref()
+    }
+}
+
+fn project_paths_equal(left: &str, right: &str) -> bool {
+    if cfg!(windows) {
+        left.trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(right.trim_end_matches(['\\', '/']))
+    } else {
+        left.trim_end_matches('/').eq(right.trim_end_matches('/'))
+    }
+}
+
+fn projects_snapshot(config: &StoredDesktopConfig) -> Vec<ProjectSelection> {
+    config.projects.clone()
+}
+
+fn upsert_authorized_project(config: &mut StoredDesktopConfig, project: ProjectSelection) {
+    if let Some(existing) = config
+        .projects
+        .iter_mut()
+        .find(|existing| project_paths_equal(&existing.path, &project.path))
+    {
+        *existing = project;
+    } else {
+        config.projects.push(project);
+    }
+}
+
+fn remove_authorized_project(
+    config: &mut StoredDesktopConfig,
+    project_path: &str,
+) -> Option<ProjectSelection> {
+    let index = config
+        .projects
+        .iter()
+        .position(|project| project_paths_equal(&project.path, project_path))?;
+    Some(config.projects.remove(index))
+}
+
+fn migrate_legacy_authorized_projects(
+    config: &mut StoredDesktopConfig,
+    default_project_dir: &Path,
+    resource_dir: &Path,
+) {
+    let local_full = config.topology.as_ref().is_some_and(|topology| {
+        topology.experience == Experience::Full && matches!(topology.server, ServerTopology::Local)
+    });
+    if !local_full {
+        return;
+    }
+
+    if config.projects.is_empty() {
+        if let Some(project) = config.project.clone() {
+            let path = project.path.trim();
+            let looks_internal = path.is_empty()
+                || project_paths_equal(path, default_project_dir.to_string_lossy().as_ref())
+                || project_paths_equal(path, resource_dir.to_string_lossy().as_ref());
+            if !looks_internal {
+                config.projects.push(project);
+            }
+        }
+    }
+
+    // `project` was overloaded by older Desktop builds as both the Runner's
+    // recovery identity and the customer-visible authorization. A local runtime
+    // now owns a dedicated app-data anchor, so force one clean re-enrollment and
+    // stop serializing the legacy field for the local topology.
+    if config.runtime_anchor.is_none() {
+        config.project = None;
+    }
+}
+
+fn customer_authorized_anchor_path(config: &StoredDesktopConfig) -> Option<String> {
+    config
+        .projects
+        .first()
+        .map(|project| project.path.clone())
+        .or_else(|| config.project.as_ref().map(|project| project.path.clone()))
 }
 
 fn stored_runner_client_id(config: &StoredDesktopConfig) -> Option<String> {
@@ -2730,7 +2989,7 @@ fn stored_runner_client_id(config: &StoredDesktopConfig) -> Option<String> {
 
 fn identity_from_config(config: &StoredDesktopConfig) -> Option<ProjectRuntimeIdentity> {
     let runtime = config.runtime.as_ref()?;
-    let project = config.project.as_ref()?;
+    let project = runtime_identity_project(config)?;
     let runner_config = runtime.runner_config.clone()?;
     let user_token_file = runtime.user_token_file.clone()?;
     let project_id = runtime.project_id.clone()?.trim().to_string();
@@ -2990,7 +3249,7 @@ fn reserve_loopback_address() -> DesktopResult<String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| {
         DesktopError::new(
             "local_port_unavailable",
-            "Desktop could not reserve a loopback port for WebCodex",
+            "Desktop could not reserve a loopback port for CodexLink",
             "Check local networking and retry.",
         )
     })?;
@@ -3323,34 +3582,37 @@ fn runtime_autostart(config: &StoredDesktopConfig) -> bool {
 }
 
 fn default_management_project_dir(data_dir: &Path, resource_dir: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        let _ = data_dir;
-        // The NSIS package is current-user scoped. Use the actual installation
-        // directory as the default management Project so a fresh Desktop is
-        // immediately manageable without asking the user to choose an unrelated
-        // source checkout first. This intentionally grants the Project the same
-        // install-directory authority the user has requested for Desktop
-        // configuration and maintenance.
-        return resource_dir.to_path_buf();
-    }
-    #[cfg(not(windows))]
-    {
-        // A macOS resource directory lives inside the signed app bundle and is
-        // not a mutable workspace. Keep the same management-project semantics
-        // in the per-user Desktop data directory there.
-        let _ = resource_dir;
-        data_dir.join("workspace")
-    }
+    let _ = resource_dir;
+    // The runtime anchor is product-internal state, not customer-authorized
+    // source access. Keep it stable under per-user app data so install/upgrade
+    // locations can never leak into the Projects authorization surface.
+    data_dir.join("runtime-anchor")
 }
 
-fn preferred_connection(config: &StoredDesktopConfig) -> RegularConnectionPreference {
-    config.preferred_connection.unwrap_or_default()
+fn preferred_connection(
+    config: &StoredDesktopConfig,
+    tunnel_configured: bool,
+) -> RegularConnectionPreference {
+    if let Some(explicit) = config.preferred_connection {
+        return explicit;
+    }
+    let local_full_runtime = config.runtime.is_some()
+        && config.topology.as_ref().is_some_and(|topology| {
+            topology.experience == Experience::Full
+                && matches!(topology.server, ServerTopology::Local)
+        });
+    if tunnel_configured && local_full_runtime {
+        RegularConnectionPreference::OpenAiTunnel
+    } else {
+        RegularConnectionPreference::NoChatGpt
+    }
 }
 
 fn apply_config_projection(snapshot: &mut DesktopStateSnapshot, config: &StoredDesktopConfig) {
     snapshot.runtime_autostart = runtime_autostart(config);
-    snapshot.preferred_connection = preferred_connection(config);
+    snapshot.preferred_connection = preferred_connection(config, snapshot.openai_tunnel_configured);
+    snapshot.project = project_snapshot(config);
+    snapshot.projects = projects_snapshot(config);
     snapshot.tunnel_proxy = if config.tunnel_proxy.mode == TunnelProxyMode::Auto {
         TunnelProxySnapshot {
             mode: TunnelProxyMode::Auto,
@@ -3407,13 +3669,43 @@ mod tests {
 
     #[test]
     fn default_management_project_uses_safe_platform_location() {
-        let data = PathBuf::from(r"C:\Users\test\AppData\Local\WebCodex");
-        let resources = PathBuf::from(r"D:\Apps\WebCodex Desktop");
+        let data = PathBuf::from(r"C:\Users\test\AppData\Local\CodexLink");
+        let resources = PathBuf::from(r"D:\Apps\CodexLink Desktop");
         let project = default_management_project_dir(&data, &resources);
-        #[cfg(windows)]
-        assert_eq!(project, resources);
-        #[cfg(not(windows))]
-        assert_eq!(project, data.join("workspace"));
+        assert_eq!(project, data.join("runtime-anchor"));
+    }
+
+    #[test]
+    fn local_runtime_identity_uses_internal_anchor_not_customer_authorized_project() {
+        let mut config = StoredDesktopConfig::default();
+        config.topology = Some(RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Local,
+            runner: RunnerTopology::Local,
+            exposure: Exposure::None,
+            enrollment: Enrollment::ManagedPairing,
+        });
+        config.runtime_anchor = Some(ProjectSelection {
+            path: r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor".to_string(),
+            allowed_root: r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor".to_string(),
+            is_git_repository: false,
+            runtime_project_id: Some("agent:desktop:internal".to_string()),
+        });
+        config.project = Some(ProjectSelection {
+            path: r"D:\customer".to_string(),
+            allowed_root: r"D:\customer".to_string(),
+            is_git_repository: true,
+            runtime_project_id: Some("agent:desktop:customer".to_string()),
+        });
+        config.projects = vec![config.project.clone().expect("customer project")];
+
+        assert_eq!(
+            runtime_identity_project(&config)
+                .expect("runtime anchor")
+                .path,
+            r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor"
+        );
+        assert_eq!(projects_snapshot(&config)[0].path, r"D:\customer");
     }
 
     #[test]
@@ -3468,12 +3760,19 @@ mod tests {
     fn test_stored_config(label: &str) -> StoredDesktopConfig {
         StoredDesktopConfig {
             topology: None,
+            runtime_anchor: None,
             project: Some(ProjectSelection {
                 path: format!("/{label}"),
                 allowed_root: "/".to_string(),
                 is_git_repository: false,
                 runtime_project_id: None,
             }),
+            projects: vec![ProjectSelection {
+                path: format!("/{label}"),
+                allowed_root: "/".to_string(),
+                is_git_repository: false,
+                runtime_project_id: None,
+            }],
             runtime_autostart: None,
             preferred_connection: None,
             openai_tunnel_id: None,
@@ -3819,6 +4118,113 @@ mod tests {
     }
 
     #[test]
+    fn legacy_full_runtime_with_saved_tunnel_defaults_to_reconnect_but_explicit_stop_wins() {
+        let mut config = test_stored_config("reconnect");
+        config.topology = Some(RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Local,
+            runner: RunnerTopology::Local,
+            exposure: Exposure::None,
+            enrollment: Enrollment::ManagedPairing,
+        });
+        config.runtime = Some(StoredRuntime {
+            server_url: "http://127.0.0.1:58208".to_string(),
+            server_env_file: None,
+            runner_config: None,
+            user_token_file: None,
+            runner_client_id: Some("desktop".to_string()),
+            project_id: None,
+            runtime_project_id: None,
+        });
+
+        assert_eq!(
+            preferred_connection(&config, true),
+            RegularConnectionPreference::OpenAiTunnel
+        );
+        assert_eq!(
+            preferred_connection(&config, false),
+            RegularConnectionPreference::NoChatGpt
+        );
+
+        config.preferred_connection = Some(RegularConnectionPreference::NoChatGpt);
+        assert_eq!(
+            preferred_connection(&config, true),
+            RegularConnectionPreference::NoChatGpt,
+            "an explicit user stop must override legacy auto-reconnect inference"
+        );
+    }
+
+    #[test]
+    fn legacy_user_project_migrates_to_authorized_paths_but_management_anchor_does_not() {
+        let management = PathBuf::from("/management");
+        let resources = PathBuf::from("/resources");
+        let local_topology = RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Local,
+            runner: RunnerTopology::Local,
+            exposure: Exposure::None,
+            enrollment: Enrollment::ManagedPairing,
+        };
+        let mut user = test_stored_config("legacy-user");
+        user.topology = Some(local_topology.clone());
+        user.projects.clear();
+        migrate_legacy_authorized_projects(&mut user, &management, &resources);
+        assert_eq!(user.projects.len(), 1);
+        assert_eq!(user.projects[0].path, "/legacy-user");
+        assert!(user.project.is_none());
+
+        let mut internal = test_stored_config("internal");
+        internal.topology = Some(local_topology);
+        internal.projects.clear();
+        internal.project.as_mut().unwrap().path = resources.to_string_lossy().to_string();
+        migrate_legacy_authorized_projects(&mut internal, &management, &resources);
+        assert!(internal.projects.is_empty());
+        assert!(internal.project.is_none());
+    }
+
+    #[test]
+    fn remote_resume_prefers_authorized_paths_and_keeps_legacy_fallback() {
+        let mut config = test_stored_config("visible");
+        assert_eq!(
+            customer_authorized_anchor_path(&config).as_deref(),
+            Some("/visible")
+        );
+
+        config.projects.clear();
+        assert_eq!(
+            customer_authorized_anchor_path(&config).as_deref(),
+            Some("/visible")
+        );
+    }
+
+    #[test]
+    fn authorized_project_helpers_keep_multiple_exact_paths_and_remove_only_one() {
+        let mut config = test_stored_config("first");
+        config.projects.clear();
+        let first = ProjectSelection {
+            path: "/first".to_string(),
+            allowed_root: "/first".to_string(),
+            is_git_repository: false,
+            runtime_project_id: Some("agent:desktop:first".to_string()),
+        };
+        let second = ProjectSelection {
+            path: "/second".to_string(),
+            allowed_root: "/second".to_string(),
+            is_git_repository: true,
+            runtime_project_id: Some("agent:desktop:second".to_string()),
+        };
+        upsert_authorized_project(&mut config, first.clone());
+        upsert_authorized_project(&mut config, second.clone());
+        assert_eq!(config.projects, vec![first.clone(), second.clone()]);
+
+        assert_eq!(
+            remove_authorized_project(&mut config, &first.path),
+            Some(first)
+        );
+        assert_eq!(config.projects, vec![second]);
+    }
+
+    #[test]
     fn explicit_tunnel_proxy_is_bounded_and_direct_mode_clears_routing() {
         let custom = TunnelProxyConfig {
             mode: TunnelProxyMode::Custom,
@@ -3968,12 +4374,19 @@ mod tests {
                 },
                 enrollment: Enrollment::ManagedPairing,
             }),
+            runtime_anchor: None,
             project: Some(ProjectSelection {
                 path: r"C:\repo".to_string(),
                 allowed_root: r"C:\".to_string(),
                 is_git_repository: true,
                 runtime_project_id: Some("agent:desktop:repo".to_string()),
             }),
+            projects: vec![ProjectSelection {
+                path: r"C:\repo".to_string(),
+                allowed_root: r"C:\".to_string(),
+                is_git_repository: true,
+                runtime_project_id: Some("agent:desktop:repo".to_string()),
+            }],
             runtime_autostart: None,
             preferred_connection: None,
             openai_tunnel_id: None,

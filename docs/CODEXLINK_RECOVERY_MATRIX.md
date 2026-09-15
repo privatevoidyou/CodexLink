@@ -2,9 +2,9 @@
 
 > 用途：把历史 `1.0.0-rc.5` 已验证能力、当前 rebuild 实现和首版剩余工作放在一张矩阵里，避免凭记忆重写或重复恢复。
 >
-> 当前 Engine 基线：WebCodex 0.4.1 (`26c44e6436f254183d74db6865d04e2ec1d85930`)。
+> 当前 Engine：历史上游恢复基线 WebCodex 0.4.1 (`26c44e6436f254183d74db6865d04e2ec1d85930`)；当前实际 CodexLink dogfood bundled runtime 为 `0.4.1 / ae858f5360ff / dirty=false`。
 >
-> 当前产品代码 checkpoint：Safe Mode `22cab846` → Identity `863d5396` → State/Migration `b191bd85` → License `733b7b54` → Project/Tunnel `e85749d7` → Lifecycle/Installer `7ebab38d` → Sandbox POC `c5fa9b50`（研究）→ POC revert `65a97891` → Destructive Guard `19775012` → Product Shell `cafc0b7e` → Tunnel Auto routing + RC5 visuals `09c48060`。这些产品代码 checkpoint 已包含在 `origin/codexlink-rebuild` 的远端历史中。
+> 当前正式 HEAD / origin checkpoint：`4b4043ca`（Local License Operator）。此前 checkpoint 依次包含 Safe Mode `22cab846` → Identity `863d5396` → State/Migration `b191bd85` → License `733b7b54` → Project/Tunnel `e85749d7` → Lifecycle/Installer `7ebab38d` → Sandbox POC/revert `c5fa9b50` / `65a97891` → Destructive Guard `19775012` → Product Shell `cafc0b7e` → Tunnel Auto routing + RC5 visuals `09c48060` → Smoke 2 docs `606f75e3` → License Operator `4b4043ca`。Smoke 3 / BrandFix 仍是未提交 worktree，实时状态见 `CODEXLINK_CURRENT_STATUS.md`。
 >
 > 首版安全策略详见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 >
@@ -32,24 +32,28 @@
 | Engine baseline | WebCodex 0.4.1, source `26c44e...` | 保持 exact baseline，再选择性同步上游安全修复 | KEEP | DONE | Server/Runner source aligned |
 | Safe execution | 历史 RC 允许更广执行 | normal execution + Destructive Guard；CodexLink 通过 checked project activation 显式启用 | REDESIGN/HARDEN | DONE | focused Guard / activation / guidance 回归已通过；真机全链留给新 RC |
 | Product name | 客户看到 CodexLink | customer-facing shell / installer 使用 CodexLink | RESTORE | DONE | fresh install 无 WebCodex 产品品牌泄漏 |
-| App data | `%LOCALAPPDATA%\dev.codexlink.desktop` | 产品独立 namespace | RESTORE | DONE | clean profile 只创建 CodexLink namespace |
-| Install/data split | 程序目录可自定义；用户状态独立持久 | upgrade/uninstall 不误删持久状态 | RESTORE | CHECKPOINTED/VERIFY | installer smoke 已完成并 checkpoint；真实 upgrade 留给新 RC |
+| App/runtime data | `%LOCALAPPDATA%\dev.codexlink.desktop` | 只承载普通 Desktop/runtime/connections state；设备资格独立 | RESTORE/HARDEN | WORKTREE/VERIFY | 不把 app-data 清理等同于设备解绑 |
+| Device activation persistence | 设备绑定应跨普通卸载/重装保留 | `%LOCALAPPDATA%\CodexLinkSecretKey\` 保存 `device_identity.dpapi + license.json`；兼容旧目录迁移 | RESTORE/HARDEN | WORKTREE/VERIFY | 自动化已覆盖删除普通 app data 后设备资格仍存在；真实卸载/重装再验 |
 | Legacy migration | bounded copy-only；旧目录保留回滚 | known-file copy-only + marker + bounded rebase | RESTORE/HARDEN | DONE | 只迁移已知文件；用户项目路径不改 |
-| License | 商业设备激活 | RC5 SignedLicense + DPAPI device identity + offline verification | RESTORE/HARDEN | DONE | 历史 RC5 状态真实验证通过 |
-| Activation UI | 客户必要信息；MYWS prefix | 保持简化 customer copy；同一销售码用于 Desktop 首次激活 | RESTORE | DONE/VERIFY | production bundle 不含不必要实现说明；新 Product Shell 复核 |
+| License | 商业设备激活 | SignedLicense + DPAPI device identity + offline verification；设备资格与 app data 分离 | RESTORE/HARDEN | WORKTREE/VERIFY | 历史 RC5 兼容 + `CodexLinkSecretKey` 迁移测试；真实 reinstall 再验 |
+| Activation UI | 客户必要信息；MYWS prefix | 简化 customer copy；同码首次激活；error-code 本地化，不直出后端英文 | RESTORE | WORKTREE/VERIFY | 6 locale 品牌守卫 + 激活错误 i18n；Signed License 协议字段不单边改名 |
 | Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
 | Admin License Operator | 历史上人工/本地 Codex 通过 SSH 调用授权服务器签发 | Windows 本地 GUI 通过管理员 SSH key 固定调用 `issue --json`；私钥留在服务器；销售码不落盘；签发绝不自动重试 | HARDEN | CHECKPOINTED | source/installed self-test + shortcut validation + real SSH probe + 用户真实一键签发体验均已通过 |
-| Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | 首版恢复 RC5 Product Shell，不采用当前 rebuild Dashboard 作为最终 UI | RESTORE | CHECKPOINTED/VERIFY | `cafc0b7e` + `09c48060`；Smoke 2 已恢复原 RC5 图标并完成第二轮首页/项目/连接/设置视觉回归；仍需用户真机逐页对照 |
-| First-use setup UX | RC5 已接近“项目 + Tunnel”产品心智 | 激活 → 选项目 → 保存 Tunnel ID + Restricted Runtime Key → ChatGPT App；底层自动处理 | HARDEN/RESTORE | CHECKPOINTED/VERIFY | fresh setup 直达本机项目；保存凭据自动准备 Secure Link；高级拓扑不占首用主链；Smoke 2 继续验证真实连接行为 |
-| Project root | 用户选哪个 root 就授权哪个 root | exact canonical root；不偷偷扩大 | RESTORE/HARDEN | DONE | normal dir/root/UNC/junction regressions |
+| Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | RC5 心智 + Smoke 3 多项目/状态/动效/品牌收口 | RESTORE | WORKTREE READY/VERIFY | frontend 56/56；BrandFix 已出包；图标缓存后的 Explorer 最终显示仍等用户确认 |
+| First-use setup UX | RC5 的项目 + Tunnel 产品心智 | 激活 → internal runtime 自动 bootstrap → 未配置时保存 Tunnel 凭据 → 按需添加多个授权路径 → ChatGPT App | HARDEN/RESTORE | WORKTREE/VERIFY | 0 项目不阻塞连接健康；老用户有凭据时自动恢复；新用户缺凭据时明确待配置 |
+| User authorized roots | 用户选哪个 root 就授权哪个 root | `projects[]` 多 root；exact canonical authority；不偷偷扩大；精确 remove | RESTORE/HARDEN | WORKTREE/VERIFY | 多盘符/文件夹共存；父 root 仍覆盖子目录时拒绝假撤权 |
 | Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | VERIFY | bounded delete 的 root/wildcard 逻辑已覆盖；显式整盘授权留给新 RC 真机复验 |
+| Internal runtime anchor | 历史 RC 把运行 identity 与项目心智混在一起 | AppData 内部 anchor 只维持 Runtime identity，不出现在普通项目列表、不自动成为用户 authority | REDESIGN/HARDEN | WORKTREE/VERIFY | 本机主链已分层；高级 Existing Server 页面仍需隐藏/说明 anchor |
+| Existing Server topology | 历史 Launcher 可把本机 Runner 连到远端 Server | CodexLink Desktop 原生 `configure_remote_setup` + one-shot pairing + identity reuse + revision check | RESTORE/HARDEN | IMPLEMENTED/NOT MIGRATED | 等公网 Server 部署为同源 fork 后做 pairing/restart/reuse/read-write/Guard smoke |
+| WebCodexLauncher retirement | 旧 Launcher 0.7.2 + WebCodex 0.3.9 当前仍能工作 | 只在新 Existing Server 链路稳定后退休 | REDESIGN | NEXT AFTER SAFETY | 删除前只读资产盘点；不得先删唯一可工作远端链路 |
 | Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | DONE | 复用现有 canonical guarded file-edit contract，不另造重复工具 |
 | Bounded recursive delete | 历史可通过 shell 广泛递归 | typed `delete_directory(path)`，只删可证明边界的明确子树 | REDESIGN | DONE | Runner focused delete 4/4；typed registry/contract Gate 已通过 |
 | Raw destructive admission | 历史 shell 更自由 | recursive delete / destructive Git / mirror-purge / disk destructive pre-dispatch deny | HARDEN | DONE | Guard focused 7/7；真机无-child-spawn 再复验 |
 | Windows OS sandbox | 曾做独立 POC | 不作为首版产品依赖或 release Gate | REFERENCE | LATER | `65a97891` 已普通 revert；历史研究保留 |
 | Tunnel binary | OpenAI tunnel-client 0.0.12 固定 SHA | 安装包自带且 fail closed | RESTORE | DONE | SHA `664916...`; 不访问 legacy WebCodex tool cache |
 | Tunnel health | 动态 `127.0.0.1:0` + url file | 保持 Engine 当前动态 health | KEEP | DONE | 不 hardcode 14286；health 200 |
-| Tunnel network route | 历史上曾因浏览器可联网但 control plane 不可达而需要显式代理 | Auto 收集 Desktop 环境代理 → Windows 系统代理 → direct，并逐候选验证 `api.openai.com`；Custom / Direct 保持确定性，不 hardcode 7890 | HARDEN | CHECKPOINTED/VERIFY | `09c48060`；当前机 7897/7891 失败、12000 可达、direct 超时仅作为真机证据，不是默认端口 |
+| Tunnel network route | 浏览器可联网不代表 control plane 可达 | Auto 收集环境代理 → Windows 系统代理 → direct，逐候选验证 `api.openai.com`；Custom / Direct 保持确定性 | HARDEN | CHECKPOINTED/VERIFY | 不 hardcode 7890；真实机多代理证据已收集 |
+| Managed self-heal | 历史版本可自动恢复大部分链路 | 启动时 + 运行中观察异常时按 desired state 恢复 Server/Runner/Tunnel；显式 stop 不自动复活 | HARDEN | WORKTREE/VERIFY | 新前端回归覆盖运行后 Tunnel 掉线；长时间真实使用继续观察 |
 | Tunnel secrets | Tunnel ID + Runtime/API Key | DPAPI product-owned secret storage；不在日志回显 | RESTORE/HARDEN | DONE | logs/diagnostics 无 secret |
 | Single instance | 第二次启动不重复 runtime | 保持 | RESTORE | CHECKPOINTED/VERIFY | source regressions 已 checkpoint；normal launch + `--background` 真机继续复验 |
 | Login startup | 登录时后台恢复 desired state | 保持 `runtime_autostart` + resume | RESTORE | CHECKPOINTED/VERIFY | source regressions 已 checkpoint；真机复验 no duplicate Server/Runner/Tunnel |
@@ -75,25 +79,32 @@ Installer SHA256: A7CB52ADE7000F8A82CEB29367828B56A0F6916806752F860C02364262E475
 
 不能覆盖、重命名或重打包成同名文件。
 
-## 历史 CodexLink state / migration contract
+## CodexLink state / migration contract
 
-预期产品 namespace：
+普通 app/runtime namespace：
 
 ```text
 %LOCALAPPDATA%\dev.codexlink.desktop
 ```
 
-历史已接受内容：
+当前这里承载可重建或普通持久状态，例如：
 
 ```text
 desktop-state.json
-license\
 secrets\
 runtime\
 connections\
 ```
 
-历史 WebCodex migration source 仅作为迁移输入，不是新客户默认输出位置。迁移逻辑必须：
+设备激活资格已经独立：
+
+```text
+%LOCALAPPDATA%\CodexLinkSecretKey\
+  device_identity.dpapi
+  license.json
+```
+
+历史 `%LOCALAPPDATA%\CodexLink.DeviceActivation.v1\` 与更旧 `dev.codexlink.desktop\license\` 只作为兼容迁移输入。历史 WebCodex migration source 同样只作为迁移输入，不是新客户默认输出位置。迁移逻辑必须：
 
 - copy-only；
 - bounded known files；
@@ -101,6 +112,7 @@ connections\
 - rebase only CodexLink-owned internal paths；
 - preserve user project/allowed-root choices；
 - migration marker prevents deleted new-state files from being resurrected。
+- 设备资格迁移不覆盖不同 device identity；普通卸载/删除 app data 不应删除 `CodexLinkSecretKey`。
 
 ## Tunnel contract
 
@@ -170,7 +182,7 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 | 首次无 license | 只出现 activation gate；后台 runtime 不偷跑 |
 | 已激活 | 正常进入产品 shell |
 | RC5 Product Shell | 首页/项目/连接/设置恢复已验收视觉心智，状态来自真实 backend |
-| 极简首次配置 | 激活 → 选项目 → 设置保存 Tunnel ID + Runtime Key → ChatGPT 创建/添加 App；无需理解 Server/Runner/端口 |
+| 极简首次配置 | 激活 → internal runtime 自动 bootstrap → 如缺失则保存 Tunnel ID + Runtime Key → 按需添加一个或多个授权路径 → ChatGPT App；无需理解 Server/Runner/端口 |
 | invalid/recovery license | customer-level recovery copy；不暴露内部算法 |
 | 添加具体项目 | exact root ready |
 | 显式磁盘根 | 可读/分析；drive root 本身不可 destructive delete；明确安全子目录按 bounded policy |
@@ -190,8 +202,8 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 | 第二实例 | 不产生重复 runtime |
 | 登录时启动 | hidden launch + desired-state resume |
 | Upgrade | user data/activation/project/tunnel state 保持 |
-| Uninstall | program files 删除策略正确；持久数据按产品策略保留 |
-| Reinstall | 保留策略与历史状态可解释、可恢复 |
+| Uninstall | program files / 普通 app data 按选择清理；`%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格不得被普通卸载语义删除 |
+| Reinstall | 同一设备在设备资格仍有效时不得重新消费销售激活码；旧激活目录可迁移 |
 | 独立 WebCodex 安装 | 不被 CodexLink 启停/迁移/清理误伤 |
 | 外部 npm Runner | 不被 CodexLink 进程管理误伤 |
 | Clean machine | 至少一台从未部署 CodexLink 的外部 Windows 机器完成首次安装主链 |
@@ -267,7 +279,7 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] focused evidence：Guard 7/7、Runner structured delete 4/4、CLI activation 11/11、startup guidance 4/4、tool contracts 95/95、tool-runtime-contracts 73/73、registry structured delete 10/10、file validation 6/6；
 - [ ] 新 RC 真机复验大型 generated tree、junction/reparse、normal Cargo/npm/Python/Node/PowerShell 与拒绝后无 child spawn。
 
-### Batch G — RC5 Product Shell & Minimal Setup UX — CHECKPOINTED / VERIFY (`cafc0b7e`, `09c48060`)
+### Batch G — RC5 Product Shell & Minimal Setup UX — WORKTREE READY / REAL-MACHINE VERIFY
 
 完整 UI 契约见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
@@ -277,12 +289,15 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片，并保留 Remote / Quick Share 高级状态页；
 - [x] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
 - [x] 保存 Tunnel 凭据后，在本地 runtime 已就绪时自动停止旧 regular tunnel 并重新准备 Secure Link；
-- [x] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；首次 fresh setup 直达本机项目；
-- [x] Smoke 2 本地验证：Vitest 51/51、TypeScript typecheck、production build、form-control CSS contract；Rust 串行完整套件 105/105 passed（5 ignored）；Auto proxy focused 4/4；failed-tunnel no-fake-green Windows real-process test 单独通过；
-- [x] RC5 原图标从真实 `CodexLink.exe` 资源提取并重新打包；Smoke 2 EXE 的 32px / 256px 图标哈希与 RC5 原图一致；
-- [x] Smoke 2 unsigned installer 构建成功，SHA256 `35CBB972A8439D03184AD10BAB4E66714EA2C52E64D773DEB111A3EBDF3F9D71`；Portable runtime 四个文件逐 SHA 与 staging metadata 一致；
-- [ ] 默认并行 Rust 全套下 `windows_failed_regular_tunnel_child_cannot_leave_fake_green_readiness` 存在并发 timing flaky；串行全套和单测均通过。后续作为 CI isolation hygiene 单独修，不 ignore、不降低安全断言；
-- [ ] 用 Smoke 2 Portable 与 `D:\Test\CodexLink\Current-RC` / 真实 RC5 逐页对照视觉、滚动、hover、focus、状态动效与高 DPI，并完成 Auto Tunnel route 真机连接冒烟。
+- [x] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；激活后 internal runtime 自动 bootstrap，项目 authority 可随后按需添加；
+- [x] Smoke 2 历史 Gate：Vitest 51/51、Rust 串行 105/105 等已记录；
+- [x] Smoke 3/AnchorFix：internal runtime anchor 与 `projects[]` user authority 分层；0 项目允许连接健康；
+- [x] 多 root add/remove authority；项目卡响应式 3/2/1；首页/连接/设置状态语义按真机反馈修正；
+- [x] UIFix / BrandFix：RC5 心智渐变/动效、Tray 精简/locale、激活错误 i18n、6 locale 品牌守卫；
+- [x] 当前自动化 Gate：frontend `56/56`；Rust Desktop `114 passed / 0 failed / 5 ignored`；production build / fmt / diff check 通过；
+- [x] 当前 BrandFix installer SHA256：`B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71`；bundled runtime `0.4.1 / ae858f5360ff / dirty=false`；
+- [ ] Explorer 图标缓存后的最终用户确认；设备激活跨卸载真实复验；长时间断线自愈观察；
+- [ ] 当前 35-file 产品源码 Smoke 3 worktree + 本轮文档同步尚未 review/checkpoint/push。
 
 ### Batch H.0 — Local License Operator — USER VERIFIED / CHECKPOINT
 
@@ -299,7 +314,15 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] 2026-09-15 用户人工点击 GUI 完成一次实际销售码签发体验验收；
 - [ ] 服务端未来如增加 `list / inspect / revoke`，再另批扩展，不直接读写 `licenses.db`。
 
-### Batch H — Commercial Entitlement / Deployment Center MVP — NEXT AFTER SMOKE 2 REAL-MACHINE PASS
+### Safety / Remote migration — NEXT BEFORE LAUNCHER RETIREMENT
+
+- [ ] 用 `tunnel-test` 在 disposable test root 完成 normal execution + destructive deny + no-child-spawn 真机 Gate；
+- [ ] 安全 Gate 通过后将公网 Server 部署为当前 CodexLink fork 同源 build；
+- [ ] CodexLink Existing Server 完成 `wc_pair_...` → Runner online → restart identity reuse → read/write/Guard smoke；
+- [ ] 上述链路稳定后再退休 WebCodexLauncher 0.7.2 / WebCodex 0.3.9；
+- [ ] 最后 review 当前大 worktree 并 checkpoint/push。
+
+### Batch H — Commercial Entitlement / Deployment Center MVP — AFTER SAFETY / REMOTE MIGRATION
 
 完整商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
@@ -316,7 +339,7 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [ ] installer SHA + release metadata；
 - [ ] 本机从 Deployment Center 开始跑完整 Windows 商业主链；
 - [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
-- [ ] 朋友按网站完成“验证购买 → 下载 → 同码激活 → 项目 → 两项 Tunnel 凭据 → ChatGPT App”，不解释底层 runtime；
+- [ ] 朋友按网站完成“验证购买 → 下载 → 同码激活 → Runtime 自动准备 → 两项 Tunnel 凭据 → 按需授权路径 → ChatGPT App”，不解释底层 runtime；
 - [ ] upgrade/uninstall/reinstall；
 - [ ] 收集问题、修复并重新候选，不覆盖历史 artifact。
 

@@ -5,7 +5,7 @@ use crate::models::{
 };
 use crate::state::AppState;
 use std::sync::Mutex;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 #[cfg(target_os = "windows")]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
@@ -69,6 +69,53 @@ struct TrayProjection {
 pub struct TrayPresentationCache {
     projection: Mutex<Option<TrayProjection>>,
     launch_at_login: Mutex<Option<bool>>,
+    locale: Mutex<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrayTexts {
+    open: &'static str,
+    quit: &'static str,
+}
+
+fn normalize_tray_locale(locale: &str) -> &'static str {
+    match locale {
+        "en-US" => "en-US",
+        "ja-JP" => "ja-JP",
+        "ko-KR" => "ko-KR",
+        "de-DE" => "de-DE",
+        "fr-FR" => "fr-FR",
+        _ => "zh-CN",
+    }
+}
+
+fn tray_texts(locale: &str) -> TrayTexts {
+    match normalize_tray_locale(locale) {
+        "en-US" => TrayTexts {
+            open: "Open CodexLink",
+            quit: "Quit CodexLink",
+        },
+        "ja-JP" => TrayTexts {
+            open: "CodexLink を開く",
+            quit: "CodexLink を終了",
+        },
+        "ko-KR" => TrayTexts {
+            open: "CodexLink 열기",
+            quit: "CodexLink 종료",
+        },
+        "de-DE" => TrayTexts {
+            open: "CodexLink öffnen",
+            quit: "CodexLink beenden",
+        },
+        "fr-FR" => TrayTexts {
+            open: "Ouvrir CodexLink",
+            quit: "Quitter CodexLink",
+        },
+        _ => TrayTexts {
+            open: "打开 CodexLink",
+            quit: "退出 CodexLink",
+        },
+    }
 }
 
 impl TrayProjection {
@@ -87,9 +134,10 @@ impl TrayProjection {
         } else {
             RuntimeStatus::NeedsAttention
         };
-        let tunnel_error = snapshot.regular_tunnel.as_ref().is_some_and(|tunnel| {
-            tunnel.status == crate::models::RegularTunnelStatus::Error
-        });
+        let tunnel_error = snapshot
+            .regular_tunnel
+            .as_ref()
+            .is_some_and(|tunnel| tunnel.status == crate::models::RegularTunnelStatus::Error);
         let observed_use = snapshot.readiness.runtime_ready
             && snapshot
                 .chatgpt_activity
@@ -164,7 +212,8 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone_from(&launch_at_login);
     let projection = TrayProjection::from_snapshot(&snapshot, launch_at_login);
-    let menu = build_menu(app, &projection)?;
+    let locale = current_locale(app);
+    let menu = build_menu(app, &projection, &locale)?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("CodexLink")
@@ -192,6 +241,15 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = desktop_shell::show_main_window(app);
             }
         });
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/24x24.png")) {
+            builder = builder.icon(icon);
+        } else if let Some(icon) = app.default_window_icon() {
+            builder = builder.icon(icon.clone());
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
@@ -223,7 +281,8 @@ pub fn refresh_from_snapshot(app: &AppHandle, snapshot: &DesktopStateSnapshot) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    match build_menu(app, &projection).and_then(|menu| tray.set_menu(Some(menu))) {
+    let locale = current_locale(app);
+    match build_menu(app, &projection, &locale).and_then(|menu| tray.set_menu(Some(menu))) {
         Ok(()) => {
             cache
                 .projection
@@ -231,7 +290,7 @@ pub fn refresh_from_snapshot(app: &AppHandle, snapshot: &DesktopStateSnapshot) {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .replace(projection);
         }
-        Err(error) => eprintln!("WebCodex tray refresh failed: {error}"),
+        Err(error) => eprintln!("CodexLink tray refresh failed: {error}"),
     }
 }
 
@@ -250,113 +309,52 @@ fn observe_launch_at_login(app: &AppHandle) {
     set_launch_at_login_observation(app, desktop_shell::launch_at_login_enabled(app).ok());
 }
 
-fn build_menu(app: &AppHandle, projection: &TrayProjection) -> tauri::Result<Menu<tauri::Wry>> {
+fn current_locale(app: &AppHandle) -> String {
+    let cache = app.state::<TrayPresentationCache>();
+    let locale = cache
+        .locale
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    normalize_tray_locale(locale.as_str()).to_string()
+}
+
+pub fn set_ui_locale(app: &AppHandle, locale: &str) {
+    let normalized = normalize_tray_locale(locale).to_string();
+    let cache = app.state::<TrayPresentationCache>();
+    let changed = {
+        let mut current = cache
+            .locale
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *current == normalized {
+            false
+        } else {
+            *current = normalized;
+            true
+        }
+    };
+    if !changed {
+        return;
+    }
+    cache
+        .projection
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    let snapshot = app.state::<AppState>().get_state();
+    refresh_from_snapshot(app, &snapshot);
+}
+
+fn build_menu(
+    app: &AppHandle,
+    _projection: &TrayProjection,
+    locale: &str,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let text = tray_texts(locale);
     let menu = Menu::new(app)?;
-    let runtime = MenuItem::new(
-        app,
-        match projection.runtime_status {
-            RuntimeStatus::Ready => "Runtime: Ready",
-            RuntimeStatus::Stopped => "Runtime: Stopped",
-            RuntimeStatus::NeedsAttention => "Runtime: Needs attention",
-        },
-        false,
-        None::<&str>,
-    )?;
-    let connection = MenuItem::new(
-        app,
-        match projection.connection_status {
-            ConnectionStatus::Ready => "Connection: Verified",
-            ConnectionStatus::ObservedUse => "ChatGPT: Project use observed",
-            ConnectionStatus::WaitingForChatGpt => "Tunnel: Ready; waiting for ChatGPT",
-            ConnectionStatus::NotConnected => "ChatGPT: Project use not observed",
-            ConnectionStatus::NeedsAttention => "Connection: Needs attention",
-        },
-        false,
-        None::<&str>,
-    )?;
-    let status_separator = PredefinedMenuItem::separator(app)?;
-    let open = MenuItem::with_id(app, OPEN_ID, "Open CodexLink", true, None::<&str>)?;
-    let activity = MenuItem::with_id(app, ACTIVITY_ID, "Activity…", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
-    menu.append_items(&[
-        &runtime,
-        &connection,
-        &status_separator,
-        &open,
-        &activity,
-        &settings,
-    ])?;
-
-    let mut has_context_action = false;
-    if let Some(action) = projection.runtime_action {
-        let (id, text) = match action {
-            RuntimeAction::Resume => (RESUME_RUNTIME_ID, "Resume local runtime"),
-            RuntimeAction::Stop => (STOP_RUNTIME_ID, "Stop local runtime"),
-        };
-        let item = MenuItem::with_id(app, id, text, !projection.operation_busy, None::<&str>)?;
-        if !has_context_action {
-            menu.append(&PredefinedMenuItem::separator(app)?)?;
-            has_context_action = true;
-        }
-        menu.append(&item)?;
-    }
-    if let Some(action) = projection.connection_action {
-        let (id, text) = match action {
-            ConnectionAction::Connect => (CONNECT_ID, "Start OpenAI Secure Tunnel"),
-            ConnectionAction::Disconnect => (DISCONNECT_ID, "Stop OpenAI Secure Tunnel"),
-        };
-        let item = MenuItem::with_id(app, id, text, !projection.operation_busy, None::<&str>)?;
-        if !has_context_action {
-            menu.append(&PredefinedMenuItem::separator(app)?)?;
-            has_context_action = true;
-        }
-        menu.append(&item)?;
-    }
-    if projection.stop_quick_share {
-        let item = MenuItem::with_id(
-            app,
-            STOP_QUICK_SHARE_ID,
-            "Stop Quick Share",
-            !projection.operation_busy,
-            None::<&str>,
-        )?;
-        if !has_context_action {
-            menu.append(&PredefinedMenuItem::separator(app)?)?;
-            has_context_action = true;
-        }
-        menu.append(&item)?;
-    }
-    if let Some(operation_id) = &projection.cancel_operation_id {
-        let item = MenuItem::with_id(
-            app,
-            format!("{CANCEL_OPERATION_PREFIX}{operation_id}"),
-            "Cancel current operation",
-            projection.cancel_operation_enabled,
-            None::<&str>,
-        )?;
-        if !has_context_action {
-            menu.append(&PredefinedMenuItem::separator(app)?)?;
-        }
-        menu.append(&item)?;
-    }
-
-    let preferences_separator = PredefinedMenuItem::separator(app)?;
-    let launch_at_login = CheckMenuItem::with_id(
-        app,
-        LAUNCH_AT_LOGIN_ID,
-        "Launch at Login",
-        projection.launch_at_login.is_some(),
-        projection.launch_at_login.unwrap_or(false),
-        None::<&str>,
-    )?;
-    let quit_separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit CodexLink", true, None::<&str>)?;
-    menu.append_items(&[
-        &preferences_separator,
-        &launch_at_login,
-        &quit_separator,
-        &quit,
-    ])?;
+    let open = MenuItem::with_id(app, OPEN_ID, text.open, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, text.quit, true, None::<&str>)?;
+    menu.append_items(&[&open, &quit])?;
     Ok(menu)
 }
 
@@ -431,7 +429,7 @@ fn spawn_state_action(app: &AppHandle, action: TrayStateAction) {
         match result {
             Ok(snapshot) => refresh_from_snapshot(&app, &snapshot),
             Err(error) => {
-                eprintln!("WebCodex tray action failed: {}", error.code);
+                eprintln!("CodexLink tray action failed: {}", error.code);
                 let snapshot = state.get_state();
                 refresh_from_snapshot(&app, &snapshot);
                 let _ = desktop_shell::navigate(&app, NavigationTarget::Activity);
@@ -461,6 +459,13 @@ mod tests {
         snapshot.openai_tunnel_configured = true;
         snapshot.regular_tunnel_available = true;
         snapshot
+    }
+
+    #[test]
+    fn tray_text_follows_supported_ui_locale_and_defaults_to_chinese() {
+        assert_eq!(tray_texts("zh-CN").open, "打开 CodexLink");
+        assert_eq!(tray_texts("en-US").quit, "Quit CodexLink");
+        assert_eq!(tray_texts("unsupported").open, "打开 CodexLink");
     }
 
     #[test]
@@ -555,7 +560,10 @@ mod tests {
         });
         let projection = TrayProjection::from_snapshot(&snapshot, Some(false));
         assert_eq!(projection.connection_status, ConnectionStatus::ObservedUse);
-        assert_eq!(projection.connection_action, Some(ConnectionAction::Disconnect));
+        assert_eq!(
+            projection.connection_action,
+            Some(ConnectionAction::Disconnect)
+        );
     }
 
     #[test]

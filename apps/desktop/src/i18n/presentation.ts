@@ -100,6 +100,22 @@ export function activitySource(source: string, t: Translate) {
 
 type ErrorPresentation = { title: string; action: string };
 
+const activationErrorKeys: Partial<Record<string, MessageKey>> = {
+  activation_code_invalid: "activation.errorInvalid",
+  activation_code_bound_elsewhere: "activation.errorBoundElsewhere",
+  license_rate_limited: "activation.errorRateLimited",
+  license_service_unavailable: "activation.errorUnavailable",
+  license_service_unreachable: "activation.errorNetwork",
+  license_store_failed: "activation.errorLocalStore",
+  device_identity_missing: "activation.errorDevice",
+  device_identity_invalid: "activation.errorDevice",
+  device_identity_unavailable: "activation.errorDevice",
+};
+
+export function activationErrorMessage(error: DesktopError, t: Translate) {
+  return t(activationErrorKeys[error.code] ?? "activation.error");
+}
+
 const binaryErrors = new Set([
   "binaries_not_checked",
   "binary_directory_invalid",
@@ -203,6 +219,7 @@ export function projectReadinessLabel(value: ProjectReadiness, t: Translate) {
 const operationKeys: Record<DesktopOperationKind, MessageKey> = {
   local_setup: "operation.localSetup",
   local_project_activate: "operation.localProjectActivate",
+  local_project_remove: "operation.localProjectRemove",
   remote_setup: "operation.remoteSetup",
   quick_share_start: "operation.quickShareStart",
   quick_share_stop: "operation.quickShareStop",

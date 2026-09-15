@@ -200,11 +200,24 @@ A real Windows smoke on 2026-09-15 had several simultaneous local proxy endpoint
 
 Those port numbers are machine-specific evidence, not CodexLink defaults. Manual troubleshooting can still use `--control-plane.http-proxy http://127.0.0.1:<proxy-port>`, while normal CodexLink users should not have to understand or guess a proxy port during first-time setup.
 
+### CodexLink product-fork topology note (2026-09-15)
+
+The current CodexLink dogfood Desktop bundles a source-aligned WebCodex `0.4.1` CLI/Server/Runner built from commit `ae858f5360ff` with `dirty=false`. This is distinct from the older WebCodexLauncher `0.7.2` / WebCodex `0.3.9` chain still kept on the development machine as a fallback during migration.
+
+CodexLink now supports two product-managed long-lived topologies:
+
+- **This computer**: Desktop manages the local Server, local Runner, and OpenAI Secure Tunnel.
+- **Existing Server**: the Server remains remote while Desktop performs one-shot `wc_pair_...` enrollment, stores/reuses the resulting Runner identity, and supervises only the local Runner.
+
+Existing Server mode is real runtime behavior, not a placeholder UI. It also checks Server revision compatibility and must fail closed when the remote Server reports a build mismatch with the bundled CodexLink CLI. Therefore the legacy Launcher must not be retired merely because the form exists: first deploy a source-compatible CodexLink fork Server, complete pairing → restart/reuse → project read/write → Guard smoke, and only then remove the old `0.3.9` path.
+
+The `tunnel-test` ChatGPT integration can already reach the current CodexLink-managed `0.4.1` Runner and is the intended path for the next destructive-Guard acceptance run. Those negative tests must use a disposable authorized root rather than a real source or historical-evidence directory.
+
 ## 6. Create the ChatGPT Connector
 
 In ChatGPT Developer Mode, create a custom MCP app and use:
 
-1. any descriptive name, such as `WebCodex Windows`;
+1. any descriptive product name, such as `CodexLink`;
 2. **Connection: Tunnel**;
 3. the selected WebCodex OpenAI Tunnel;
 4. **Authentication: No authentication**;

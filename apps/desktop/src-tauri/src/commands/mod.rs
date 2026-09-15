@@ -68,6 +68,12 @@ pub struct LaunchAtLoginRequest {
     pub enabled: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiLocaleRequest {
+    pub locale: String,
+}
+
 fn project_state_result(
     app: &AppHandle,
     result: Result<DesktopStateSnapshot, DesktopError>,
@@ -100,6 +106,11 @@ pub async fn get_desktop_state(
 #[tauri::command]
 pub fn open_powershell_install_guide() -> Result<(), DesktopError> {
     crate::platform::open_powershell_install_guide()
+}
+
+#[tauri::command]
+pub fn set_ui_locale(request: UiLocaleRequest, app: AppHandle) {
+    tray::set_ui_locale(&app, &request.locale);
 }
 
 #[tauri::command]
@@ -201,6 +212,18 @@ pub async fn activate_local_project(
     project_state_result(
         &app,
         state.activate_local_project(&request.project_path).await,
+    )
+}
+
+#[tauri::command]
+pub async fn remove_local_project(
+    request: ProjectRequest,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DesktopStateSnapshot, DesktopError> {
+    project_state_result(
+        &app,
+        state.remove_local_project(&request.project_path).await,
     )
 }
 

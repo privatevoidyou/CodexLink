@@ -1,6 +1,6 @@
 # CodexLink License Operator
 
-> 状态：**2026-09-15 Windows 本地管理员签发工具 v1 已实现并完成本机 SSH probe。**
+> 状态：**2026-09-15 Windows 本地管理员签发工具 v1 已实现、用户真实一键签发验收通过，并已作为 `4b4043ca — CodexLink: add local license operator` 提交/推送。**
 >
 > 定位：这是 CodexLink 销售/运营侧的本地管理员工具，不是客户软件，也不是公开授权 API。
 
@@ -122,6 +122,7 @@ stderr 用于故障说明，但不能覆盖已经收到的有效销售码。当�
 - 桌面快捷方式 target / icon / config 路径核验；
 - 使用安装副本执行真实 SSH `PROBE_OK`，未签发销售码；
 - 另用同一 SSH/CLI 合同真实签发 1 枚 unused 集成测试销售码，以确认 `issue --json` schema；该销售码没有写入仓库、Operator 配置或本地工具文件。
+- 用户已实际打开安装后的 GUI 完成一次一键签发并确认体验可用；该人工验收是 Batch H.0 checkpoint 的完成条件之一。
 
 ## 8. 后续管理能力
 

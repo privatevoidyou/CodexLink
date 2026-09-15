@@ -4,7 +4,7 @@
 >
 > 核心决策：**同一枚 `MYWS-...` 销售激活码既是购买资格凭证，也是 CodexLink 首次设备激活凭证；它不是单纯的下载密码。**
 >
-> 目标：把“购买 → 下载 → 本机激活 → 项目 → Tunnel → ChatGPT App”做成一条真实、简单、可测试的商业主链。
+> 目标：把“购买 → 下载 → 本机激活 → Runtime 自动准备 → Tunnel 凭据 → 按需授权路径 → ChatGPT App”做成一条真实、简单、可测试的商业主链。
 
 本文是 CodexLink 首版商业 entitlement / activation 的权威规范。产品 UI 见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)，安全边界见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 
@@ -20,7 +20,7 @@ CodexLink 卖的是**产品使用授权**，不是一个可复制的安装包链
 - 网站使用这枚码验证购买资格并展示下载 / 教程入口；
 - 安装后的 CodexLink 使用**同一枚码**完成设备激活；
 - 没有有效本机 License 时，不允许启动可工作的 Server / Runner / Tunnel runtime；
-- 已激活设备以后通过本地签名 License 验证，不要求每次启动都在线联系授权服务；
+- 已激活设备以后通过本地签名 License 验证，不要求每次启动都在线联系授权服务；普通卸载/重装也不应被当成“换了一台设备”；
 - 安装包即使被单独复制，也不等于获得 CodexLink 使用授权。
 
 首版不把购买资格、下载资格和设备激活拆成三套不同凭证。
@@ -38,9 +38,10 @@ CodexLink 卖的是**产品使用授权**，不是一个可复制的安装包链
 → 安装 CodexLink
 → 首次启动再次输入同一枚 MYWS 激活码
 → 完成设备绑定并取得 Signed License
-→ 选择本地项目
-→ 保存 Tunnel ID + Restricted Runtime Key
-→ CodexLink 自动准备 Engine / Runner / Secure Link
+→ CodexLink 使用 internal runtime anchor 自动准备 Engine / Runner
+→ 若尚未配置，保存 Tunnel ID + Restricted Runtime Key
+→ CodexLink 自动准备 / 恢复 Secure Link
+→ 按需添加一个或多个本地授权路径
 → 在 ChatGPT 创建/添加 CodexLink App
 → 开始使用
 ```
@@ -78,10 +79,12 @@ CodexLink 首次启动时的 Activation Gate 才决定这台设备能否进入�
 1. Desktop 生成 / 读取当前设备身份；
 2. 调用授权服务完成设备激活；
 3. 获得并验证 Signed License；
-4. 持久化 License 与受保护的设备身份；
+4. 将 License 与受保护的设备身份持久化到独立设备资格目录 `%LOCALAPPDATA%\CodexLinkSecretKey\`；
 5. 激活成功后才进入 RC5 Product Shell 和 runtime setup。
 
 销售激活码本身不长期写入 Desktop state。
+
+设备资格与普通 app/runtime data 分离：`%LOCALAPPDATA%\dev.codexlink.desktop` 可以承载可重建的运行状态，而 `CodexLinkSecretKey\device_identity.dpapi + license.json` 不应因为卸载器清理普通应用数据而被删除。当前实现还兼容从 `CodexLink.DeviceActivation.v1` 与更旧 app-data `license` 目录迁移。
 
 ---
 
@@ -128,6 +131,9 @@ CodexLink Desktop
 - 未激活时 runtime-creating operation fail closed；
 - 已激活设备可离线验证 License；
 - 历史 RC5 `license.json + device_identity.dpapi` 与当前 LicenseManager 兼容。
+- 当前工作树已把设备激活目标目录迁到 `%LOCALAPPDATA%\CodexLinkSecretKey\`，并增加跨旧目录迁移与“删除普通 app data 后设备资格仍存在”的自动化回归；
+- Activation error 由 `error.code` 映射到当前 UI locale，后端英文 `next_action` 不再直接暴露给中文用户；
+- Signed License 内部 `product: "webcodex-deployment"` 暂时作为签名协议字段保留，不能客户端单边改名；未来如迁移必须同时升级服务端签发端和客户端验证端。
 
 实现 checkpoint：`733b7b54 — CodexLink: restore RC5 device activation`。
 
@@ -183,9 +189,9 @@ CodexLink Desktop
 普通用户首用只需要理解四类输入：
 
 1. 购买后收到的销售激活码（首次设备激活）；
-2. 本地项目目录；
-3. OpenAI Tunnel ID；
-4. Restricted Runtime Key。
+2. OpenAI Tunnel ID；
+3. Restricted Runtime Key；
+4. 需要让 ChatGPT 访问时，再添加一个或多个本地授权路径。
 
 Server、Runner、端口、enrollment、tunnel-client path、health URL 等全部属于实现细节，默认自动处理和隐藏。
 
@@ -193,8 +199,9 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 
 ```text
 购买 / 激活
-→ 项目
-→ 两项 OpenAI Tunnel 凭据
+→ CodexLink 自动准备内部 Runtime
+→ 两项 OpenAI Tunnel 凭据（若尚未保存）
+→ 按需添加本地授权路径
 → ChatGPT App
 ```
 
@@ -214,6 +221,8 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 - 激活码无效：明确提示检查购买码或联系支持；
 - 本地 License 损坏 / 无法验证：进入 recovery activation，而不是绕过 Gate；
 - 已有有效 License：正常启动不依赖网站在线。
+- 卸载/重装：只要独立设备资格目录仍在且 License 有效，应直接识别同一设备；不得因为删除普通 app data 就要求重新消费销售激活码；
+- 已绑定到另一设备：按当前商业策略进入支持流程，不在客户端提供绕过绑定的隐藏开关。
 
 设备数量、换机、解绑、退款等商业政策由授权服务 / 支持政策单独定义；客户端首版不自行发明绕过机制。
 
@@ -241,7 +250,7 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 5. 同一枚有效销售激活码可以完成 Desktop 设备激活；
 6. 激活成功后重启可离线验证，不要求每次联网；
 7. 激活码不出现在普通 state、日志、activity、diagnostics；
-8. upgrade / uninstall / reinstall 按既定持久数据策略处理已激活状态；
+8. upgrade / uninstall / reinstall 不删除 `%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格；即使普通 app data 被清理，同设备仍能恢复已激活状态；
 9. clean-machine 外部测试者可以不理解授权实现细节完成“验证购买 → 下载 → 安装 → 激活”；
 10. 网站、Desktop 和教程使用一致的产品词汇和同一条客户主链。
 

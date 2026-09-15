@@ -135,6 +135,7 @@ export interface TunnelProxySnapshot {
 export type DesktopOperationKind =
   | "local_setup"
   | "local_project_activate"
+  | "local_project_remove"
   | "remote_setup"
   | "quick_share_start"
   | "quick_share_stop"
@@ -186,6 +187,7 @@ export interface DesktopState {
   topology?: RuntimeTopology | null;
   readiness: ReadinessSnapshot;
   project?: ProjectSelection | null;
+  projects: ProjectSelection[];
   binaries?: BinaryInfo | null;
   powershell_runtime?: PowerShellRuntimeSnapshot | null;
   chatgpt_activity?: ChatGptActivitySnapshot | null;

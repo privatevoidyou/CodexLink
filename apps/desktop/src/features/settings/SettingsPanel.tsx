@@ -4,7 +4,6 @@ import type { DesktopError, DesktopState, TunnelProxyMode } from "../../models/t
 import { LANGUAGES, useLocale } from "../../i18n/locale";
 import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
 import { TunnelConfigDiagnostics } from "../connection/TunnelConfigDiagnostics";
-import { PowerShellInstallGuidance } from "./PowerShellInstallGuidance";
 
 export function SettingsPanel({
   state,
@@ -122,8 +121,13 @@ export function SettingsPanel({
         <TunnelConfigDiagnostics state={state} onState={onState} />
       </section>
 
-      <details className="settings-advanced settings-network" open>
-        <summary>{t("settings.networkAdvanced")}</summary>
+      <section className="settings-group settings-network" aria-labelledby="settings-network-title">
+        <div className="settings-group-heading">
+          <div>
+            <h2 id="settings-network-title">{t("settings.networkAdvanced")}</h2>
+            <p>{t("settings.networkAdvancedHelp")}</p>
+          </div>
+        </div>
         <article className="detail-card tunnel-proxy-settings">
           <div className="field-group">
             <label htmlFor="desktop-tunnel-proxy-mode">{t("settings.tunnelProxy")}</label>
@@ -178,24 +182,8 @@ export function SettingsPanel({
           </button>
           {proxyError && <SettingsError error={proxyError} />}
         </article>
-      </details>
+      </section>
 
-      <details className="settings-advanced settings-diagnostics">
-        <summary>{t("settings.diagnostics")}</summary>
-        <PowerShellInstallGuidance state={state} onState={onState} />
-        <article className="detail-card">
-          {state.binaries ? (
-            <dl className="detail-list">
-              <div><dt>{t("settings.version")}</dt><dd>{state.binaries.version}</dd></div>
-              <div><dt>{t("settings.sourceRevision")}</dt><dd>{state.binaries.git_commit}</dd></div>
-              <div><dt>{t("settings.binaryDirectory")}</dt><dd>{state.binaries.directory}</dd></div>
-              <div><dt>{t("settings.runtimeProjectId")}</dt><dd>{state.project?.runtime_project_id ?? t("settings.notEstablished")}</dd></div>
-            </dl>
-          ) : (
-            <p>{t("settings.binariesPending")}</p>
-          )}
-        </article>
-      </details>
     </section>
   );
 }

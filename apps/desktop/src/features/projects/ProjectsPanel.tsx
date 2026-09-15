@@ -1,11 +1,25 @@
 import type { DesktopState } from "../../models/topology";
 import { useLocale } from "../../i18n/locale";
+
+function displayProjectName(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  if (/^[A-Za-z]:$/.test(normalized)) return normalized;
+  return normalized.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
 import { projectReadinessLabel } from "../../i18n/presentation";
 
-export function ProjectsPanel({ state, onChooseProject }: { state: DesktopState; onChooseProject: () => void }) {
+export function ProjectsPanel({
+  state,
+  onChooseProject,
+  onRemoveProject,
+}: {
+  state: DesktopState;
+  onChooseProject: () => void;
+  onRemoveProject: (projectPath: string) => void;
+}) {
   const { t } = useLocale();
-  const projectName = state.project?.path.split(/[\\/]/).filter(Boolean).pop();
-  const projectReady = state.readiness.project === "ready";
+  const projects = state.projects ?? [];
+  const projectReady = state.readiness.runtime_ready;
   return (
     <section className="page-section rc5-page" aria-labelledby="projects-title" data-webcodex-page="projects">
       <div className="page-heading-row rc5-heading-row">
@@ -18,39 +32,51 @@ export function ProjectsPanel({ state, onChooseProject }: { state: DesktopState;
           className="primary-button"
           onClick={onChooseProject}
           disabled={Boolean(state.current_operation)}
-          data-webcodex-action={state.project ? "change-project" : "add-project"}
+          data-webcodex-action="add-project"
         >
-          {state.project ? t("project.change") : `+ ${t("project.add")}`}
+          + {t("project.add")}
         </button>
       </div>
 
       <div className="project-count-row">
-        <div><strong>{state.project ? 1 : 0}</strong><span>{t("project.authorized")}</span></div>
+        <div><strong>{projects.length}</strong><span>{t("project.authorized")}</span></div>
         <span className="project-count-hint">{t("project.countHint")}</span>
       </div>
 
       <div className="project-library-grid">
-      {state.project ? (
-        <article className="project-library-card" aria-labelledby="configured-project-title">
-          <div className="project-library-icon" aria-hidden="true"><span className="nav-icon nav-projects" /></div>
-          <div className="project-library-copy">
-            <div className="project-library-heading">
-              <h2 id="configured-project-title">{projectName}</h2>
-              <span className={`project-access-badge ${projectReady ? "ready" : "pending"}`}>
-                <i className={`status-dot ${projectReady ? "ready" : "pending"}`} aria-hidden="true" />
-                {projectReady ? t("project.aiAccessReady") : projectReadinessLabel(state.readiness.project, t)}
-              </span>
+      {projects.length > 0 ? (
+        projects.map((project) => (
+          <article className="project-library-card" key={project.path}>
+            <div className="project-library-icon" aria-hidden="true"><span className="nav-icon nav-projects" /></div>
+            <span className="project-added-badge">
+              <i className="status-dot ready" aria-hidden="true" />
+              {t("project.added")}
+            </span>
+            <div className="project-library-copy">
+              <div className="project-library-heading">
+                <h2>{displayProjectName(project.path)}</h2>
+              </div>
+              <code>{project.path}</code>
             </div>
-            <code>{state.project.path}</code>
-            <div className="project-library-meta">
-              <span>{t("project.allowedRoot")}: {state.project.allowed_root}</span>
-              <span>{state.project.is_git_repository ? t("project.gitDetected") : t("project.gitNotRequired")}</span>
+            <div className="project-library-access-row">
+              <span>{t("project.aiAccess")}</span>
+              <strong className={projectReady ? "ready" : "pending"}>
+                {projectReady ? t("common.ready") : projectReadinessLabel(state.readiness.project, t)}
+              </strong>
             </div>
-          </div>
-          <button className="secondary-button" onClick={onChooseProject} disabled={Boolean(state.current_operation)}>
-            {t("project.change")}
-          </button>
-        </article>
+            <div className="project-library-footer">
+              <span>{project.is_git_repository ? t("project.gitDetected") : t("project.regularFolder")}</span>
+              <button
+                className="secondary-button"
+                onClick={() => onRemoveProject(project.path)}
+                disabled={Boolean(state.current_operation)}
+                data-webcodex-action="remove-project"
+              >
+                {t("project.remove")}
+              </button>
+            </div>
+          </article>
+        ))
       ) : (
         <div className="empty-state project-empty-state">
           <div className="project-library-icon" aria-hidden="true"><span className="nav-icon nav-projects" /></div>
@@ -62,6 +88,7 @@ export function ProjectsPanel({ state, onChooseProject }: { state: DesktopState;
         </div>
       )}
       </div>
+      <p className="project-library-note">{t("project.runnerScopeNote")}</p>
     </section>
   );
 }

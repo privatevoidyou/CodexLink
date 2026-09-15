@@ -39,6 +39,14 @@ pub fn run() {
             app.manage(AppState::new(data_dir, resource_dir)?);
             app.manage(desktop_shell::DesktopShellState::default());
             app.manage(tray::TrayPresentationCache::default());
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window(desktop_shell::MAIN_WINDOW_LABEL) {
+                if let Ok(icon) =
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
+                {
+                    let _ = window.set_icon(icon);
+                }
+            }
             tray::setup(app.handle())?;
 
             let snapshot = app.state::<AppState>().get_state();
@@ -54,6 +62,7 @@ pub fn run() {
             commands::get_desktop_state,
             commands::activate_license,
             commands::open_powershell_install_guide,
+            commands::set_ui_locale,
             commands::get_launch_at_login,
             commands::set_launch_at_login,
             commands::refresh_runtime_status,
@@ -64,6 +73,7 @@ pub fn run() {
             commands::inspect_project,
             commands::configure_local_setup,
             commands::activate_local_project,
+            commands::remove_local_project,
             commands::configure_remote_setup,
             commands::start_quick_share,
             commands::stop_quick_share,

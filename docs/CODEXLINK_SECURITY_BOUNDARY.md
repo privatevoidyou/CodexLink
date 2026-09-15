@@ -1,12 +1,14 @@
 # CodexLink First-Release Security Boundary
 
-> 状态：**2026-09-14 正式敲定，首个商业版本的安全边界规范。**
+> 状态：**2026-09-15 首版安全边界规范保持有效；Batch F focused Gate 已提交，下一项 release Gate 是通过当前 CodexLink 0.4.1 / tunnel-test 做真实 destructive shell 与 no-child-spawn 验收。**
 >
 > 适用范围：CodexLink Desktop、CodexLink 管理的 WebCodex Server / Runner、模型可见的 typed file tools 与本地 execution admission。
 >
 > 核心决策：**首版不做 OS sandbox；允许正常开发 execution；重点防止 Agent 常见的大范围误删、误覆盖和明显 destructive shell。**
 
 本文是 CodexLink 首版安全策略的详细单一来源。主线交付路线图只保留摘要并引用本文，避免安全规则在多份文档中漂移。
+
+当前 dogfood runtime identity：`WebCodex 0.4.1 / ae858f5360ff / dirty=false`。历史上游恢复基线 `26c44e...` 仍是来源证据，但真实安全验收必须针对当前 bundled fork build，而不是只复用旧测试结果。
 
 ---
 
@@ -94,6 +96,7 @@ Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell
 首版继续依赖并保持：
 
 - exact project authority / canonical path；
+- internal runtime anchor 与 user authorized roots 分离；internal anchor 只维持 CodexLink Runtime identity，不自动成为用户项目 authority；
 - guarded edit / expected SHA；
 - License 与 Tunnel secret 的 DPAPI protection；
 - CodexLink-owned process tree / Job Object 生命周期；
@@ -254,7 +257,8 @@ walk tree once
 - 授权 root 的父目录；
 - Windows 系统核心 anchor（如 Windows / Program Files / Users 根）；
 - 当前用户 profile 根本身；
-- CodexLink state / license / secrets 根及其敏感子树；
+- CodexLink app state / runtime / connection 根；
+- `%LOCALAPPDATA%\CodexLinkSecretKey` 设备激活根及其 `device_identity.dpapi` / `license.json` 敏感子树；
 - repository metadata anchor（至少 `.git` 根目录）。
 
 注意：保护 anchor 不等于永远禁止清理其所有安全子目录。以后若产品明确支持系统清理，应逐项定义可删除的具体子树，而不是允许删除 anchor 本身。
@@ -451,6 +455,32 @@ Batch F 在恢复 CodexLink-managed model-authored normal shell / process / scri
 - installer / migration / staging 无新增 broad destructive cleanup。
 
 这些 focused tests 已通过后，CodexLink 不修改 WebCodex 通用 enrollment 默认，而是在自己管理的 Runner 上通过 `project activate --allow-raw-shell` + config check / generation CAS / hot reload，从初始 fail-closed 配置切换到“正常 execution + Destructive Guard”。新 RC 真机仍必须验证完整 normal execution 与 deny-no-child-spawn 行为。
+
+---
+
+## 11.5 当前 tunnel-test 安全验收计划
+
+Batch F focused tests 证明 Guard/typed contract 的实现，但正式进入规模测试前还要通过当前产品链路做一次真机端到端负面测试：
+
+```text
+ChatGPT / tunnel-test
+→ CodexLink bundled 0.4.1 ae858f...
+→ Runner execution admission
+→ disposable authorized test root
+```
+
+要求：
+
+- 正常 `git status` / build / test / PowerShell / Node / Python 工作流可运行；
+- `run_process` 不接受 shell 语义；需要 shell 的命令必须走专用 shell contract；
+- PowerShell / cmd / shell 的明显 recursive delete 在 spawn 前拒绝；
+- destructive Git、mirror/purge、disk destructive primitive 在 spawn 前拒绝；
+- project root / parent / drive root / wildcard / protected anchor / reparse 继续 fail closed；
+- deny 后验证没有 destructive child process 留下；
+- typed `delete_directory` 只在专门 disposable tree 中验证成功路径；
+- 不对真实 CodexLink 源码树、`D:\Test` 历史证据或用户真实文件做 destructive 负面测试。
+
+只有这一 Gate 通过后，才建议把公网 Server 切到当前 fork build，并进一步退休旧 WebCodexLauncher 链路。
 
 ---
 

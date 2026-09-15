@@ -23,7 +23,7 @@ export function ConnectionPanel({
   const secureLinkReady = state.regular_tunnel?.status === "ready"
     && Boolean(state.regular_tunnel.ready_for_chatgpt);
   const tunnelError = state.regular_tunnel?.status === "error";
-  const chatgptObserved = runtimeReady && secureLinkReady && Boolean(state.chatgpt_activity?.observed);
+  const chatgptAccessible = runtimeReady && secureLinkReady;
   const tunnelId = state.openai_tunnel_config.effective_tunnel_id ?? state.openai_tunnel_config.saved_tunnel_id;
 
   if (state.topology?.server.kind === "remote") {
@@ -112,36 +112,35 @@ export function ConnectionPanel({
       <h1 id="connection-title">{t("connection.title")}</h1>
       <p className="lede">{t("connection.description")}</p>
       {tunnelId && <span className="visually-hidden">{tunnelId}</span>}
-      {chatgptObserved && <span className="visually-hidden">{t("connection.established")}</span>}
-      {secureLinkReady && !chatgptObserved && <span className="visually-hidden">{t("connection.waitingForChatGptShort")}</span>}
+      {chatgptAccessible && <span className="visually-hidden">{t("connection.chatgptAccessible")}</span>}
 
       <div className="connection-overview-grid">
-        <article className={`connection-progress-card ${chatgptObserved ? "ready" : "pending"}`}>
+        <article className={`connection-progress-card ${chatgptAccessible ? "ready" : "pending"}`}>
           <div className="connection-progress-heading">
             <div>
               <span className="section-kicker">CodexLink</span>
               <h2>{t("connection.connectTitle")}</h2>
             </div>
-            <span className={`connection-state-badge ${chatgptObserved ? "ready" : "pending"}`}>
-              <i className={`status-dot ${chatgptObserved ? "ready" : "pending"}`} aria-hidden="true" />
-              {chatgptObserved ? t("common.connected") : t("connection.inProgress")}
+            <span className={`connection-state-badge ${chatgptAccessible ? "ready" : "pending"}`}>
+              <i className={`status-dot ${chatgptAccessible ? "ready" : "pending"}`} aria-hidden="true" />
+              {chatgptAccessible ? t("connection.chatgptAccessible") : t("connection.inProgress")}
             </span>
           </div>
           <ol className="connection-step-list">
             <ConnectionStep index={1} ready={runtimeReady} label={t("connection.stepRuntime")} description={t("home.runnerExplanation")} />
             <ConnectionStep index={2} ready={credentialsReady} label={t("connection.stepCredentials")} description={t("settings.tunnelHelp")} />
             <ConnectionStep index={3} ready={secureLinkReady} label={t("connection.stepSecureLink")} description={t("connection.secureLinkHelp")} />
-            <ConnectionStep index={4} ready={chatgptObserved} label={t("connection.stepChatGpt")} description={t("connection.createAppHelp")} />
+            <ConnectionStep index={4} ready={chatgptAccessible} label={t("connection.stepChatGpt")} description={t("connection.createAppHelp")} />
           </ol>
         </article>
 
         <article className="connection-status-card">
           <div className="connection-status-hero">
             <span className="section-kicker">{t("connection.current")}</span>
-            <div className={`connection-status-icon ${secureLinkReady ? "ready" : "pending"}`} aria-hidden="true">○</div>
+            <div className={`connection-status-icon ${secureLinkReady ? "ready" : "pending"}`} aria-hidden="true"><span /></div>
             <div>
-              <h2>{chatgptObserved || secureLinkReady ? t("connection.normal") : t("connection.needsAction")}</h2>
-              <p>{secureLinkReady ? t("connection.waitingForChatGpt") : t("connection.secureLinkHelp")}</p>
+              <h2>{chatgptAccessible ? t("connection.normal") : t("connection.needsAction")}</h2>
+              <p>{chatgptAccessible ? t("connection.chatgptAccessibleHelp") : t("connection.secureLinkHelp")}</p>
             </div>
           </div>
           <dl className="connection-status-list">
@@ -159,8 +158,8 @@ export function ConnectionPanel({
           {error && <LocalizedError error={error} />}
           <dl className="connection-status-list diagnostic-list">
             <ConnectionStatusRow label={t("connection.runtimeStatus")} value={runtimeReady ? t("common.ready") : t("common.error")} ready={runtimeReady} />
-            <ConnectionStatusRow label={t("connection.credentialsStatus")} value={credentialsReady ? `✓ ${t("common.configured")}` : t("connection.notConfigured")} ready={credentialsReady} />
-            {state.tunnel_proxy.effective_url && <ConnectionStatusRow label={t("connection.networkRoute")} value={`✓ ${state.tunnel_proxy.effective_url}`} ready />}
+            <ConnectionStatusRow label={t("connection.credentialsStatus")} value={credentialsReady ? t("common.configured") : t("connection.notConfigured")} ready={credentialsReady} />
+            {state.tunnel_proxy.effective_url && <ConnectionStatusRow label={t("connection.networkRoute")} value={state.tunnel_proxy.effective_url} ready />}
           </dl>
           {!credentialsReady && <button className="primary-button" onClick={onOpenSettings}>{t("connection.configureCredentials")}</button>}
           {credentialsReady && runtimeReady && (!secureLinkReady || tunnelError) && (
@@ -174,7 +173,7 @@ export function ConnectionPanel({
           <div>
             <span className="section-kicker">OpenAI Secure Tunnel</span>
             <strong>{secureLinkReady ? t("connection.normal") : tunnelError ? t("common.error") : tunnelStarted ? t("connection.needsAction") : t("connection.secureLinkNotStarted")}</strong>
-            <p>{secureLinkReady ? t("connection.waitingForChatGpt") : credentialsReady ? t("connection.secureLinkHelp") : t("connection.credentialsFirst")}</p>
+            <p>{secureLinkReady ? t("connection.chatgptAccessibleHelp") : credentialsReady ? t("connection.secureLinkHelp") : t("connection.credentialsFirst")}</p>
           </div>
           {tunnelStarted && (
             <button className="danger-button" onClick={() => void run(desktopApi.stopRegularTunnel)} disabled={mutationBusy} data-webcodex-action="stop-regular-tunnel">

@@ -799,12 +799,19 @@ mod tests {
             .join("alice");
         StoredDesktopConfig {
             topology: None,
+            runtime_anchor: None,
             project: Some(ProjectSelection {
                 path: r"D:\GitHub\customer-project".to_string(),
                 allowed_root: r"D:\GitHub\customer-project".to_string(),
                 is_git_repository: true,
                 runtime_project_id: Some("project-1".to_string()),
             }),
+            projects: vec![ProjectSelection {
+                path: r"D:\GitHub\customer-project".to_string(),
+                allowed_root: r"D:\GitHub\customer-project".to_string(),
+                is_git_repository: true,
+                runtime_project_id: Some("project-1".to_string()),
+            }],
             runtime: Some(StoredRuntime {
                 server_url: "https://example.test".to_string(),
                 server_env_file: Some(legacy.join("runtime/local/webcodex.env")),

@@ -19,6 +19,17 @@ pub struct ProjectActivationOutput {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct ProjectRemovalOutput {
+    pub project: ProjectRemovalProjectOutput,
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectRemovalProjectOutput {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct LegacyProjectRegisterOutput {
     pub project: LegacyRegisteredProjectOutput,
 }

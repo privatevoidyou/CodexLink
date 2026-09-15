@@ -180,8 +180,8 @@ pub fn aggregate_readiness(
         (
             ReadinessSummaryKind::ServiceNeedsAttention,
             Some(ReadinessNextActionKind::StartOrReconnectService),
-            "WebCodex Service needs attention".to_string(),
-            Some("Start or reconnect the WebCodex Service.".to_string()),
+            "CodexLink Service needs attention".to_string(),
+            Some("Start or reconnect the CodexLink Service.".to_string()),
         )
     } else if !matches!(runner, RunnerReadiness::Ready) {
         (
@@ -274,6 +274,7 @@ pub struct RegularTunnelState {
 pub enum DesktopOperationKind {
     LocalSetup,
     LocalProjectActivate,
+    LocalProjectRemove,
     RemoteSetup,
     QuickShareStart,
     QuickShareStop,
@@ -291,6 +292,7 @@ impl DesktopOperationKind {
         match self {
             Self::LocalSetup => "local_setup",
             Self::LocalProjectActivate => "local_project_activate",
+            Self::LocalProjectRemove => "local_project_remove",
             Self::RemoteSetup => "remote_setup",
             Self::QuickShareStart => "quick_share_start",
             Self::QuickShareStop => "quick_share_stop",
@@ -423,6 +425,8 @@ pub struct DesktopStateSnapshot {
     pub topology: Option<RuntimeTopology>,
     pub readiness: ReadinessSnapshot,
     pub project: Option<ProjectSelection>,
+    #[serde(default)]
+    pub projects: Vec<ProjectSelection>,
     pub binaries: Option<BinaryInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub powershell_runtime: Option<PowerShellRuntimeSnapshot>,
@@ -447,6 +451,7 @@ impl Default for DesktopStateSnapshot {
             topology: None,
             readiness: ReadinessSnapshot::default(),
             project: None,
+            projects: Vec::new(),
             binaries: None,
             powershell_runtime: None,
             chatgpt_activity: None,
@@ -473,7 +478,12 @@ impl Default for DesktopStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct StoredDesktopConfig {
     pub topology: Option<RuntimeTopology>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_anchor: Option<ProjectSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectSelection>,
+    #[serde(default)]
+    pub projects: Vec<ProjectSelection>,
     pub runtime: Option<StoredRuntime>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_autostart: Option<bool>,

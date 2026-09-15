@@ -27,6 +27,14 @@ pub(crate) struct ProjectActivateOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectRemoveOptions {
+    pub(crate) config: PathBuf,
+    pub(crate) user_token_file: PathBuf,
+    pub(crate) project: PathBuf,
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectRegistration {
     pub(crate) id: String,
     pub(crate) path: PathBuf,
@@ -200,6 +208,96 @@ fn prepare_exact_project_authority(
         allowed_roots,
         authority_changed: !exact_root_present,
     })
+}
+
+fn prepare_exact_project_removal(
+    project: &Path,
+    configured_roots: &[PathBuf],
+) -> Result<PreparedProjectAuthority, String> {
+    webcodex_runner_config::paths::validate_project_path_ingress(project)?;
+    if project
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("project path must not contain parent traversal".to_string());
+    }
+    let canonical_project = canonical_existing_directory(project, "project path")?;
+    let mut removed = false;
+    let mut broader_root = None;
+    let mut allowed_roots = Vec::with_capacity(configured_roots.len());
+    for root in configured_roots {
+        let resolved = root.canonicalize().unwrap_or_else(|_| root.clone());
+        let exact = webcodex_runner_config::paths::paths_equal(&resolved, &canonical_project);
+        if exact {
+            removed = true;
+        } else {
+            if canonical_project.starts_with(&resolved) {
+                broader_root = Some(resolved.clone());
+            }
+            allowed_roots.push(root.clone());
+        }
+    }
+    if let Some(root) = broader_root {
+        return Err(format!(
+            "project_removal_still_authorized_by_parent: {} remains reachable through broader allowed root {}; remove the broader authorization first",
+            canonical_project.display(),
+            root.display()
+        ));
+    }
+    Ok(PreparedProjectAuthority {
+        canonical_project,
+        allowed_roots,
+        authority_changed: removed,
+    })
+}
+
+fn valid_project_revision(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn render_removal_output(
+    opts: &ProjectRemoveOptions,
+    canonical_project: &Path,
+    runtime_project: Option<&str>,
+    outcome: &str,
+    authority_changed: bool,
+    config_reloaded: bool,
+    reconciled: bool,
+) -> Result<String, String> {
+    if opts.json {
+        return serde_json::to_string_pretty(&json!({
+            "project": {
+                "runtime_project": runtime_project,
+                "path": canonical_project.to_string_lossy(),
+            },
+            "outcome": outcome,
+            "policy": {
+                "authority_changed": authority_changed,
+                "config_reloaded": config_reloaded,
+            },
+            "reconciled": reconciled,
+        }))
+        .map_err(|error| error.to_string());
+    }
+    Ok(format!(
+        "Project access removed:\n  {}\n",
+        canonical_project.display()
+    ))
+}
+
+async fn reconcile_project_removal(
+    server_url: &str,
+    token: &str,
+    client_id: &str,
+    canonical_project: &Path,
+) -> Result<bool, String> {
+    Ok(
+        reconcile_project_from_inventory(server_url, token, client_id, canonical_project)
+            .await?
+            .is_none(),
+    )
 }
 
 fn register_canonical_project(
@@ -1016,6 +1114,232 @@ pub(crate) async fn run_project_activate(opts: ProjectActivateOptions) -> Result
     }
 }
 
+pub(crate) async fn run_project_remove(opts: ProjectRemoveOptions) -> Result<String, String> {
+    let token = read_optional_token(&Some(opts.user_token_file.clone()), "--user-token-file")?
+        .ok_or_else(|| "--user-token-file does not contain a token".to_string())?;
+    validate_user_api_token(&token)?;
+
+    let (mut config, mut config_content) = read_activation_config(&opts.config)?;
+    let server_url = config.server_url.clone();
+    let client_id = config.client_id.clone();
+    let mut prepared = prepare_exact_project_removal(&opts.project, &config.policy.allowed_roots)?;
+    let canonical_project = prepared.canonical_project.clone();
+    let mut authority_changed = false;
+    let mut config_reloaded = false;
+
+    // Narrow Runner authority before unregistering the Project. If the Server-side
+    // mutation later becomes uncertain, the local Runner is already fail-closed
+    // for this exact root. Re-running this command never re-adds authority.
+    for _ in 0..3 {
+        if prepared.authority_changed {
+            config_content = persist_activation_policy_if_unchanged(
+                &opts.config,
+                &config_content,
+                &prepared.allowed_roots,
+                false,
+            )?;
+            authority_changed = true;
+            config.policy.allowed_roots = prepared.allowed_roots.clone();
+            prepared.authority_changed = false;
+        }
+
+        let checked = operator_tool_call(
+            &server_url,
+            &token,
+            "/api/runners/config/check",
+            json!({"client_id": client_id}),
+        )
+        .await?;
+        if !checked.success {
+            if capability_unavailable(&checked) {
+                return Err("project_removal_capability_unavailable: this Runner does not support hot project removal".to_string());
+            }
+            return Err(format!(
+                "Runner config check failed during project removal: {}",
+                checked
+                    .error
+                    .as_deref()
+                    .unwrap_or("unknown config check error")
+            ));
+        }
+        if checked.output.get("valid").and_then(Value::as_bool) != Some(true) {
+            return Err("project_removal_invalid_config: narrowed Runner config candidate is invalid; Project unregister was not dispatched".to_string());
+        }
+        if checked
+            .output
+            .get("restart_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Err("project_removal_restart_required: Runner config contains startup-only changes; Project unregister was not dispatched".to_string());
+        }
+        let generation = checked
+            .output
+            .get("current_generation")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Runner config check did not report current_generation".to_string())?;
+
+        if !runner_config_candidate_unchanged(&opts.config, &config_content)? {
+            let snapshot = reread_activation_config(&opts.config, &server_url, &client_id)?;
+            config = snapshot.0;
+            config_content = snapshot.1;
+            prepared =
+                prepare_exact_project_removal(&canonical_project, &config.policy.allowed_roots)?;
+            continue;
+        }
+
+        let reload = operator_tool_call(
+            &server_url,
+            &token,
+            "/api/runners/config/reload",
+            json!({"client_id": client_id, "expected_generation": generation}),
+        )
+        .await;
+        match reload {
+            Ok(result) if result.success => {
+                if result
+                    .output
+                    .get("restart_required")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    return Err("project_removal_restart_required: Runner reported startup-only changes after reload".to_string());
+                }
+                config_reloaded = true;
+                break;
+            }
+            Ok(result) if operator_error_code(&result) == Some("config_generation_conflict") => {
+                let snapshot = reread_activation_config(&opts.config, &server_url, &client_id)?;
+                config = snapshot.0;
+                config_content = snapshot.1;
+                prepared = prepare_exact_project_removal(
+                    &canonical_project,
+                    &config.policy.allowed_roots,
+                )?;
+                continue;
+            }
+            Ok(result) if operation_uncertain(&result) => {
+                reconcile_reload_generation(
+                    &server_url,
+                    &token,
+                    &client_id,
+                    &opts.config,
+                    &config_content,
+                    generation,
+                )
+                .await
+                .map_err(|error| format!("project_removal_reconcile_required: {error}"))?;
+                config_reloaded = true;
+                break;
+            }
+            Ok(result) if capability_unavailable(&result) => {
+                return Err("project_removal_capability_unavailable: this Runner does not support hot config reload".to_string());
+            }
+            Ok(result) => {
+                return Err(format!(
+                    "project removal config reload failed: {}",
+                    result
+                        .error
+                        .as_deref()
+                        .unwrap_or("unknown config reload error")
+                ));
+            }
+            Err(_) => {
+                reconcile_reload_generation(
+                    &server_url,
+                    &token,
+                    &client_id,
+                    &opts.config,
+                    &config_content,
+                    generation,
+                )
+                .await
+                .map_err(|error| format!("project_removal_reconcile_required: {error}"))?;
+                config_reloaded = true;
+                break;
+            }
+        }
+    }
+    if !config_reloaded {
+        return Err("project_removal_config_conflict: Runner config kept changing; Project unregister was not dispatched".to_string());
+    }
+
+    let project =
+        reconcile_project_from_inventory(&server_url, &token, &client_id, &canonical_project)
+            .await?;
+    let Some(project) = project else {
+        return render_removal_output(
+            &opts,
+            &canonical_project,
+            None,
+            "already_unregistered",
+            authority_changed,
+            config_reloaded,
+            true,
+        );
+    };
+    let runtime_project = project
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "project_removal_reconcile_required: project inventory omitted its id".to_string()
+        })?
+        .to_string();
+    let revision = project
+        .get("revision")
+        .and_then(Value::as_str)
+        .filter(|value| valid_project_revision(value))
+        .ok_or_else(|| "project_removal_reconcile_required: project inventory omitted a valid revision; unregister was not dispatched".to_string())?
+        .to_string();
+
+    let unregister = operator_tool_call(
+        &server_url,
+        &token,
+        "/api/projects/unregister",
+        json!({
+            "project": runtime_project,
+            "expected_revision": revision,
+        }),
+    )
+    .await;
+    match unregister {
+        Ok(result) if result.success => {
+            let output_project = result.output.get("project").and_then(Value::as_str);
+            let outcome = result.output.get("outcome").and_then(Value::as_str);
+            if output_project == Some(runtime_project.as_str())
+                && matches!(outcome, Some("unregistered" | "already_unregistered"))
+            {
+                return render_removal_output(
+                    &opts,
+                    &canonical_project,
+                    Some(&runtime_project),
+                    outcome.unwrap_or("unregistered"),
+                    authority_changed,
+                    config_reloaded,
+                    false,
+                );
+            }
+        }
+        _ => {}
+    }
+
+    // Unregister is non-idempotent with respect to a revision. Never dispatch it
+    // a second time after a lost/ambiguous response; observe inventory instead.
+    if reconcile_project_removal(&server_url, &token, &client_id, &canonical_project).await? {
+        return render_removal_output(
+            &opts,
+            &canonical_project,
+            Some(&runtime_project),
+            "unregistered",
+            authority_changed,
+            config_reloaded,
+            true,
+        );
+    }
+    Err("project_removal_reconcile_required: unregister outcome could not be proven; narrowed Runner authority was kept and no retry was attempted".to_string())
+}
+
 pub(crate) fn run_project_register(opts: ProjectRegisterOptions) -> Result<String, String> {
     let config = read_registration_config(&opts.config)?;
     // Mirror Runner config loading exactly: old/new config spellings normalize
@@ -1259,6 +1583,57 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn removal_drops_only_the_exact_root_and_preserves_disjoint_authority() {
+        let tmp = canonical_test_tempdir();
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        let first = first.canonicalize().unwrap();
+        let second = second.canonicalize().unwrap();
+
+        let prepared =
+            prepare_exact_project_removal(&first, &[first.clone(), second.clone()]).unwrap();
+        assert!(prepared.authority_changed);
+        assert_eq!(prepared.canonical_project, first);
+        assert_eq!(prepared.allowed_roots, vec![second]);
+    }
+
+    #[test]
+    fn removal_refuses_to_claim_revocation_while_a_broader_root_still_covers_target() {
+        let tmp = canonical_test_tempdir();
+        let parent = tmp.path().join("parent");
+        let project = parent.join("demo");
+        std::fs::create_dir_all(&project).unwrap();
+        let parent = parent.canonicalize().unwrap();
+        let project = project.canonicalize().unwrap();
+
+        let error =
+            prepare_exact_project_removal(&project, &[parent, project.clone()]).unwrap_err();
+        assert!(error.contains("project_removal_still_authorized_by_parent"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn removal_accepts_an_explicit_windows_drive_root() {
+        let cwd = std::env::current_dir().unwrap();
+        let prefix = cwd
+            .components()
+            .next()
+            .expect("current directory should have a drive prefix")
+            .as_os_str()
+            .to_string_lossy()
+            .to_string();
+        let drive_root = PathBuf::from(format!("{prefix}\\"));
+        let drive_root = drive_root.canonicalize().unwrap();
+
+        let prepared =
+            prepare_exact_project_removal(&drive_root, std::slice::from_ref(&drive_root)).unwrap();
+        assert!(prepared.authority_changed);
+        assert!(prepared.allowed_roots.is_empty());
     }
 
     #[tokio::test]
