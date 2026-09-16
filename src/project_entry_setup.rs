@@ -321,6 +321,7 @@ pub(crate) fn setup(options: &ProjectCommandOptions) -> Result<SetupReport, Prod
             project_registry_dir: paths.project_registry.clone(),
             output: runner_config.clone(),
             allowed_roots: vec![config.root.clone(), paths.runs.clone(), paths.cache.clone()],
+            allow_empty_allowed_roots: false,
             // Bootstrap remains fail-closed; CodexLink Desktop later opts its managed
             // Runner into normal execution through checked project activation.
             allow_raw_shell: false,

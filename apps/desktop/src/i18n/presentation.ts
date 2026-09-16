@@ -195,6 +195,8 @@ export function serverReadinessLabel(value: ServerReadiness, t: Translate) {
   if (value === "ready") return t("common.running");
   if (value === "stopped") return t("common.stopped");
   if (value === "starting") return t("common.starting");
+  if (value === "offline") return t("common.offline");
+  if (value === "degraded") return t("common.degraded");
   if (value === "error") return t("common.error");
   return t("common.unknown");
 }

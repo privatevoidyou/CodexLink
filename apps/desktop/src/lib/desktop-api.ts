@@ -44,10 +44,10 @@ export const desktopApi = {
   configureRemote: (
     serverUrl: string,
     pairingCode: string,
-    projectPath: string,
+    projectPath?: string | null,
   ) =>
     invoke<DesktopState>("configure_remote_setup", {
-      request: { serverUrl, pairingCode, projectPath },
+      request: { serverUrl, pairingCode, projectPath: projectPath ?? null },
     }),
   startQuickShare: (projectPath: string, provider: QuickShareProvider) =>
     invoke<DesktopState>("start_quick_share", {

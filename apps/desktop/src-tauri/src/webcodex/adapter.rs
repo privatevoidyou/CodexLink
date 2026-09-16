@@ -1,6 +1,6 @@
 use super::cli::{run_json, run_json_until, run_project_activation_json, ResolvedBinaries};
 use super::models::{
-    LegacyProjectRegisterOutput, LoginOutput, OpsProjectsOutput, OpsWindowsOutput,
+    AuthStatusOutput, LegacyProjectRegisterOutput, LoginOutput, OpsProjectsOutput, OpsWindowsOutput,
     PairingCreateOutput, ProjectActivationOutput, ProjectRemovalOutput, RunnerStatusOutput,
     ServerStatusOutput,
 };
@@ -14,6 +14,13 @@ use std::process::Command;
 use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerRuntimeIdentity {
+    pub runner_config: PathBuf,
+    pub user_token_file: PathBuf,
+    pub server_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectRuntimeIdentity {
     pub project_id: String,
     pub runtime_project_id: String,
@@ -23,10 +30,35 @@ pub struct ProjectRuntimeIdentity {
     pub server_url: String,
 }
 
+impl ProjectRuntimeIdentity {
+    pub fn runner_identity(&self) -> RunnerRuntimeIdentity {
+        RunnerRuntimeIdentity {
+            runner_config: self.runner_config.clone(),
+            user_token_file: self.user_token_file.clone(),
+            server_url: self.server_url.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunnerConnectionState {
+    Online,
+    RunnerOffline,
+    ServerUnavailable,
+    CredentialInvalid,
+    Unknown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerConnectionObservation {
     pub client_id: String,
-    pub online: bool,
+    pub state: RunnerConnectionState,
+}
+
+impl RunnerConnectionObservation {
+    pub fn online(&self) -> bool {
+        self.state == RunnerConnectionState::Online
+    }
 }
 
 pub struct WebCodexAdapter {
@@ -342,6 +374,88 @@ impl WebCodexAdapter {
         Ok(output.pairing_code)
     }
 
+    pub async fn saved_runner_identity(
+        &mut self,
+        server_url: &str,
+        connections_dir: &Path,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<Option<(RunnerRuntimeIdentity, String)>> {
+        let canonical = validate_server_url(server_url)?;
+        let webcodex = self.ensure_binaries(cancellation).await?.webcodex.clone();
+        let args = vec![
+            "auth".into(),
+            "status".into(),
+            "--dir".into(),
+            connections_dir.to_string_lossy().to_string(),
+            "--json".into(),
+        ];
+        let output: AuthStatusOutput = run_json(&webcodex, &args, None, true, cancellation).await?;
+        let Some(connection) = select_saved_connection(output, &canonical)? else {
+            return Ok(None);
+        };
+        let dir = PathBuf::from(connection.dir);
+        let identity = RunnerRuntimeIdentity {
+            runner_config: dir.join("runner.toml"),
+            user_token_file: dir.join("webcodex-user-token"),
+            server_url: canonical,
+        };
+        if !identity.runner_config.is_file() || !identity.user_token_file.is_file() {
+            return Err(DesktopError::new(
+                "remote_profile_incomplete",
+                "The saved CodexLink enrollment is incomplete",
+                "Re-enroll this Server after checking the local connection directory.",
+            ));
+        }
+        Ok(Some((identity, connection.device)))
+    }
+
+    pub async fn login_runner_with_pairing(
+        &mut self,
+        server_url: &str,
+        pairing_code: &str,
+        connections_dir: &Path,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<RunnerRuntimeIdentity> {
+        let server_url = validate_server_url(server_url)?;
+        if !pairing_code.starts_with("wc_pair_") {
+            return Err(DesktopError::new(
+                "pairing_code_invalid",
+                "A valid one-time CodexLink pairing code is required",
+                "Enter the wc_pair_… code issued by the Server.",
+            ));
+        }
+        let webcodex = self.ensure_binaries(cancellation).await?.webcodex.clone();
+        tokio::fs::create_dir_all(connections_dir).await.map_err(|_| {
+            DesktopError::new(
+                "desktop_state_unavailable",
+                "Desktop could not prepare its protected connection directory",
+                "Check local app-data permissions and retry.",
+            )
+        })?;
+        let mut args = vec![
+            "login".into(),
+            server_url.clone(),
+            "--code-stdin".into(),
+            "--dir".into(),
+            connections_dir.to_string_lossy().to_string(),
+            "--overwrite".into(),
+            "--allow-empty-authorized-roots".into(),
+            "--json".into(),
+        ];
+        if server_url_is_loopback(&server_url) {
+            args.push("--no-system-proxy".into());
+        }
+        let output: LoginOutput = run_json(
+            &webcodex,
+            &args,
+            Some(pairing_code.as_bytes()),
+            true,
+            cancellation,
+        )
+        .await?;
+        validate_runner_login_output(&output)
+    }
+
     pub async fn login_with_pairing(
         &mut self,
         server_url: &str,
@@ -401,15 +515,6 @@ impl WebCodexAdapter {
         validate_login_output(&output, project)
     }
 
-    pub async fn runner_ready(
-        &mut self,
-        identity: &ProjectRuntimeIdentity,
-        cancellation: &CancellationContext,
-    ) -> DesktopResult<bool> {
-        self.runner_ready_with_deadline(identity, cancellation, None)
-            .await
-    }
-
     pub async fn runner_ready_until(
         &mut self,
         identity: &ProjectRuntimeIdentity,
@@ -420,9 +525,31 @@ impl WebCodexAdapter {
             .await
     }
 
+    pub async fn runner_identity_ready_until(
+        &mut self,
+        identity: &RunnerRuntimeIdentity,
+        cancellation: &CancellationContext,
+        deadline: Deadline,
+    ) -> DesktopResult<bool> {
+        self.observe_runner_connection_with_deadline(identity, None, cancellation, Some(deadline))
+            .await
+            .map(|observation| observation.online())
+    }
+
     pub async fn observe_runner_connection(
         &mut self,
         identity: &ProjectRuntimeIdentity,
+        expected_client_id: Option<&str>,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<RunnerConnectionObservation> {
+        let runner = identity.runner_identity();
+        self.observe_runner_identity(&runner, expected_client_id, cancellation)
+            .await
+    }
+
+    pub async fn observe_runner_identity(
+        &mut self,
+        identity: &RunnerRuntimeIdentity,
         expected_client_id: Option<&str>,
         cancellation: &CancellationContext,
     ) -> DesktopResult<RunnerConnectionObservation> {
@@ -437,7 +564,7 @@ impl WebCodexAdapter {
 
     async fn observe_runner_connection_with_deadline(
         &mut self,
-        identity: &ProjectRuntimeIdentity,
+        identity: &RunnerRuntimeIdentity,
         expected_client_id: Option<&str>,
         cancellation: &CancellationContext,
         deadline: Option<Deadline>,
@@ -486,18 +613,16 @@ impl WebCodexAdapter {
                 "Refresh this Runner connection before activating another project.",
             ));
         }
-        let runtime = output
-            .runtime
-            .unwrap_or(super::models::RunnerRuntimeOutput {
-                checked: false,
-                reachable: None,
-                client_online: None,
-            });
+        let runtime = output.runtime.unwrap_or(super::models::RunnerRuntimeOutput {
+            checked: false,
+            reachable: None,
+            client_online: None,
+            status_code: None,
+        });
+        let state = classify_runner_runtime(&runtime);
         Ok(RunnerConnectionObservation {
             client_id: output.config.client_id,
-            online: runtime.checked
-                && runtime.reachable == Some(true)
-                && runtime.client_online == Some(true),
+            state,
         })
     }
 
@@ -507,14 +632,27 @@ impl WebCodexAdapter {
         cancellation: &CancellationContext,
         deadline: Option<Deadline>,
     ) -> DesktopResult<bool> {
-        self.observe_runner_connection_with_deadline(identity, None, cancellation, deadline)
+        let runner = identity.runner_identity();
+        self.observe_runner_connection_with_deadline(&runner, None, cancellation, deadline)
             .await
-            .map(|observation| observation.online)
+            .map(|observation| observation.online())
     }
 
     pub async fn activate_project(
         &mut self,
         identity: &ProjectRuntimeIdentity,
+        expected_client_id: &str,
+        project: &ProjectSelection,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<ProjectRuntimeIdentity> {
+        let runner = identity.runner_identity();
+        self.activate_project_for_runner(&runner, expected_client_id, project, cancellation)
+            .await
+    }
+
+    pub async fn activate_project_for_runner(
+        &mut self,
+        identity: &RunnerRuntimeIdentity,
         expected_client_id: &str,
         project: &ProjectSelection,
         cancellation: &CancellationContext,
@@ -552,9 +690,9 @@ impl WebCodexAdapter {
         })
     }
 
-    pub async fn remove_project(
+    pub async fn remove_project_for_runner(
         &mut self,
-        identity: &ProjectRuntimeIdentity,
+        identity: &RunnerRuntimeIdentity,
         project: &ProjectSelection,
         cancellation: &CancellationContext,
     ) -> DesktopResult<()> {
@@ -585,6 +723,18 @@ impl WebCodexAdapter {
     pub async fn legacy_register_project(
         &mut self,
         identity: &ProjectRuntimeIdentity,
+        client_id: &str,
+        project: &ProjectSelection,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<ProjectRuntimeIdentity> {
+        let runner = identity.runner_identity();
+        self.legacy_register_project_for_runner(&runner, client_id, project, cancellation)
+            .await
+    }
+
+    pub async fn legacy_register_project_for_runner(
+        &mut self,
+        identity: &RunnerRuntimeIdentity,
         client_id: &str,
         project: &ProjectSelection,
         cancellation: &CancellationContext,
@@ -706,6 +856,43 @@ impl WebCodexAdapter {
     }
 }
 
+fn classify_runner_runtime(
+    runtime: &super::models::RunnerRuntimeOutput,
+) -> RunnerConnectionState {
+    if !runtime.checked {
+        RunnerConnectionState::Unknown
+    } else if runtime.reachable == Some(true) {
+        if runtime.client_online == Some(true) {
+            RunnerConnectionState::Online
+        } else {
+            RunnerConnectionState::RunnerOffline
+        }
+    } else if matches!(runtime.status_code, Some(401 | 403)) {
+        RunnerConnectionState::CredentialInvalid
+    } else {
+        RunnerConnectionState::ServerUnavailable
+    }
+}
+
+fn select_saved_connection(
+    output: AuthStatusOutput,
+    canonical_server_url: &str,
+) -> DesktopResult<Option<super::models::AuthConnectionOutput>> {
+    let mut matches = output
+        .connections
+        .into_iter()
+        .filter(|connection| same_server(&connection.server_url, canonical_server_url));
+    let first = matches.next();
+    if first.is_some() && matches.next().is_some() {
+        return Err(DesktopError::new(
+            "remote_profile_ambiguous",
+            "More than one saved CodexLink enrollment matches this Server",
+            "Remove the obsolete saved enrollment before reconnecting this Server.",
+        ));
+    }
+    Ok(first)
+}
+
 fn server_url_is_loopback(server_url: &str) -> bool {
     Url::parse(server_url)
         .ok()
@@ -786,6 +973,21 @@ fn ops_project_is_ready(
         && candidate.agent_status.as_deref() == Some("online")
 }
 
+fn validate_runner_login_output(output: &LoginOutput) -> DesktopResult<RunnerRuntimeIdentity> {
+    if output.server_url.trim().is_empty()
+        || output.runner_config.trim().is_empty()
+        || output.user_token_file.trim().is_empty()
+        || !output.registered_projects.is_empty()
+    {
+        return Err(invalid_contract("zero-authority login"));
+    }
+    Ok(RunnerRuntimeIdentity {
+        runner_config: PathBuf::from(&output.runner_config),
+        user_token_file: PathBuf::from(&output.user_token_file),
+        server_url: validate_server_url(&output.server_url)?,
+    })
+}
+
 fn validate_login_output(
     output: &LoginOutput,
     project: &ProjectSelection,
@@ -837,7 +1039,7 @@ pub fn validate_server_url(value: &str) -> DesktopResult<String> {
             "Enter only the CodexLink Server origin.",
         ));
     }
-    Ok(value.to_string())
+    Ok(parsed.to_string().trim_end_matches('/').to_string())
 }
 
 fn configure_local_loopback_bypass_environment(command: &mut Command) {
@@ -901,8 +1103,10 @@ fn remove_tunnel_credentials(command: &mut Command) {
 }
 
 fn same_server(left: &str, right: &str) -> bool {
-    left.trim_end_matches('/')
-        .eq_ignore_ascii_case(right.trim_end_matches('/'))
+    match (validate_server_url(left), validate_server_url(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn same_existing_file(left: &Path, right: &Path) -> bool {
@@ -976,6 +1180,83 @@ mod tests {
         assert!(validate_server_url("https://user:pass@example.com").is_err());
         assert!(validate_server_url("https://example.com/admin").is_err());
         assert!(validate_server_url("file:///tmp/server").is_err());
+    }
+
+    #[test]
+    fn server_url_normalization_matches_saved_profile_origins() {
+        assert_eq!(
+            validate_server_url(" HTTPS://Example.COM/ ").unwrap(),
+            "https://example.com"
+        );
+        assert!(same_server(
+            "https://EXAMPLE.com/",
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn saved_profile_selection_uses_normalized_server_url_and_rejects_ambiguity() {
+        let connection = |url: &str, device: &str| super::super::models::AuthConnectionOutput {
+            server_url: url.to_string(),
+            device: device.to_string(),
+            dir: format!("connections/{device}"),
+        };
+        let selected = select_saved_connection(
+            AuthStatusOutput {
+                connections: vec![
+                    connection("https://other.example", "other"),
+                    connection("https://EXAMPLE.com/", "desktop-a"),
+                ],
+            },
+            "https://example.com",
+        )
+        .unwrap()
+        .expect("matching saved enrollment");
+        assert_eq!(selected.device, "desktop-a");
+
+        let error = select_saved_connection(
+            AuthStatusOutput {
+                connections: vec![
+                    connection("https://example.com", "desktop-a"),
+                    connection("https://EXAMPLE.com/", "desktop-b"),
+                ],
+            },
+            "https://example.com",
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "remote_profile_ambiguous");
+    }
+
+    #[test]
+    fn runner_runtime_classification_keeps_transient_and_revoked_states_distinct() {
+        let runtime = |checked, reachable, online, status_code| {
+            super::super::models::RunnerRuntimeOutput {
+                checked,
+                reachable,
+                client_online: online,
+                status_code,
+            }
+        };
+        assert_eq!(
+            classify_runner_runtime(&runtime(true, Some(true), Some(true), Some(200))),
+            RunnerConnectionState::Online
+        );
+        assert_eq!(
+            classify_runner_runtime(&runtime(true, Some(true), Some(false), Some(200))),
+            RunnerConnectionState::RunnerOffline
+        );
+        assert_eq!(
+            classify_runner_runtime(&runtime(true, Some(false), None, None)),
+            RunnerConnectionState::ServerUnavailable
+        );
+        assert_eq!(
+            classify_runner_runtime(&runtime(true, Some(false), None, Some(401))),
+            RunnerConnectionState::CredentialInvalid
+        );
+        assert_eq!(
+            classify_runner_runtime(&runtime(false, None, None, None)),
+            RunnerConnectionState::Unknown
+        );
     }
 
     #[test]

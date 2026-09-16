@@ -53,6 +53,8 @@ pub enum ServerReadiness {
     Stopped,
     Starting,
     Ready,
+    Offline,
+    Degraded,
     Error,
     Unknown,
 }
@@ -149,10 +151,15 @@ pub fn aggregate_readiness(
     exposure: ExposureReadiness,
     project: ProjectReadiness,
 ) -> ReadinessSnapshot {
-    let runtime_ready = server == ServerReadiness::Ready
-        && runner == RunnerReadiness::Ready
-        && project == ProjectReadiness::Ready;
-    let ready_for_chatgpt = runtime_ready && exposure == ExposureReadiness::RemoteReady;
+    let server_usable = matches!(server, ServerReadiness::Ready | ServerReadiness::Degraded);
+    // Connection/runtime readiness is independent from customer project authority.
+    // Zero authorized roots is a valid connected state; ChatGPT readiness still
+    // requires an active project and a verified remote exposure.
+    let runtime_ready = server_usable && runner == RunnerReadiness::Ready;
+    let ready_for_chatgpt = runtime_ready
+        && server == ServerReadiness::Ready
+        && project == ProjectReadiness::Ready
+        && exposure == ExposureReadiness::RemoteReady;
     let (summary_kind, next_action_kind, summary, next_action) = if ready_for_chatgpt {
         (
             ReadinessSummaryKind::ReadyForChatGpt,
@@ -168,7 +175,7 @@ pub fn aggregate_readiness(
             Some("Start the runtime to continue.".to_string()),
         )
     } else if server == ServerReadiness::Starting
-        || (server == ServerReadiness::Ready && runner == RunnerReadiness::Connecting)
+        || (server_usable && runner == RunnerReadiness::Connecting)
     {
         (
             ReadinessSummaryKind::RuntimeStarting,
@@ -176,7 +183,7 @@ pub fn aggregate_readiness(
             "Runtime starting".to_string(),
             None,
         )
-    } else if !matches!(server, ServerReadiness::Ready) {
+    } else if !server_usable {
         (
             ReadinessSummaryKind::ServiceNeedsAttention,
             Some(ReadinessNextActionKind::StartOrReconnectService),
@@ -568,6 +575,19 @@ mod tests {
     }
 
     #[test]
+    fn zero_authorized_roots_is_a_valid_connected_runtime() {
+        let state = aggregate_readiness(
+            ServerReadiness::Ready,
+            RunnerReadiness::Ready,
+            ExposureReadiness::RemoteReady,
+            ProjectReadiness::None,
+        );
+        assert!(state.runtime_ready);
+        assert!(!state.ready_for_chatgpt);
+        assert_eq!(state.summary_kind, ReadinessSummaryKind::ProjectNotReady);
+    }
+
+    #[test]
     fn process_alive_is_not_aggregate_readiness() {
         let server_only = aggregate_readiness(
             ServerReadiness::Ready,
@@ -584,8 +604,12 @@ mod tests {
             ExposureReadiness::RemoteReady,
             ProjectReadiness::None,
         );
-        assert!(!missing_project.runtime_ready);
+        assert!(missing_project.runtime_ready);
         assert!(!missing_project.ready_for_chatgpt);
+        assert_eq!(
+            missing_project.summary_kind,
+            ReadinessSummaryKind::ProjectNotReady
+        );
 
         let local_only = aggregate_readiness(
             ServerReadiness::Ready,

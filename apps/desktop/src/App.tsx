@@ -47,6 +47,7 @@ export default function App() {
   const hasLoadedState = Boolean(state);
   const shouldObserveChatgptActivity = Boolean(
     state?.readiness.runtime_ready
+      && state.readiness.project === "ready"
       && !state.chatgpt_activity?.observed
       && !hasCurrentOperation
       && !refreshing
@@ -288,11 +289,14 @@ export default function App() {
       const canSwitchInPlace = Boolean(
         topology
         && topology.experience === "full"
-        && topology.server.kind === "local"
         && state.readiness.runtime_ready,
       );
       if (!canSwitchInPlace) {
-        commitState(await desktopApi.configureLocal(selection));
+        if (topology?.server.kind === "remote") {
+          commitState(await desktopApi.configureRemote(topology.server.url, "", selection));
+        } else {
+          commitState(await desktopApi.configureLocal(selection));
+        }
         setShowSetup(false);
         return;
       }
@@ -307,10 +311,13 @@ export default function App() {
         ) {
           throw normalized;
         }
-        // Older Runners may need the existing bounded Local Setup fallback to
-        // refresh only the Desktop-owned Runner. Keep the user's already-running
-        // Tunnel untouched and do not require a second confirmation click.
-        commitState(await desktopApi.configureLocal(selection));
+        // Legacy managed Runners may need the bounded topology-specific setup
+        // fallback to refresh only the Desktop-owned Runner without re-pairing.
+        if (topology?.server.kind === "remote") {
+          commitState(await desktopApi.configureRemote(topology.server.url, "", selection));
+        } else {
+          commitState(await desktopApi.configureLocal(selection));
+        }
       }
       setShowSetup(false);
     } catch (value) {

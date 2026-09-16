@@ -50,6 +50,19 @@ pub struct LoginOutput {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct AuthStatusOutput {
+    #[serde(default)]
+    pub connections: Vec<AuthConnectionOutput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConnectionOutput {
+    pub server_url: String,
+    pub device: String,
+    pub dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ServerStatusOutput {
     pub http_reachable: bool,
     pub probe_url: String,
@@ -79,6 +92,8 @@ pub struct RunnerRuntimeOutput {
     pub reachable: Option<bool>,
     #[serde(default)]
     pub client_online: Option<bool>,
+    #[serde(default)]
+    pub status_code: Option<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

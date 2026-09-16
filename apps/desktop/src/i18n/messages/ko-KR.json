@@ -81,6 +81,8 @@
   "common.noChatGpt": "ChatGPT 연결 안 함",
   "common.connected": "연결됨",
   "common.running": "실행 중",
+  "common.offline": "오프라인",
+  "common.degraded": "성능 저하",
   "common.stopped": "중지됨",
   "common.starting": "시작 중",
   "common.error": "조치 필요",

@@ -297,6 +297,7 @@ pub(crate) struct LoginOptions {
     pub(crate) base_dir: PathBuf,
     pub(crate) transport: String,
     pub(crate) allowed_roots: Vec<PathBuf>,
+    pub(crate) allow_empty_allowed_roots: bool,
     pub(crate) project: Option<PathBuf>,
     pub(crate) overwrite: bool,
     pub(crate) json: bool,
@@ -575,6 +576,7 @@ pub(crate) fn stage_connection(
         project_registry_dir: published_project_registry_dir.to_path_buf(),
         output: paths.runner_config.clone(),
         allowed_roots: allowed_roots.to_vec(),
+        allow_empty_allowed_roots: opts.allow_empty_allowed_roots,
         // Generic login remains fail-closed for model-authored execution. Product
         // shells such as CodexLink may opt in later through checked project activation.
         allow_raw_shell: false,
@@ -971,6 +973,7 @@ pub(crate) async fn run_login(opts: LoginOptions) -> Result<String, String> {
     let mut output_allowed_roots = webcodex_runner_config::effective_allowed_roots(
         &opts.allowed_roots,
         opts.project.is_some(),
+        opts.allow_empty_allowed_roots,
     )?;
     // Preserve the historical generated-config behavior unless explicit project
     // selection adds exact project authority. In that case this becomes the persisted
@@ -1203,6 +1206,7 @@ mod tests {
             // explicit project authority. Tests that need empty-root semantics
             // can override this field explicitly.
             allowed_roots: vec![base.to_path_buf()],
+            allow_empty_allowed_roots: false,
             overwrite,
             project: None,
             json: false,
@@ -2310,6 +2314,7 @@ mod tests {
             base_dir: base.clone(),
             transport: "websocket".to_string(),
             allowed_roots: Vec::new(),
+            allow_empty_allowed_roots: false,
             overwrite: false,
             project: None,
             json: false,
@@ -2390,6 +2395,7 @@ mod tests {
             base_dir: base.clone(),
             transport: "websocket".to_string(),
             allowed_roots: vec![allowed_root.clone()],
+            allow_empty_allowed_roots: false,
             project: Some(project.clone()),
             overwrite: false,
             json: true,
@@ -2472,6 +2478,7 @@ mod tests {
             base_dir: base.clone(),
             transport: "websocket".to_string(),
             allowed_roots: vec![allowed_root],
+            allow_empty_allowed_roots: false,
             project: Some(outside),
             overwrite: false,
             json: false,
@@ -2509,6 +2516,7 @@ mod tests {
             base_dir: base.clone(),
             transport: "websocket".to_string(),
             allowed_roots: vec![allowed_root],
+            allow_empty_allowed_roots: false,
             project: Some(dangerous_project),
             overwrite: false,
             json: false,
@@ -2542,6 +2550,7 @@ mod tests {
             base_dir: base.clone(),
             transport: "websocket".to_string(),
             allowed_roots: vec![unc.clone()],
+            allow_empty_allowed_roots: false,
             project: Some(unc),
             overwrite: false,
             json: false,

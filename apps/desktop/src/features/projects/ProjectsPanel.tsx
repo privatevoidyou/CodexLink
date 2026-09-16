@@ -19,7 +19,7 @@ export function ProjectsPanel({
 }) {
   const { t } = useLocale();
   const projects = state.projects ?? [];
-  const projectReady = state.readiness.runtime_ready;
+  const projectReady = state.readiness.project === "ready";
   return (
     <section className="page-section rc5-page" aria-labelledby="projects-title" data-webcodex-page="projects">
       <div className="page-heading-row rc5-heading-row">

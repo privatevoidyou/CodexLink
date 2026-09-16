@@ -31,13 +31,22 @@ export function Dashboard({
   const { t } = useLocale();
   const operationBusy = Boolean(state.current_operation);
   const runtimeReady = state.readiness.runtime_ready;
+  const isRemote = state.topology?.experience === "full" && state.topology.server.kind === "remote";
   const tunnelConfigured = state.openai_tunnel_configured;
-  const secureLinkReady = state.regular_tunnel?.status === "ready"
+  const localSecureLinkReady = state.regular_tunnel?.status === "ready"
     && Boolean(state.regular_tunnel.ready_for_chatgpt);
-  const chatgptAccessible = runtimeReady && secureLinkReady;
-  const connectionHealthy = runtimeReady && tunnelConfigured && secureLinkReady;
+  const remoteServerReady = isRemote
+    && state.readiness.server === "ready"
+    && state.readiness.exposure === "remote_ready";
+  const linkReady = isRemote ? remoteServerReady : localSecureLinkReady;
   const authorizedProjects = state.projects ?? [];
-  const allSet = authorizedProjects.length > 0 && connectionHealthy;
+  const chatgptAccessible = isRemote
+    ? state.readiness.ready_for_chatgpt
+    : runtimeReady && authorizedProjects.length > 0 && localSecureLinkReady;
+  const connectionHealthy = isRemote
+    ? ["ready", "degraded"].includes(state.readiness.server) && state.readiness.runner === "ready"
+    : runtimeReady && tunnelConfigured && localSecureLinkReady;
+  const allSet = authorizedProjects.length > 0 && chatgptAccessible;
   const canResumeRuntime = Boolean(state.topology) && !runtimeReady;
   const needsConnectionRepair = Boolean(
     state.runtime_autostart
@@ -135,8 +144,8 @@ export function Dashboard({
           <ChainNode label={t("home.localMachine")} ready={runtimeReady} status={runtimeReady ? t("common.ready") : t("common.stopped")} />
           <span className={`chain-line ${runtimeReady ? "ready" : ""}`} aria-hidden="true" />
           <ChainNode label="Engine" ready={runtimeReady} status={runtimeReady ? t("common.ready") : t("common.stopped")} />
-          <span className={`chain-line ${secureLinkReady ? "ready" : ""}`} aria-hidden="true" />
-          <ChainNode label="Secure Link" ready={secureLinkReady} status={secureLinkReady ? t("common.ready") : t("home.configuring")} />
+          <span className={`chain-line ${linkReady ? "ready" : ""}`} aria-hidden="true" />
+          <ChainNode label={isRemote ? t("connection.remoteServer") : "Secure Link"} ready={linkReady} status={linkReady ? t("common.ready") : t("home.configuring")} />
           <span className={`chain-line ${chatgptAccessible ? "ready" : ""}`} aria-hidden="true" />
           <ChainNode label="ChatGPT" ready={chatgptAccessible} status={chatgptAccessible ? t("connection.chatgptAccessible") : t("home.configuring")} />
         </div>
@@ -243,6 +252,7 @@ function nextHomeMessage(state: DesktopState, t: Translate) {
   }
   if ((state.projects ?? []).length === 0) return t("home.needProject");
   if (!state.readiness.runtime_ready) return t("home.needRuntime");
+  if (state.topology?.server.kind === "remote") return t("home.needChatGpt");
   if (!state.openai_tunnel_configured) return t("home.needTunnelCredentials");
   if (state.regular_tunnel?.status !== "ready") return t("home.needSecureLink");
   return t("home.needChatGpt");

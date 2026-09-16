@@ -50,6 +50,10 @@ pub struct RunnerInitOptions {
     pub project_registry_dir: PathBuf,
     pub output: PathBuf,
     pub allowed_roots: Vec<PathBuf>,
+    /// Preserve an intentionally empty authority set instead of applying the
+    /// legacy HOME fallback. Product-managed enrollment uses this for a
+    /// connected Runner with zero customer-authorized roots.
+    pub allow_empty_allowed_roots: bool,
     /// Master gate for model-authored command/process/script execution.
     /// Generic enrollment may keep this false until a trusted product/operator explicitly opts in.
     pub allow_raw_shell: bool,
@@ -79,9 +83,13 @@ pub fn home_allowed_root() -> Option<PathBuf> {
 pub fn effective_allowed_roots(
     configured: &[PathBuf],
     allow_cwd_anywhere: bool,
+    allow_empty_allowed_roots: bool,
 ) -> Result<Vec<PathBuf>, String> {
     if !configured.is_empty() {
         return Ok(configured.to_vec());
+    }
+    if allow_empty_allowed_roots {
+        return Ok(Vec::new());
     }
     if let Some(home) = home_allowed_root() {
         return Ok(vec![home]);
@@ -196,7 +204,11 @@ struct GeneratedRunnerPolicy {
 }
 
 pub fn generated_runner_config_toml(opts: &RunnerInitOptions) -> Result<String, String> {
-    let effective_roots = effective_allowed_roots(&opts.allowed_roots, opts.allow_cwd_anywhere)?;
+    let effective_roots = effective_allowed_roots(
+        &opts.allowed_roots,
+        opts.allow_cwd_anywhere,
+        opts.allow_empty_allowed_roots,
+    )?;
     let cfg = GeneratedRunnerConfig {
         server_url: opts.server_url.trim_end_matches('/').to_string(),
         token: resolve_runner_init_token(opts)?,
@@ -466,6 +478,7 @@ mod tests {
             project_registry_dir: PathBuf::from("/etc/webcodex/project-registry"),
             output,
             allowed_roots: vec![PathBuf::from("/srv/projects")],
+            allow_empty_allowed_roots: false,
             allow_raw_shell: true,
             allow_cwd_anywhere: false,
             overwrite: false,
@@ -474,7 +487,7 @@ mod tests {
 
     #[test]
     fn effective_allowed_roots_uses_explicit_when_present() {
-        let roots = effective_allowed_roots(&[PathBuf::from("/root/git")], false).unwrap();
+        let roots = effective_allowed_roots(&[PathBuf::from("/root/git")], false, false).unwrap();
         assert_eq!(roots, vec![PathBuf::from("/root/git")]);
     }
 
@@ -483,7 +496,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let home = home_allowed_root();
         if let Some(home) = home {
-            let roots = effective_allowed_roots(&[], false).unwrap();
+            let roots = effective_allowed_roots(&[], false, false).unwrap();
             assert_eq!(roots, vec![home]);
         }
     }
@@ -493,7 +506,7 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let _h = EnvVarRestore::remove("HOME");
         let _u = EnvVarRestore::remove("USERPROFILE");
-        let err = effective_allowed_roots(&[], false).unwrap_err();
+        let err = effective_allowed_roots(&[], false, false).unwrap_err();
         assert!(err.contains("allowed_roots is empty"));
     }
 
@@ -502,8 +515,28 @@ mod tests {
         let _guard = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let _h = EnvVarRestore::remove("HOME");
         let _u = EnvVarRestore::remove("USERPROFILE");
-        let roots = effective_allowed_roots(&[], true).unwrap();
+        let roots = effective_allowed_roots(&[], true, false).unwrap();
         assert!(roots.is_empty());
+    }
+
+    #[test]
+    fn explicit_empty_authority_bypasses_home_fallback() {
+        let roots = effective_allowed_roots(&[], false, true).unwrap();
+        assert!(roots.is_empty());
+
+        let mut opts = init_opts(PathBuf::from("-"));
+        opts.allowed_roots.clear();
+        opts.allow_empty_allowed_roots = true;
+        let content = generated_runner_config_toml(&opts).unwrap();
+        let value: toml::Value = toml::from_str(&content).unwrap();
+        assert_eq!(
+            value
+                .get("policy")
+                .and_then(|value| value.get("allowed_roots"))
+                .and_then(toml::Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
     }
 
     #[test]

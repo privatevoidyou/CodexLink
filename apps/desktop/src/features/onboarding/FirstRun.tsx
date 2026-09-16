@@ -47,7 +47,6 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   const canReuseRemoteEnrollment = Boolean(
     mode === "remote" &&
       !remoteEnrollmentNeedsRefresh &&
-      state.project?.runtime_project_id &&
       state.topology?.experience === "full" &&
       state.topology.server.kind === "remote" &&
       sameServerOrigin(serverUrl, state.topology.server.url),
@@ -69,22 +68,21 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
   };
 
   const run = async () => {
-    if (!mode || !project || mutationBusy) return;
+    if (!mode || mutationBusy || (mode === "share" && !project)) return;
     setBusy(true);
     setError(null);
     try {
       if (mode === "local") {
-        const next = await desktopApi.configureLocal(project.path);
+        const next = await desktopApi.configureLocal(project?.path ?? null);
         onState(next);
         onComplete?.();
       } else if (mode === "remote") {
-        if (!project) return;
         const oneTimeCode = pairingCode;
         setPairingCode("");
         const next = await desktopApi.configureRemote(
           serverUrl,
           oneTimeCode,
-          project.path,
+          project?.path ?? null,
         );
         setRemoteEnrollmentNeedsRefresh(false);
         onState(next);
@@ -96,7 +94,10 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
       }
     } catch (value) {
       const normalized = normalizeDesktopError(value);
-      if (mode === "remote" && normalized.code === "pairing_code_invalid") {
+      if (
+        mode === "remote" &&
+        ["pairing_code_invalid", "pairing_code_required", "remote_credential_invalid"].includes(normalized.code)
+      ) {
         // The optimistic reuse hint is based on saved Desktop state. If the
         // backend proves that connection identity is no longer reusable, expose
         // the one-shot recovery field instead of trapping the user behind the
@@ -141,7 +142,11 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
 
   const presentation = error ? desktopErrorPresentation(error, t) : null;
   const serverInvalid = error?.code === "server_url_invalid" || error?.code === "server_unreachable";
-  const pairingInvalid = error?.code === "pairing_code_invalid";
+  const pairingInvalid = Boolean(error && [
+    "pairing_code_invalid",
+    "pairing_code_required",
+    "remote_credential_invalid",
+  ].includes(error.code));
 
   return (
     <form
@@ -166,9 +171,6 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
         <div>
           <span className="section-kicker">{t("setup.project")}</span>
           <strong>{project ? project.path : t("setup.chooseProject")}</strong>
-          {mode === "local" && !project && (
-            <span className="project-meta">{t("setup.projectRequired")}</span>
-          )}
           {project && (
             <span className="project-meta">
               {t("setup.allowedRoot", {
@@ -302,9 +304,9 @@ export function FirstRun({ state, onState, chooseModeFirst = false, onComplete }
           className="primary-button"
           disabled={
             mutationBusy ||
-            !project ||
+            (mode === "share" && !project) ||
             (mode === "remote" &&
-              (!serverUrl.trim() || (!canReuseRemoteEnrollment && !pairingCode.trim())))
+              (!serverUrl.trim() || (remoteEnrollmentNeedsRefresh && !pairingCode.trim())))
           }
           data-webcodex-action={mode === "local" ? "configure-local" : mode === "remote" ? "configure-remote" : "start-quick-share"}
         >

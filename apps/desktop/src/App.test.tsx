@@ -669,7 +669,18 @@ describe("semantic Desktop UI", () => {
   it("keeps the connection path healthy with zero authorized projects and guides the user to add one", async () => {
     const connectedWithoutProjects: DesktopState = {
       ...readyState,
+      project: undefined,
       projects: [],
+      readiness: {
+        ...readyState.readiness,
+        project: "none",
+        runtime_ready: true,
+        ready_for_chatgpt: false,
+        summary: "Project is not ready",
+        summary_kind: "project_not_ready",
+        next_action: "Prepare and activate the selected project.",
+        next_action_kind: "add_or_reload_project",
+      },
       regular_tunnel: { provider: "openai", status: "ready", clipboard_state: "unavailable", clipboard_contains: "tunnel_id", ready_for_chatgpt: true },
       chatgpt_activity: null,
     };
@@ -682,7 +693,7 @@ describe("semantic Desktop UI", () => {
     expect(screen.getByRole("listitem", { name: "本机" })).toHaveClass("ready");
     expect(screen.getByRole("listitem", { name: "Engine" })).toHaveClass("ready");
     expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
-    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
+    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("pending");
     const nextActions = screen.getByRole("heading", { level: 2, name: "接下来做什么" }).closest("section") as HTMLElement | null;
     expect(nextActions).not.toBeNull();
     expect(within(nextActions!).getByRole("button", { name: /^添加项目/ })).toBeEnabled();
@@ -690,7 +701,7 @@ describe("semantic Desktop UI", () => {
     expect(systemStatus).not.toBeNull();
     const chatgptStatus = within(systemStatus!).getByText("ChatGPT 连接").closest(".system-status-line") as HTMLElement | null;
     expect(chatgptStatus).not.toBeNull();
-    expect(within(chatgptStatus!).getByText("已连接")).toBeInTheDocument();
+    expect(within(chatgptStatus!).getByText("尚未连接")).toBeInTheDocument();
   });
 
   it("treats a verified ready Secure Link as customer-facing ChatGPT accessibility", async () => {
@@ -1542,5 +1553,173 @@ describe("semantic Desktop UI", () => {
     expect(await screen.findByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /快速共享项目/ })).toBeInTheDocument();
+  });
+
+  it("allows Local setup with zero authorized roots", async () => {
+    const zeroRootLocal: DesktopState = {
+      ...readyState,
+      project: undefined,
+      projects: [],
+      readiness: {
+        ...readyState.readiness,
+        project: "none",
+        runtime_ready: true,
+        ready_for_chatgpt: false,
+        summary: "Project is not ready",
+        summary_kind: "project_not_ready",
+        next_action: "Prepare and activate the selected project.",
+        next_action_kind: "add_or_reload_project",
+      },
+    };
+    api.getState.mockResolvedValue(zeroRootLocal);
+    api.configureLocal.mockResolvedValue(zeroRootLocal);
+    renderApp();
+    await findHomeHeading();
+
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-webcodex-action="choose-local-setup"]')!);
+    const submit = document.querySelector<HTMLButtonElement>('[data-webcodex-action="configure-local"]')!;
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(null));
+  });
+
+  it("allows Remote saved-profile recovery with zero authorized roots and no new pairing code", async () => {
+    const remoteZeroRoot: DesktopState = {
+      ...readyState,
+      topology: {
+        experience: "full",
+        server: { kind: "remote", url: "https://server.example.test" },
+        runner: { kind: "local" },
+        exposure: { kind: "existing_https", url: "https://server.example.test" },
+        enrollment: { kind: "managed_pairing" },
+      },
+      project: undefined,
+      projects: [],
+      readiness: {
+        ...readyState.readiness,
+        server: "ready",
+        runner: "ready",
+        exposure: "remote_ready",
+        project: "none",
+        runtime_ready: true,
+        ready_for_chatgpt: false,
+        summary: "Project is not ready",
+        summary_kind: "project_not_ready",
+        next_action: "Prepare and activate the selected project.",
+        next_action_kind: "add_or_reload_project",
+      },
+      openai_tunnel_configured: false,
+      regular_tunnel: null,
+    };
+    const localZeroRootStart: DesktopState = {
+      ...readyState,
+      project: undefined,
+      projects: [],
+      readiness: {
+        ...readyState.readiness,
+        project: "none",
+        runtime_ready: true,
+        ready_for_chatgpt: false,
+        summary: "Project is not ready",
+        summary_kind: "project_not_ready",
+        next_action: "Prepare and activate the selected project.",
+        next_action_kind: "add_or_reload_project",
+      },
+    };
+    api.getState.mockResolvedValue(localZeroRootStart);
+    api.configureRemote.mockResolvedValue(remoteZeroRoot);
+    renderApp();
+    await findHomeHeading();
+
+    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-webcodex-action="choose-remote-setup"]')!);
+    fireEvent.change(document.querySelector<HTMLInputElement>('#setup-server-url')!, {
+      target: { value: "https://server.example.test" },
+    });
+    const submit = document.querySelector<HTMLButtonElement>('[data-webcodex-action="configure-remote"]')!;
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(api.configureRemote).toHaveBeenCalledWith(
+        "https://server.example.test",
+        "",
+        null,
+      ),
+    );
+  });
+
+  it("projects Remote readiness without requiring local OpenAI Tunnel state", async () => {
+    const remoteReady: DesktopState = {
+      ...readyState,
+      topology: {
+        experience: "full",
+        server: { kind: "remote", url: "https://server.example.test" },
+        runner: { kind: "local" },
+        exposure: { kind: "existing_https", url: "https://server.example.test" },
+        enrollment: { kind: "managed_pairing" },
+      },
+      readiness: {
+        ...readyState.readiness,
+        server: "ready",
+        runner: "ready",
+        exposure: "remote_ready",
+        project: "ready",
+        runtime_ready: true,
+        ready_for_chatgpt: true,
+        summary: "Ready to use with ChatGPT",
+        summary_kind: "ready_for_chat_gpt",
+        next_action: null,
+        next_action_kind: null,
+      },
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+      regular_tunnel: null,
+    };
+    api.getState.mockResolvedValue(remoteReady);
+    renderApp();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "一切就绪" })).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "远程 CodexLink Server" })).toHaveClass("ready");
+    expect(screen.queryByRole("listitem", { name: "Secure Link" })).not.toBeInTheDocument();
+  });
+
+  it("does not paint a saved Remote Server URL green while the real probe is offline", async () => {
+    const remoteOffline: DesktopState = {
+      ...readyState,
+      topology: {
+        experience: "full",
+        server: { kind: "remote", url: "https://server.example.test" },
+        runner: { kind: "local" },
+        exposure: { kind: "existing_https", url: "https://server.example.test" },
+        enrollment: { kind: "managed_pairing" },
+      },
+      readiness: {
+        ...readyState.readiness,
+        server: "offline",
+        runner: "unknown",
+        exposure: "error",
+        project: "ready",
+        runtime_ready: false,
+        ready_for_chatgpt: false,
+        summary: "CodexLink Service needs attention",
+        summary_kind: "service_needs_attention",
+        next_action: "Start or reconnect the CodexLink Service.",
+        next_action_kind: "start_or_reconnect_service",
+      },
+      regular_tunnel: null,
+    };
+    api.getState.mockResolvedValue(remoteOffline);
+    renderApp();
+    await findHomeHeading();
+    fireEvent.click(screen.getByRole("button", { name: "连接详情" }));
+
+    const serverValue = await screen.findByText("https://server.example.test · 离线");
+    expect(serverValue.closest("dd")?.querySelector(".status-dot")).toHaveClass("pending");
   });
 });

@@ -29,6 +29,8 @@ export type ServerReadiness =
   | "stopped"
   | "starting"
   | "ready"
+  | "offline"
+  | "degraded"
   | "error"
   | "unknown";
 export type RunnerReadiness =

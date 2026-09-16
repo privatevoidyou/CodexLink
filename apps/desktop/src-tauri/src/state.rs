@@ -20,7 +20,7 @@ use crate::tunnel_config::{
 };
 use crate::webcodex::{
     inspect_project_path, ProjectRuntimeIdentity, QuickShareReadyEvent, RegularTunnelReadyEvent,
-    WebCodexAdapter,
+    RunnerConnectionState, RunnerRuntimeIdentity, WebCodexAdapter,
 };
 use serde_json::Value;
 #[cfg(unix)]
@@ -350,7 +350,7 @@ impl AppState {
         &self,
         server_url: &str,
         pairing_code: &str,
-        project_path: &str,
+        project_path: Option<&str>,
     ) -> DesktopResult<DesktopStateSnapshot> {
         let (operation, cancellation, mut core, baseline) = self
             .begin_operation(DesktopOperationKind::RemoteSetup, true)
@@ -835,12 +835,17 @@ impl DesktopCore {
             return self.get_state().await;
         }
 
-        let Some(identity) = identity_from_config(&self.config) else {
+        let Some(identity) = runner_identity_from_config(&self.config) else {
             self.snapshot.chatgpt_activity = None;
             self.snapshot.topology = self.config.topology.clone();
             self.snapshot.project = project_snapshot(&self.config);
             return self.get_state().await;
         };
+        let project_identity = customer_project_identity_from_config(&self.config);
+        let remote_topology = self.config.topology.as_ref().is_some_and(|topology| {
+            topology.experience == Experience::Full
+                && matches!(topology.server, ServerTopology::Remote { .. })
+        });
         self.adapter.ensure_binaries(cancellation).await.ok();
         cancellation.check()?;
         if let Ok(binaries) = self.adapter.binaries() {
@@ -859,38 +864,73 @@ impl DesktopCore {
             )
             .await
         {
-            Ok(status) if status.http_reachable => ServerReadiness::Ready,
-            Ok(_) => ServerReadiness::Error,
+            Ok(status) if status.http_reachable => {
+                if remote_topology && !identity.server_url.starts_with("https://") {
+                    ServerReadiness::Degraded
+                } else {
+                    ServerReadiness::Ready
+                }
+            }
+            Ok(_) => ServerReadiness::Offline,
+            Err(error) if error.code == "binary_version_mismatch" => return Err(error),
             Err(_) => ServerReadiness::Unknown,
         };
         cancellation.check()?;
-        // A saved user stop remains stopped across refresh, while a reachable
-        // external service is still observed normally.
-        if !runtime_autostart(&self.config) && server != ServerReadiness::Ready {
+        // A saved local user stop remains stopped across refresh. Remote Server
+        // liveness is always observed independently because it is externally owned.
+        if !remote_topology
+            && !runtime_autostart(&self.config)
+            && !matches!(server, ServerReadiness::Ready | ServerReadiness::Degraded)
+        {
             self.snapshot.chatgpt_activity = None;
             self.snapshot.readiness = aggregate_readiness(
                 ServerReadiness::Stopped,
                 RunnerReadiness::Stopped,
                 ExposureReadiness::Disabled,
-                ProjectReadiness::Configured,
+                if project_identity.is_some() {
+                    ProjectReadiness::Configured
+                } else {
+                    ProjectReadiness::None
+                },
             );
             return self.get_state().await;
         }
-        let runner = match self.adapter.runner_ready(&identity, cancellation).await {
-            Ok(true) => RunnerReadiness::Ready,
-            Ok(false) => RunnerReadiness::Connecting,
+        let runner = match self
+            .adapter
+            .observe_runner_identity(
+                &identity,
+                stored_runner_client_id(&self.config).as_deref(),
+                cancellation,
+            )
+            .await
+        {
+            Ok(observation) => match observation.state {
+                RunnerConnectionState::Online => RunnerReadiness::Ready,
+                RunnerConnectionState::RunnerOffline => RunnerReadiness::Error,
+                RunnerConnectionState::ServerUnavailable | RunnerConnectionState::Unknown => {
+                    RunnerReadiness::Unknown
+                }
+                RunnerConnectionState::CredentialInvalid => RunnerReadiness::Error,
+            },
+            Err(error) if error.code == "runner_identity_mismatch" => return Err(error),
             Err(_) => RunnerReadiness::Unknown,
         };
         cancellation.check()?;
-        let project = match self.adapter.project_ready(&identity, cancellation).await {
-            Ok(true) => ProjectReadiness::Ready,
-            Ok(false) => ProjectReadiness::ReloadRequired,
-            Err(_) => ProjectReadiness::Unknown,
+        let project = if let Some(project_identity) = project_identity.as_ref() {
+            match self.adapter.project_ready(project_identity, cancellation).await {
+                Ok(true) => ProjectReadiness::Ready,
+                Ok(false) => ProjectReadiness::ReloadRequired,
+                Err(_) => ProjectReadiness::Unknown,
+            }
+        } else {
+            ProjectReadiness::None
         };
         cancellation.check()?;
-        self.snapshot.chatgpt_activity =
-            if server == ServerReadiness::Ready && project == ProjectReadiness::Ready {
-                match self.adapter.chatgpt_activity(&identity, cancellation).await {
+        self.snapshot.chatgpt_activity = if server == ServerReadiness::Ready
+            && project == ProjectReadiness::Ready
+        {
+            if let Some(project_identity) = project_identity.as_ref() {
+                match self.adapter.chatgpt_activity(project_identity, cancellation).await {
                     Ok(last_meaningful_activity_at_ms) => Some(ChatGptActivitySnapshot {
                         observed: last_meaningful_activity_at_ms.is_some(),
                         last_meaningful_activity_at_ms,
@@ -899,20 +939,37 @@ impl DesktopCore {
                 }
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
         cancellation.check()?;
-        let tunnel_active = self
-            .process_snapshot(ProcessKind::RegularTunnel)
-            .await
-            .is_some_and(|process| {
-                matches!(
-                    process.phase,
-                    ProcessPhase::Starting | ProcessPhase::Running
-                )
-            });
-        let regular_tunnel_expected = self.snapshot.regular_tunnel.is_some();
-        let exposure = regular_tunnel_exposure(&mut self.snapshot.regular_tunnel, tunnel_active)
-            .unwrap_or_else(|| exposure_readiness(self.config.topology.as_ref()));
+
+        let (exposure, regular_tunnel_expected) = if remote_topology {
+            let exposure = match server {
+                ServerReadiness::Ready => ExposureReadiness::RemoteReady,
+                ServerReadiness::Degraded => ExposureReadiness::Degraded,
+                ServerReadiness::Offline | ServerReadiness::Error => ExposureReadiness::Error,
+                ServerReadiness::Stopped => ExposureReadiness::Disabled,
+                ServerReadiness::Starting => ExposureReadiness::Starting,
+                ServerReadiness::Unknown => ExposureReadiness::Unknown,
+            };
+            (exposure, false)
+        } else {
+            let tunnel_active = self
+                .process_snapshot(ProcessKind::RegularTunnel)
+                .await
+                .is_some_and(|process| {
+                    matches!(
+                        process.phase,
+                        ProcessPhase::Starting | ProcessPhase::Running
+                    )
+                });
+            let expected = self.snapshot.regular_tunnel.is_some();
+            let exposure = regular_tunnel_exposure(&mut self.snapshot.regular_tunnel, tunnel_active)
+                .unwrap_or_else(|| exposure_readiness(self.config.topology.as_ref()));
+            (exposure, expected)
+        };
         self.snapshot.readiness = aggregate_readiness(server, runner, exposure.clone(), project);
         if regular_tunnel_expected && exposure == ExposureReadiness::Error {
             self.snapshot.readiness.next_action_kind =
@@ -925,10 +982,14 @@ impl DesktopCore {
                 "Restore clipboard access, then restart the secure tunnel handoff.".to_string(),
             );
         }
-        self.snapshot.topology = effective_topology(
-            self.config.topology.as_ref(),
-            self.snapshot.regular_tunnel.is_some(),
-        );
+        self.snapshot.topology = if remote_topology {
+            self.config.topology.clone()
+        } else {
+            effective_topology(
+                self.config.topology.as_ref(),
+                self.snapshot.regular_tunnel.is_some(),
+            )
+        };
         self.snapshot.project = project_snapshot(&self.config);
         self.get_state().await
     }
@@ -1060,15 +1121,8 @@ impl DesktopCore {
         match topology.server {
             ServerTopology::Local => self.configure_local_setup(None, cancellation).await,
             ServerTopology::Remote { url } => {
-                let project_path =
-                    customer_authorized_anchor_path(&self.config).ok_or_else(|| {
-                        DesktopError::new(
-                            "project_not_ready",
-                            "The saved remote Desktop runtime no longer has a project selection",
-                            "Choose a project or change the Desktop runtime setup.",
-                        )
-                    })?;
-                self.configure_remote_setup(&url, "", &project_path, cancellation)
+                let project_path = customer_authorized_anchor_path(&self.config);
+                self.configure_remote_setup(&url, "", project_path.as_deref(), cancellation)
                     .await
             }
         }
@@ -1097,66 +1151,76 @@ impl DesktopCore {
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
         cancellation.check()?;
-        let local_full = self.config.topology.as_ref().is_some_and(|topology| {
+        let full_topology = self.config.topology.as_ref().is_some_and(|topology| {
             topology.experience == Experience::Full
-                && matches!(topology.server, ServerTopology::Local)
         });
-        if !local_full || self.snapshot.quick_share.is_some() {
+        let remote_topology = self.config.topology.as_ref().is_some_and(|topology| {
+            topology.experience == Experience::Full
+                && matches!(topology.server, ServerTopology::Remote { .. })
+        });
+        if !full_topology || self.snapshot.quick_share.is_some() {
             return Err(DesktopError::new(
                 "unsupported_topology",
-                "Projects can only be activated in place on a local Full Runtime",
+                "Projects can only be activated on a connected Full Runtime",
                 "Use the full runtime setup flow before activating another project.",
             ));
         }
         if !self.snapshot.readiness.runtime_ready {
             return Err(DesktopError::new(
                 "runtime_not_ready",
-                "The local Full Runtime is not ready for an in-place project activation",
-                "Restore the local runtime, then choose the project again.",
+                "The Full Runtime is not ready for an in-place project activation",
+                "Restore the runtime, then choose the project again.",
             ));
         }
 
         let project = self.adapter.inspect_project(project_path).await?;
         cancellation.check()?;
-        let identity = identity_from_config(&self.config).ok_or_else(|| {
+        let identity = runner_identity_from_config(&self.config).ok_or_else(|| {
             DesktopError::new(
                 "runtime_not_ready",
-                "The saved local Runner identity is incomplete",
-                "Restore or reconfigure the local runtime before activating another project.",
+                "The saved Runner identity is incomplete",
+                "Restore or reconfigure the runtime before activating another project.",
             )
         })?;
         let runner_client_id = stored_runner_client_id(&self.config).ok_or_else(|| {
             DesktopError::new(
                 "runner_offline",
-                "The saved local Runner client identity is unavailable",
-                "Restore or reconfigure the local runtime before activating another project.",
+                "The saved Runner client identity is unavailable",
+                "Restore or reconfigure the runtime before activating another project.",
             )
         })?;
         let runner = self
             .adapter
-            .observe_runner_connection(&identity, Some(&runner_client_id), cancellation)
+            .observe_runner_identity(&identity, Some(&runner_client_id), cancellation)
             .await?;
         cancellation.check()?;
-        if !runner.online {
+        if !runner.online() {
             return Err(DesktopError::new(
                 "runner_offline",
-                "The current local Runner is not online",
-                "Restore the local runtime, then choose the project again.",
+                "The current Runner is not online",
+                "Restore the runtime, then choose the project again.",
             ));
         }
 
-        let identity = self
+        let activated = self
             .adapter
-            .activate_project(&identity, &runner_client_id, &project, cancellation)
+            .activate_project_for_runner(&identity, &runner_client_id, &project, cancellation)
             .await?;
-        self.wait_for_project(&identity, cancellation).await?;
+        self.wait_for_project(&activated, cancellation).await?;
         cancellation.check()?;
 
         let previous_config = self.config.clone();
         let previous_snapshot = self.snapshot.clone();
         let mut committed_project = project;
-        committed_project.runtime_project_id = Some(identity.runtime_project_id.clone());
+        committed_project.runtime_project_id = Some(activated.runtime_project_id.clone());
         upsert_authorized_project(&mut self.config, committed_project.clone());
+        if remote_topology {
+            self.config.project = Some(committed_project.clone());
+            if let Some(runtime) = self.config.runtime.as_mut() {
+                runtime.project_id = Some(activated.project_id.clone());
+                runtime.runtime_project_id = Some(activated.runtime_project_id.clone());
+            }
+        }
         if let Err(error) = self.save_config().await {
             self.config = previous_config;
             self.snapshot = previous_snapshot;
@@ -1174,6 +1238,7 @@ impl DesktopCore {
                 .to_string_lossy(),
         );
         self.snapshot.chatgpt_activity = None;
+        self.snapshot.project = project_snapshot(&self.config);
         self.snapshot.readiness = aggregate_readiness(
             self.snapshot.readiness.server.clone(),
             self.snapshot.readiness.runner.clone(),
@@ -1189,6 +1254,10 @@ impl DesktopCore {
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
         cancellation.check()?;
+        let remote_topology = self.config.topology.as_ref().is_some_and(|topology| {
+            topology.experience == Experience::Full
+                && matches!(topology.server, ServerTopology::Remote { .. })
+        });
         let project = self
             .config
             .projects
@@ -1202,33 +1271,67 @@ impl DesktopCore {
                     "Refresh the Projects page and retry.",
                 )
             })?;
-        let identity = identity_from_config(&self.config).ok_or_else(|| {
+        let identity = runner_identity_from_config(&self.config).ok_or_else(|| {
             DesktopError::new(
                 "runtime_not_ready",
-                "The saved local Runner identity is incomplete",
-                "Restore the local runtime before removing project access.",
+                "The saved Runner identity is incomplete",
+                "Restore the runtime before removing project access.",
             )
         })?;
 
-        if let Err(error) = self
-            .adapter
-            .remove_project(&identity, &project, cancellation)
-            .await
-        {
-            self.stop_process(ProcessKind::RegularTunnel).await;
-            self.snapshot.regular_tunnel = None;
-            self.stop_process(ProcessKind::LocalRunner).await;
-            return Err(error);
-        }
+        self.adapter
+            .remove_project_for_runner(&identity, &project, cancellation)
+            .await?;
         cancellation.check()?;
 
+        let previous_config = self.config.clone();
         remove_authorized_project(&mut self.config, &project.path);
-        self.save_config().await?;
+        if remote_topology
+            && self
+                .config
+                .project
+                .as_ref()
+                .is_some_and(|active| project_paths_equal(&active.path, &project.path))
+        {
+            self.config.project = self.config.projects.first().cloned();
+            if let Some(runtime) = self.config.runtime.as_mut() {
+                runtime.runtime_project_id = self
+                    .config
+                    .project
+                    .as_ref()
+                    .and_then(|next| next.runtime_project_id.clone());
+                runtime.project_id = runtime
+                    .runtime_project_id
+                    .as_deref()
+                    .and_then(|runtime_id| runtime_id.rsplit(':').next())
+                    .map(str::to_string);
+            }
+        }
+        if let Err(error) = self.save_config().await {
+            self.config = previous_config;
+            return Err(error);
+        }
         self.activity.push(
             ActivityEventKind::ProjectActivated,
             "desktop",
             ActivityLevel::Info,
-            format!("Removed local project access: {}", project.path),
+            format!("Removed project access: {}", project.path),
+        );
+        self.snapshot.chatgpt_activity = None;
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.readiness = aggregate_readiness(
+            self.snapshot.readiness.server.clone(),
+            self.snapshot.readiness.runner.clone(),
+            self.snapshot.readiness.exposure.clone(),
+            if remote_topology {
+                self.config
+                    .project
+                    .as_ref()
+                    .map(|_| ProjectReadiness::Ready)
+                    .unwrap_or(ProjectReadiness::None)
+            } else {
+                self.snapshot.readiness.project.clone()
+            },
         );
         self.get_state().await
     }
@@ -1525,8 +1628,8 @@ impl DesktopCore {
                         RunnerReadiness::Stopped,
                         exposure_readiness(self.config.topology.as_ref()),
                         self.config
-                            .runtime_anchor
-                            .as_ref()
+                            .projects
+                            .first()
                             .map(|_| ProjectReadiness::Configured)
                             .unwrap_or(ProjectReadiness::None),
                     );
@@ -1587,22 +1690,14 @@ impl DesktopCore {
                 },
                 ExposureReadiness::Disabled,
                 self.config
-                    .runtime_anchor
-                    .as_ref()
+                    .projects
+                    .first()
                     .map(|_| ProjectReadiness::Configured)
                     .unwrap_or(ProjectReadiness::None),
             );
             self.publish_snapshot();
             return Err(error);
         }
-
-        self.snapshot.project = Some(committed_anchor);
-        self.snapshot.readiness = aggregate_readiness(
-            ServerReadiness::Ready,
-            RunnerReadiness::Ready,
-            ExposureReadiness::LocalReady,
-            ProjectReadiness::Ready,
-        );
 
         if identity_replaced || requested_user_project.is_some() {
             self.reconcile_authorized_projects(
@@ -1615,6 +1710,19 @@ impl DesktopCore {
             .await?;
             self.save_config().await?;
         }
+
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.projects = projects_snapshot(&self.config);
+        self.snapshot.readiness = aggregate_readiness(
+            ServerReadiness::Ready,
+            RunnerReadiness::Ready,
+            ExposureReadiness::LocalReady,
+            if self.config.projects.is_empty() {
+                ProjectReadiness::None
+            } else {
+                ProjectReadiness::Ready
+            },
+        );
 
         self.activity.push(
             ActivityEventKind::LocalRuntimeReady,
@@ -1702,15 +1810,17 @@ impl DesktopCore {
         &mut self,
         server_url: &str,
         pairing_code: &str,
-        project_path: &str,
+        project_path: Option<&str>,
         cancellation: &CancellationContext,
     ) -> DesktopResult<DesktopStateSnapshot> {
         cancellation.check()?;
         let server_url = crate::webcodex::validate_server_url(server_url)?;
-        let project = self.adapter.inspect_project(project_path).await?;
+        let project = match project_path.map(str::trim).filter(|path| !path.is_empty()) {
+            Some(path) => Some(self.adapter.inspect_project(path).await?),
+            None => None,
+        };
         cancellation.check()?;
         let binaries = self.adapter.ensure_binaries(cancellation).await?.clone();
-        self.snapshot.binaries = Some(binaries.info());
         let exposure = if server_url.starts_with("https://") {
             Exposure::ExistingHttps {
                 url: server_url.clone(),
@@ -1727,86 +1837,109 @@ impl DesktopCore {
             exposure,
             enrollment: Enrollment::ManagedPairing,
         };
-        self.snapshot.topology = Some(topology.clone());
-        self.stage_project_scope(project.clone());
-        self.config.topology = Some(topology.clone());
-        self.config.runtime_autostart = Some(true);
-        self.config.preferred_connection = Some(RegularConnectionPreference::NoChatGpt);
-        self.snapshot.readiness = aggregate_readiness(
-            ServerReadiness::Starting,
-            RunnerReadiness::Connecting,
-            if server_url.starts_with("https://") {
-                ExposureReadiness::Starting
-            } else {
-                ExposureReadiness::Degraded
-            },
-            ProjectReadiness::Configured,
-        );
         self.activity.push(
             ActivityEventKind::RemoteConnecting,
             "desktop",
             ActivityLevel::Info,
-            "Connecting this computer to the existing CodexLink Server",
+            "Validating the existing CodexLink Server before switching topology",
         );
-        self.publish_snapshot();
 
-        let reusable_identity = identity_from_config(&self.config)
+        let connections_dir = self.data_dir.join("connections");
+        let configured_identity = runner_identity_from_config(&self.config)
             .filter(|identity| same_server(&identity.server_url, &server_url));
-        let saved_runner_client_id = stored_runner_client_id(&self.config);
-        let reusable_observation = match reusable_identity.as_ref() {
-            Some(identity) => self
+        let configured_client_id = configured_identity
+            .as_ref()
+            .and_then(|_| stored_runner_client_id(&self.config));
+        let (reusable_identity, expected_client_id) = if let Some(identity) = configured_identity {
+            (Some(identity), configured_client_id)
+        } else {
+            match self
                 .adapter
-                .observe_runner_connection(
-                    identity,
-                    saved_runner_client_id.as_deref(),
-                    cancellation,
-                )
-                .await
-                .ok(),
-            None => None,
+                .saved_runner_identity(&server_url, &connections_dir, cancellation)
+                .await?
+            {
+                Some((identity, client_id)) => (Some(identity), Some(client_id)),
+                None => (None, None),
+            }
         };
-        let (mut identity, identity_replaced, runner_client_id) = match (
-            reusable_identity,
-            reusable_observation,
-        ) {
-            (Some(identity), Some(observation)) => (identity, false, observation.client_id),
-            _ => {
-                if !pairing_code.starts_with("wc_pair_") {
-                    return Err(DesktopError::new(
-                            "pairing_code_invalid",
-                            "The saved Runner identity is not reusable and no new CodexLink pairing code was provided",
-                            "Refresh this Runner connection with a new wc_pair_… code.",
-                        ));
-                }
-                let identity = self
+
+        let reusable = match reusable_identity {
+            Some(identity) => {
+                let observation = self
                     .adapter
-                    .login_with_pairing(
-                        &server_url,
-                        pairing_code,
-                        &self.data_dir.join("connections"),
-                        &project,
+                    .observe_runner_identity(
+                        &identity,
+                        expected_client_id.as_deref(),
                         cancellation,
                     )
                     .await?;
-                let observation = self
-                    .adapter
-                    .observe_runner_connection(&identity, None, cancellation)
-                    .await?;
-                // A remote pairing code is one-shot. Publish the newly
-                // validated connection identity before Runner/project
-                // activation so a later readiness failure can retry this
-                // same credential instead of forcing another pairing.
-                self.config.topology = Some(topology.clone());
-                self.store_identity(
-                    &project,
-                    &identity,
-                    None,
-                    Some(observation.client_id.clone()),
+                match observation.state {
+                    RunnerConnectionState::CredentialInvalid => None,
+                    RunnerConnectionState::ServerUnavailable | RunnerConnectionState::Unknown => {
+                        return Err(DesktopError::new(
+                            "remote_server_offline",
+                            "The saved CodexLink enrollment is still present, but the Server is currently unreachable",
+                            "Keep the saved enrollment and retry when the Server is reachable; do not create a new pairing code.",
+                        ));
+                    }
+                    RunnerConnectionState::Online | RunnerConnectionState::RunnerOffline => {
+                        Some((identity, observation.client_id))
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let (mut identity, identity_replaced, runner_client_id) = if let Some(reusable) = reusable {
+            (reusable.0, false, reusable.1)
+        } else {
+            if !pairing_code.starts_with("wc_pair_") {
+                let code = if expected_client_id.is_some() {
+                    "remote_credential_invalid"
+                } else {
+                    "pairing_code_required"
+                };
+                return Err(DesktopError::new(
+                    code,
+                    if code == "remote_credential_invalid" {
+                        "The saved CodexLink enrollment was rejected by the Server"
+                    } else {
+                        "This Server has no saved CodexLink enrollment on this computer"
+                    },
+                    "Provide a fresh wc_pair_… code only when enrolling this Server or replacing a revoked credential.",
+                ));
+            }
+            let identity = self
+                .adapter
+                .login_runner_with_pairing(
+                    &server_url,
+                    pairing_code,
+                    &connections_dir,
+                    cancellation,
                 )
                 .await?;
-                cancellation.check()?;
-                (identity, true, observation.client_id)
+            let observation = self
+                .adapter
+                .observe_runner_identity(&identity, None, cancellation)
+                .await?;
+            match observation.state {
+                RunnerConnectionState::CredentialInvalid => {
+                    return Err(DesktopError::new(
+                        "remote_credential_invalid",
+                        "The newly enrolled credential was rejected by the Server",
+                        "Generate a fresh pairing code and enroll again.",
+                    ));
+                }
+                RunnerConnectionState::ServerUnavailable | RunnerConnectionState::Unknown => {
+                    return Err(DesktopError::new(
+                        "remote_server_offline",
+                        "The enrollment was saved, but the Server became unreachable before topology validation completed",
+                        "Keep the saved enrollment and retry later without generating another pairing code.",
+                    ));
+                }
+                RunnerConnectionState::Online | RunnerConnectionState::RunnerOffline => {}
             }
+            (identity, true, observation.client_id)
         };
 
         let server_deadline = Deadline::after(SERVER_READY_TIMEOUT);
@@ -1854,12 +1987,12 @@ impl DesktopCore {
             false
         } else {
             self.adapter
-                .runner_ready_until(&identity, cancellation, runner_deadline)
+                .runner_identity_ready_until(&identity, cancellation, runner_deadline)
                 .await
                 .unwrap_or(false)
         };
         cancellation.check()?;
-        let runner_started = if !runner_ready {
+        let mut runner_started = if !runner_ready {
             if runner_deadline.is_elapsed() {
                 return Err(readiness_timeout_error(
                     "runner_offline",
@@ -1874,71 +2007,125 @@ impl DesktopCore {
         } else {
             false
         };
-        self.wait_for_runner(&identity, cancellation, runner_deadline, runner_started)
+        self.wait_for_runner_identity(&identity, cancellation, runner_deadline, runner_started)
             .await?;
-        identity = match self
-            .adapter
-            .activate_project(&identity, &runner_client_id, &project, cancellation)
-            .await
-        {
-            Ok(identity) => identity,
-            Err(error)
-                if matches!(
-                    error.code.as_str(),
-                    "project_activation_capability_unavailable"
-                        | "project_activation_restart_required"
-                ) =>
+
+        let mut activated_identity: Option<ProjectRuntimeIdentity> = None;
+        if let Some(project) = project.as_ref() {
+            let activated = match self
+                .adapter
+                .activate_project_for_runner(&identity, &runner_client_id, project, cancellation)
+                .await
             {
-                if !can_refresh_legacy_runner(self.process_snapshot(ProcessKind::LocalRunner).await)
+                Ok(identity) => identity,
+                Err(error)
+                    if matches!(
+                        error.code.as_str(),
+                        "project_activation_capability_unavailable"
+                            | "project_activation_restart_required"
+                    ) =>
                 {
-                    return Err(DesktopError::new(
-                        "project_activation_legacy_runner",
-                        "This Runner needs to be refreshed before the new project can be activated",
-                        "Refresh the Runner, then select this project again.",
-                    ));
+                    if !can_refresh_legacy_runner(
+                        self.process_snapshot(ProcessKind::LocalRunner).await,
+                    ) {
+                        return Err(DesktopError::new(
+                            "project_activation_legacy_runner",
+                            "This Runner needs to be refreshed before the new project can be activated",
+                            "Refresh the Runner, then select this project again.",
+                        ));
+                    }
+                    let legacy_identity = self
+                        .adapter
+                        .legacy_register_project_for_runner(
+                            &identity,
+                            &runner_client_id,
+                            project,
+                            cancellation,
+                        )
+                        .await?;
+                    let legacy_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
+                    self.stop_process_until(ProcessKind::LocalRunner, legacy_deadline)
+                        .await;
+                    if legacy_deadline.is_elapsed() {
+                        return Err(readiness_timeout_error(
+                            "runner_offline",
+                            "Desktop could not refresh its legacy Runner",
+                            "Retry project setup after checking Runner diagnostics.",
+                        ));
+                    }
+                    identity = legacy_identity.runner_identity();
+                    let command = self.adapter.local_runner_command(&identity.runner_config)?;
+                    self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
+                        .await?;
+                    self.wait_for_runner_identity(&identity, cancellation, legacy_deadline, true)
+                        .await?;
+                    runner_started = true;
+                    legacy_identity
                 }
-                let legacy_identity = self
-                    .adapter
-                    .legacy_register_project(&identity, &runner_client_id, &project, cancellation)
-                    .await?;
-                let legacy_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
-                self.stop_process_until(ProcessKind::LocalRunner, legacy_deadline)
-                    .await;
-                if legacy_deadline.is_elapsed() {
-                    return Err(readiness_timeout_error(
-                        "runner_offline",
-                        "Desktop could not refresh its legacy Runner",
-                        "Retry project setup after checking Runner diagnostics.",
-                    ));
-                }
-                let command = self
-                    .adapter
-                    .local_runner_command(&legacy_identity.runner_config)?;
-                self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
-                    .await?;
-                self.wait_for_runner(&legacy_identity, cancellation, legacy_deadline, true)
-                    .await?;
-                legacy_identity
-            }
-            Err(error) => return Err(error),
-        };
-        self.wait_for_project(&identity, cancellation).await?;
+                Err(error) => return Err(error),
+            };
+            self.wait_for_project(&activated, cancellation).await?;
+            activated_identity = Some(activated);
+        }
         cancellation.check()?;
-        self.config.topology = Some(topology);
-        self.store_identity(&project, &identity, None, Some(runner_client_id))
-            .await?;
+
+        let previous_config = self.config.clone();
+        self.config.topology = Some(topology.clone());
+        self.config.runtime_anchor = None;
+        self.config.project = None;
+        self.config.projects.clear();
+        self.config.runtime_autostart = Some(true);
+        self.config.preferred_connection = Some(RegularConnectionPreference::NoChatGpt);
+        let mut project_readiness = ProjectReadiness::None;
+        let (project_id, runtime_project_id) = if let (Some(project), Some(activated)) =
+            (project.as_ref(), activated_identity.as_ref())
+        {
+            let mut committed = project.clone();
+            committed.runtime_project_id = Some(activated.runtime_project_id.clone());
+            self.config.project = Some(committed.clone());
+            self.config.projects.push(committed);
+            project_readiness = ProjectReadiness::Ready;
+            (
+                Some(activated.project_id.clone()),
+                Some(activated.runtime_project_id.clone()),
+            )
+        } else {
+            (None, None)
+        };
+        self.config.runtime = Some(StoredRuntime {
+            server_url: identity.server_url.clone(),
+            server_env_file: None,
+            runner_config: Some(identity.runner_config.clone()),
+            user_token_file: Some(identity.user_token_file.clone()),
+            runner_client_id: Some(runner_client_id),
+            project_id,
+            runtime_project_id,
+        });
+        if let Err(error) = self.save_config().await {
+            self.config = previous_config;
+            if runner_started || replacing_owned_runner {
+                self.stop_process_until(
+                    ProcessKind::LocalRunner,
+                    Deadline::after(READINESS_CLEANUP_SLACK),
+                )
+                .await;
+            }
+            return Err(error);
+        }
+
+        self.snapshot.binaries = Some(binaries.info());
+        self.snapshot.topology = Some(topology);
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.projects = projects_snapshot(&self.config);
         self.snapshot.readiness = aggregate_readiness(
             ServerReadiness::Ready,
             RunnerReadiness::Ready,
             if server_url.starts_with("https://") {
-                // HTTPS proves transport shape, not that ChatGPT can reach and
-                // authenticate to the MCP endpoint. D1 has no canonical remote
-                // MCP/handoff probe, so keep this explicitly unverified.
-                ExposureReadiness::Unknown
+                ExposureReadiness::RemoteReady
             } else {
                 ExposureReadiness::Degraded
             },
-            ProjectReadiness::Ready,
+            project_readiness,
         );
         self.activity.push(
             ActivityEventKind::RemoteConnected,
@@ -2580,9 +2767,9 @@ impl DesktopCore {
         }
     }
 
-    async fn wait_for_runner(
+    async fn wait_for_runner_identity(
         &mut self,
-        identity: &ProjectRuntimeIdentity,
+        identity: &RunnerRuntimeIdentity,
         cancellation: &CancellationContext,
         deadline: Deadline,
         cleanup_owned_process: bool,
@@ -2619,28 +2806,26 @@ impl DesktopCore {
             }
             if self
                 .adapter
-                .runner_ready_until(identity, cancellation, deadline)
+                .runner_identity_ready_until(identity, cancellation, deadline)
                 .await
                 .unwrap_or(false)
             {
                 return Ok(());
             }
-            cancellation.check()?;
-            if deadline.is_elapsed() {
-                self.cleanup_readiness_process(
-                    ProcessKind::LocalRunner,
-                    deadline,
-                    cleanup_owned_process,
-                )
-                .await;
-                return Err(readiness_timeout_error(
-                    "runner_offline",
-                    "Runner did not become connected",
-                    "Check Server reachability and Runner diagnostics, then retry.",
-                ));
-            }
             sleep_or_cancel_until(POLL_INTERVAL, cancellation, deadline).await?;
         }
+    }
+
+    async fn wait_for_runner(
+        &mut self,
+        identity: &ProjectRuntimeIdentity,
+        cancellation: &CancellationContext,
+        deadline: Deadline,
+        cleanup_owned_process: bool,
+    ) -> DesktopResult<()> {
+        let runner = identity.runner_identity();
+        self.wait_for_runner_identity(&runner, cancellation, deadline, cleanup_owned_process)
+            .await
     }
 
     async fn wait_for_project(
@@ -2683,30 +2868,6 @@ impl DesktopCore {
             )
             .await;
         }
-    }
-
-    async fn store_identity(
-        &mut self,
-        project: &ProjectSelection,
-        identity: &ProjectRuntimeIdentity,
-        server_env_file: Option<PathBuf>,
-        runner_client_id: Option<String>,
-    ) -> DesktopResult<()> {
-        let mut project = project.clone();
-        project.runtime_project_id = Some(identity.runtime_project_id.clone());
-        self.config.project = Some(project.clone());
-        upsert_authorized_project(&mut self.config, project.clone());
-        self.config.runtime = Some(StoredRuntime {
-            server_url: identity.server_url.clone(),
-            server_env_file,
-            runner_config: Some(identity.runner_config.clone()),
-            user_token_file: Some(identity.user_token_file.clone()),
-            runner_client_id,
-            project_id: Some(identity.project_id.clone()),
-            runtime_project_id: Some(identity.runtime_project_id.clone()),
-        });
-        self.snapshot.project = Some(project);
-        self.save_config().await
     }
 
     async fn save_config(&self) -> DesktopResult<()> {
@@ -2866,8 +3027,19 @@ fn local_enrollment_directory(data_dir: &Path, config: &StoredDesktopConfig) -> 
 }
 
 fn project_snapshot(config: &StoredDesktopConfig) -> Option<ProjectSelection> {
-    let mut project = runtime_identity_project(config)?.clone();
-    if identity_from_config(config).is_none() {
+    let remote_full = config.topology.as_ref().is_some_and(|topology| {
+        topology.experience == Experience::Full
+            && matches!(topology.server, ServerTopology::Remote { .. })
+    });
+    let mut project = if remote_full {
+        config.project.clone().or_else(|| config.projects.first().cloned())
+    } else {
+        config.projects.first().cloned()
+    }?;
+    // Keep the customer-visible path selection, but never advertise a stale
+    // runtime Project identity when the underlying Runner enrollment files are
+    // missing or otherwise unusable.
+    if runner_identity_from_config(config).is_none() {
         project.runtime_project_id = None;
     }
     Some(project)
@@ -2985,6 +3157,47 @@ fn stored_runner_client_id(config: &StoredDesktopConfig) -> Option<String> {
         .map(str::trim)
         .filter(|client_id| !client_id.is_empty())
         .map(str::to_string)
+}
+
+fn runner_identity_from_config(config: &StoredDesktopConfig) -> Option<RunnerRuntimeIdentity> {
+    let runtime = config.runtime.as_ref()?;
+    let runner_config = runtime.runner_config.clone()?;
+    let user_token_file = runtime.user_token_file.clone()?;
+    if runtime.server_url.trim().is_empty()
+        || !runner_config.is_file()
+        || !user_token_file.is_file()
+    {
+        return None;
+    }
+    Some(RunnerRuntimeIdentity {
+        runner_config,
+        user_token_file,
+        server_url: runtime.server_url.clone(),
+    })
+}
+
+fn customer_project_identity_from_config(
+    config: &StoredDesktopConfig,
+) -> Option<ProjectRuntimeIdentity> {
+    let runner = runner_identity_from_config(config)?;
+    let project = project_snapshot(config)?;
+    let runtime_project_id = project.runtime_project_id.clone()?.trim().to_string();
+    if runtime_project_id.is_empty() {
+        return None;
+    }
+    let project_id = runtime_project_id
+        .rsplit(':')
+        .next()
+        .unwrap_or(runtime_project_id.as_str())
+        .to_string();
+    Some(ProjectRuntimeIdentity {
+        project_id,
+        runtime_project_id,
+        project_path: project.path,
+        runner_config: runner.runner_config,
+        user_token_file: runner.user_token_file,
+        server_url: runner.server_url,
+    })
 }
 
 fn identity_from_config(config: &StoredDesktopConfig) -> Option<ProjectRuntimeIdentity> {
@@ -4198,6 +4411,132 @@ mod tests {
     }
 
     #[test]
+    fn remote_zero_root_runner_identity_survives_without_project_authority() {
+        let dir = unique_state_dir("remote-zero-root-identity");
+        std::fs::create_dir_all(&dir).unwrap();
+        let runner_config = dir.join("runner.toml");
+        let user_token_file = dir.join("webcodex-user-token");
+        std::fs::write(&runner_config, "fixture").unwrap();
+        std::fs::write(&user_token_file, "fixture").unwrap();
+
+        let mut config = test_stored_config("legacy");
+        config.topology = Some(RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Remote {
+                url: "https://server.example.test".to_string(),
+            },
+            runner: RunnerTopology::Local,
+            exposure: Exposure::ExistingHttps {
+                url: "https://server.example.test".to_string(),
+            },
+            enrollment: Enrollment::ManagedPairing,
+        });
+        config.runtime_anchor = None;
+        config.project = None;
+        config.projects.clear();
+        config.runtime = Some(StoredRuntime {
+            server_url: "https://server.example.test".to_string(),
+            server_env_file: None,
+            runner_config: Some(runner_config),
+            user_token_file: Some(user_token_file),
+            runner_client_id: Some("desktop-zero-root".to_string()),
+            project_id: None,
+            runtime_project_id: None,
+        });
+
+        assert!(runner_identity_from_config(&config).is_some());
+        assert!(identity_from_config(&config).is_none());
+        assert!(customer_project_identity_from_config(&config).is_none());
+        assert!(project_snapshot(&config).is_none());
+        assert_eq!(customer_authorized_anchor_path(&config), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn remote_project_authority_can_be_removed_without_losing_runner_enrollment() {
+        let dir = unique_state_dir("remote-project-lifecycle");
+        std::fs::create_dir_all(&dir).unwrap();
+        let runner_config = dir.join("runner.toml");
+        let user_token_file = dir.join("webcodex-user-token");
+        std::fs::write(&runner_config, "fixture").unwrap();
+        std::fs::write(&user_token_file, "fixture").unwrap();
+        let project = ProjectSelection {
+            path: dir.join("project").to_string_lossy().to_string(),
+            allowed_root: dir.join("project").to_string_lossy().to_string(),
+            is_git_repository: false,
+            runtime_project_id: Some("agent:desktop-remote:project-a".to_string()),
+        };
+
+        let mut config = test_stored_config("legacy");
+        config.topology = Some(RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Remote {
+                url: "https://server.example.test".to_string(),
+            },
+            runner: RunnerTopology::Local,
+            exposure: Exposure::ExistingHttps {
+                url: "https://server.example.test".to_string(),
+            },
+            enrollment: Enrollment::ManagedPairing,
+        });
+        config.runtime_anchor = None;
+        config.project = Some(project.clone());
+        config.projects = vec![project];
+        config.runtime = Some(StoredRuntime {
+            server_url: "https://server.example.test".to_string(),
+            server_env_file: None,
+            runner_config: Some(runner_config),
+            user_token_file: Some(user_token_file),
+            runner_client_id: Some("desktop-remote".to_string()),
+            project_id: Some("project-a".to_string()),
+            runtime_project_id: Some("agent:desktop-remote:project-a".to_string()),
+        });
+
+        assert!(runner_identity_from_config(&config).is_some());
+        assert!(customer_project_identity_from_config(&config).is_some());
+        config.projects.clear();
+        config.project = None;
+        if let Some(runtime) = config.runtime.as_mut() {
+            runtime.project_id = None;
+            runtime.runtime_project_id = None;
+        }
+        assert!(runner_identity_from_config(&config).is_some());
+        assert!(customer_project_identity_from_config(&config).is_none());
+        assert!(project_snapshot(&config).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn remote_setup_validation_failure_keeps_active_topology_unchanged() {
+        let data_dir = unique_state_dir("remote-setup-transaction");
+        let resource_dir = data_dir.join("resources");
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        let mut core = DesktopCore::new(data_dir.clone(), resource_dir).unwrap();
+        let local = RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Local,
+            runner: RunnerTopology::Local,
+            exposure: Exposure::None,
+            enrollment: Enrollment::ManagedPairing,
+        };
+        core.config.topology = Some(local.clone());
+        core.snapshot.topology = Some(local.clone());
+        let error = core
+            .configure_remote_setup(
+                "not-a-server-url",
+                "wc_pair_unused",
+                None,
+                &CancellationContext::never(),
+            )
+            .await
+            .expect_err("invalid remote setup must fail before commit");
+        assert_eq!(error.code, "server_url_invalid");
+        assert_eq!(core.config.topology, Some(local.clone()));
+        assert_eq!(core.snapshot.topology, Some(local));
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
     fn authorized_project_helpers_keep_multiple_exact_paths_and_remove_only_one() {
         let mut config = test_stored_config("first");
         config.projects.clear();
@@ -5079,7 +5418,7 @@ mod tests {
                     .create_local_pairing(&server_url, &env_file, &cancellation)
                     .await?;
                 let first = client
-                    .configure_remote_setup(&server_url, &pairing_code, &project, &cancellation)
+                    .configure_remote_setup(&server_url, &pairing_code, Some(&project), &cancellation)
                     .await?;
                 let first_started_server = client
                     .process_snapshot(ProcessKind::LocalServer)
@@ -5088,7 +5427,7 @@ mod tests {
                 client.stop_local_runtime(&cancellation).await?;
 
                 let second = client
-                    .configure_remote_setup(&server_url, "", &project, &cancellation)
+                    .configure_remote_setup(&server_url, "", Some(&project), &cancellation)
                     .await?;
                 let second_started_server = client
                     .process_snapshot(ProcessKind::LocalServer)

@@ -81,6 +81,8 @@
   "common.noChatGpt": "暂不连接 ChatGPT",
   "common.connected": "已连接",
   "common.running": "运行中",
+  "common.offline": "离线",
+  "common.degraded": "受限",
   "common.stopped": "已停止",
   "common.starting": "正在启动",
   "common.error": "需要处理",

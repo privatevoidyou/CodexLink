@@ -109,7 +109,11 @@ fn authorize_canonical_project(
 ) -> Result<(Vec<PathBuf>, bool), String> {
     // Root discovery may return empty when HOME is absent: this local explicit
     // selection supplies its own root below. The actual policy flag is unchanged.
-    let effective_roots = webcodex_runner_config::effective_allowed_roots(configured_roots, true)?;
+    let effective_roots = webcodex_runner_config::effective_allowed_roots(
+        configured_roots,
+        true,
+        configured_roots.is_empty(),
+    )?;
     let canonical_roots =
         webcodex_runner_config::paths::canonicalize_usable_allowed_roots(&effective_roots);
 

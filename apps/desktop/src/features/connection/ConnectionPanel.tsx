@@ -2,7 +2,7 @@ import { useState } from "react";
 import { desktopApi } from "../../lib/desktop-api";
 import type { DesktopError, DesktopState } from "../../models/topology";
 import { useLocale } from "../../i18n/locale";
-import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
+import { desktopErrorPresentation, normalizeDesktopError, serverReadinessLabel } from "../../i18n/presentation";
 
 export function ConnectionPanel({
   state,
@@ -27,6 +27,8 @@ export function ConnectionPanel({
   const tunnelId = state.openai_tunnel_config.effective_tunnel_id ?? state.openai_tunnel_config.saved_tunnel_id;
 
   if (state.topology?.server.kind === "remote") {
+    const serverReady = state.readiness.server === "ready";
+    const serverStatus = serverReadinessLabel(state.readiness.server, t);
     return (
       <section className="page-section rc5-page connection-page" aria-labelledby="connection-title" data-webcodex-page="connection">
         <div className="eyebrow">{t("connection.eyebrow")}</div>
@@ -36,9 +38,9 @@ export function ConnectionPanel({
           <span className="section-kicker">{t("connection.current")}</span>
           <h2>{t("connection.remoteServer")}</h2>
           <dl className="connection-status-list">
-            <ConnectionStatusRow label="Server" value={state.topology.server.url} ready />
+            <ConnectionStatusRow label="Server" value={`${state.topology.server.url} · ${serverStatus}`} ready={serverReady} />
             <ConnectionStatusRow label="Runner" value={t("connection.runnerThisComputer")} ready={state.readiness.runner === "ready"} />
-            <ConnectionStatusRow label={t("connection.method")} value={t("connection.externalManagedRemote")} ready />
+            <ConnectionStatusRow label={t("connection.method")} value={t("connection.externalManagedRemote")} ready={serverReady} />
           </dl>
         </article>
       </section>

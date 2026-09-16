@@ -39,7 +39,7 @@ pub struct LocalSetupRequest {
 pub struct RemoteSetupRequest {
     pub server_url: String,
     pub pairing_code: String,
-    pub project_path: String,
+    pub project_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -237,7 +237,7 @@ pub async fn configure_remote_setup(
         .configure_remote_setup(
             &request.server_url,
             &request.pairing_code,
-            &request.project_path,
+            request.project_path.as_deref(),
         )
         .await;
     project_state_result(&app, result)

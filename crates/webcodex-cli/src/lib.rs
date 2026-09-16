@@ -885,6 +885,7 @@ fn parse_login(args: &[String]) -> CliAction {
     let mut base_dir: Option<PathBuf> = None;
     let mut transport = TRANSPORT_WEBSOCKET.to_string();
     let mut allowed_roots: Vec<PathBuf> = Vec::new();
+    let mut allow_empty_allowed_roots = false;
     let mut project: Option<PathBuf> = None;
     let mut overwrite = false;
     let mut json = false;
@@ -926,6 +927,7 @@ fn parse_login(args: &[String]) -> CliAction {
                 Some(value) => allowed_roots.push(PathBuf::from(value)),
                 None => return cli_parse_error("--allowed-root requires a value".to_string()),
             },
+            "--allow-empty-authorized-roots" => allow_empty_allowed_roots = true,
             "--project" => match take(&mut index) {
                 Some(value) => project = Some(PathBuf::from(value)),
                 None => return cli_parse_error("--project requires a value".to_string()),
@@ -988,6 +990,7 @@ fn parse_login(args: &[String]) -> CliAction {
         base_dir,
         transport,
         allowed_roots,
+        allow_empty_allowed_roots,
         project,
         overwrite,
         json,
@@ -2534,6 +2537,7 @@ fn parse_cli_runner_init(args: &[String]) -> Result<RunnerInitOptions, String> {
         project_registry_dir: PathBuf::new(),
         output: PathBuf::new(),
         allowed_roots: Vec::new(),
+        allow_empty_allowed_roots: false,
         // Explicit `webcodex runner init` keeps the upstream execution default.
         // Product-managed CodexLink enrollment overrides this to false.
         allow_raw_shell: true,
@@ -2584,6 +2588,7 @@ fn parse_cli_runner_init(args: &[String]) -> Result<RunnerInitOptions, String> {
             "--allowed-root" => opts
                 .allowed_roots
                 .push(PathBuf::from(next_value(&mut iter, arg)?)),
+            "--allow-empty-authorized-roots" => opts.allow_empty_allowed_roots = true,
             "--allow-cwd-anywhere" => {
                 opts.allow_cwd_anywhere = runner_config::parse_bool(&next_value(&mut iter, arg)?)?;
             }

@@ -81,6 +81,8 @@
   "common.noChatGpt": "No ChatGPT connection",
   "common.connected": "Connected",
   "common.running": "Running",
+  "common.offline": "Offline",
+  "common.degraded": "Degraded",
   "common.stopped": "Stopped",
   "common.starting": "Starting",
   "common.error": "Needs attention",
