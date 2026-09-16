@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   activateLicense: vi.fn(),
   updateTunnelConfig: vi.fn(),
   openPowerShellInstallGuide: vi.fn(),
+  openProductLink: vi.fn(),
   refresh: vi.fn(),
   observeChatgptActivity: vi.fn(),
   resumeSavedRuntime: vi.fn(),
@@ -225,17 +226,19 @@ describe("semantic Desktop UI", () => {
     api.activity.mockResolvedValue([]);
     api.getLaunchAtLogin.mockResolvedValue(false);
     api.openPowerShellInstallGuide.mockResolvedValue(undefined);
+    api.openProductLink.mockResolvedValue(undefined);
     api.setUiLocale.mockResolvedValue(undefined);
     api.activateLicense.mockResolvedValue(readyState);
     api.setLaunchAtLogin.mockImplementation(async (enabled: boolean) => enabled);
     api.resumeSavedRuntime.mockResolvedValue(readyState);
     api.observeChatgptActivity.mockResolvedValue(readyState);
     api.updateTunnelProxy.mockResolvedValue(readyState);
+    api.updateTunnelConfig.mockResolvedValue(readyState);
     api.startRegularTunnel.mockResolvedValue(readyState);
     api.stopRegularTunnel.mockResolvedValue(readyState);
   });
 
-  it("shows device activation first, then bootstraps the local runtime only after activation", async () => {
+  it("shows device activation first, then starts onboarding and bootstraps the runtime in the background", async () => {
     const unactivated: DesktopState = {
       ...firstRunState,
       license: { status: "not_activated" },
@@ -260,8 +263,166 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
 
     await waitFor(() => expect(api.activateLicense).toHaveBeenCalledWith("MYWS-ABCDE-12345-FGHIJ-67890"));
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
+    await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "我已经添加过，跳过" }));
     await findHomeHeading();
-    expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
+  });
+
+  it("starts a newly activated device without Tunnel credentials at onboarding step 1", async () => {
+    const noTunnel = {
+      tunnel_id_present: false,
+      api_key_present: false,
+      source: "environment" as const,
+      saved_tunnel_id: null,
+    };
+    const unactivated: DesktopState = {
+      ...firstRunState,
+      license: { status: "not_activated" },
+      openai_tunnel_configured: false,
+      openai_tunnel_config: noTunnel,
+    };
+    const activated: DesktopState = { ...unactivated, license: { status: "activated" } };
+    const bootstrapped: DesktopState = {
+      ...readyState,
+      projects: [],
+      openai_tunnel_configured: false,
+      openai_tunnel_config: noTunnel,
+      preferred_connection: "no_chat_gpt",
+    };
+    api.getState.mockResolvedValueOnce(unactivated).mockResolvedValueOnce(activated);
+    api.activateLicense.mockResolvedValue(activated);
+    api.resumeSavedRuntime.mockResolvedValue(bootstrapped);
+
+    renderApp();
+    const activationCode = await screen.findByLabelText("销售激活码");
+    fireEvent.change(activationCode, { target: { value: "MYWS-ABCDE-12345-FGHIJ-67890" } });
+    fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
+
+    expect(await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(screen.getByLabelText("Tunnel ID")).toHaveValue("");
+    expect(screen.getByLabelText("Restricted Runtime Key")).toHaveValue("");
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("tunnel");
+  });
+
+  it("saves onboarding Tunnel credentials securely and advances to ChatGPT guidance", async () => {
+    const missing: DesktopState = {
+      ...readyState,
+      readiness: { ...readyState.readiness, runtime_ready: false },
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+    };
+    const configured: DesktopState = {
+      ...missing,
+      openai_tunnel_configured: true,
+      openai_tunnel_config: {
+        tunnel_id_present: true,
+        api_key_present: true,
+        source: "file",
+        saved_tunnel_id: "tunnel_fixture",
+        effective_tunnel_id: "tunnel_fixture",
+      },
+    };
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue(missing);
+    api.updateTunnelConfig.mockResolvedValue(configured);
+
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "创建 Tunnel" }));
+    await waitFor(() => expect(api.openProductLink).toHaveBeenCalledWith("openai_tunnels"));
+    fireEvent.change(screen.getByLabelText("Tunnel ID"), { target: { value: "tunnel_fixture" } });
+    fireEvent.change(screen.getByLabelText("Restricted Runtime Key"), { target: { value: "runtime-key-fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    await waitFor(() => expect(api.updateTunnelConfig).toHaveBeenCalledWith({
+      action: "save",
+      tunnelId: "tunnel_fixture",
+      apiKey: "runtime-key-fixture",
+    }));
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("runtime-key-fixture")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
+  });
+
+  it("lets first-use onboarding be skipped without changing runtime readiness", async () => {
+    const missing: DesktopState = {
+      ...readyState,
+      readiness: { ...readyState.readiness, runtime_ready: false, ready_for_chatgpt: false },
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+    };
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue(missing);
+
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "我已经配置过，跳过" }));
+
+    await findHomeHeading();
+    expect(api.updateTunnelConfig).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
+    expect(screen.getAllByText("尚未连接").length).toBeGreaterThan(0);
+  });
+
+  it("resumes pending onboarding but leaves existing activated upgrades on Home", async () => {
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "chatgpt");
+    api.getState.mockResolvedValue(readyState);
+    const pending = renderApp();
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
+    pending.unmount();
+
+    window.localStorage.removeItem("codexlink.desktop.v1.onboarding");
+    renderApp();
+    await findHomeHeading();
+    expect(screen.queryByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).not.toBeInTheDocument();
+  });
+
+  it("reopens onboarding from Settings without making it pending on the next restart", async () => {
+    api.getState.mockResolvedValue(readyState);
+    renderApp();
+    await findHomeHeading();
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新打开首次使用向导" }));
+
+    expect(await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "我已经配置过，跳过" }));
+    await findHomeHeading();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
+  });
+
+  it("routes the onboarding advanced link into the existing setup chooser", async () => {
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue({
+      ...readyState,
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+    });
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "使用其他连接方式" }));
+
+    expect(await screen.findByRole("heading", { name: "你希望如何使用这台电脑？", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
   });
 
   it("localizes activation failures instead of showing backend English", async () => {

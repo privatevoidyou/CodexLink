@@ -62,6 +62,7 @@ pub fn run() {
             commands::get_desktop_state,
             commands::activate_license,
             commands::open_powershell_install_guide,
+            commands::open_product_link,
             commands::set_ui_locale,
             commands::get_launch_at_login,
             commands::set_launch_at_login,

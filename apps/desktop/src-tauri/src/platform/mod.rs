@@ -53,6 +53,28 @@ pub fn open_powershell_install_guide() -> DesktopResult<()> {
     }
 }
 
+pub fn open_product_link(url: &'static str) -> DesktopResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        return windows::open_external_url(url).map_err(|error| {
+            DesktopError::new(
+                "product_link_unavailable",
+                format!("failed to open the CodexLink setup link: {error}"),
+                "Open the CodexLink setup link in your browser and retry.",
+            )
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = url;
+        Err(DesktopError::new(
+            "product_link_unsupported",
+            "Opening CodexLink setup links is not supported by this Desktop build",
+            "Open the setup page manually in your browser.",
+        ))
+    }
+}
+
 pub fn current_username() -> String {
     std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))

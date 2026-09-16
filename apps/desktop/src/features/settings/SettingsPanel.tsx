@@ -8,9 +8,11 @@ import { TunnelConfigDiagnostics } from "../connection/TunnelConfigDiagnostics";
 export function SettingsPanel({
   state,
   onState,
+  onOpenOnboarding,
 }: {
   state: DesktopState;
   onState: (state: DesktopState) => void;
+  onOpenOnboarding: () => void;
 }) {
   const { locale, setLocale, t } = useLocale();
   const [proxyMode, setProxyMode] = useState<TunnelProxyMode>(state.tunnel_proxy.mode);
@@ -106,6 +108,15 @@ export function SettingsPanel({
               />
               <span aria-hidden="true" />
             </label>
+          </div>
+          <div className="setting-line">
+            <div>
+              <strong>{t("settings.onboarding")}</strong>
+              <span>{t("settings.onboardingHelp")}</span>
+            </div>
+            <button className="secondary-button" type="button" onClick={onOpenOnboarding} data-webcodex-action="reopen-onboarding">
+              {t("settings.reopenOnboarding")}
+            </button>
           </div>
         </div>
         {launchAtLoginError && <SettingsError error={launchAtLoginError} />}

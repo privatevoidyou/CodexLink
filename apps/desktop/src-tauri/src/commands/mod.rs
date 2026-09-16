@@ -74,6 +74,28 @@ pub struct UiLocaleRequest {
     pub locale: String,
 }
 
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductLinkTarget {
+    OpenaiTunnels,
+    OpenaiApiKeys,
+    Chatgpt,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductLinkRequest {
+    pub target: ProductLinkTarget,
+}
+
+fn product_link_url(target: ProductLinkTarget) -> &'static str {
+    match target {
+        ProductLinkTarget::OpenaiTunnels => "https://platform.openai.com/settings/organization/tunnels",
+        ProductLinkTarget::OpenaiApiKeys => "https://platform.openai.com/settings/organization/api-keys",
+        ProductLinkTarget::Chatgpt => "https://chatgpt.com/",
+    }
+}
+
 fn project_state_result(
     app: &AppHandle,
     result: Result<DesktopStateSnapshot, DesktopError>,
@@ -106,6 +128,11 @@ pub async fn get_desktop_state(
 #[tauri::command]
 pub fn open_powershell_install_guide() -> Result<(), DesktopError> {
     crate::platform::open_powershell_install_guide()
+}
+
+#[tauri::command]
+pub fn open_product_link(request: ProductLinkRequest) -> Result<(), DesktopError> {
+    crate::platform::open_product_link(product_link_url(request.target))
 }
 
 #[tauri::command]
@@ -301,4 +328,22 @@ pub async fn get_bounded_activity(
     state: State<'_, AppState>,
 ) -> Result<Vec<ActivityEntry>, DesktopError> {
     Ok(state.activity())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn product_setup_links_are_fixed_allowlisted_targets() {
+        assert_eq!(
+            product_link_url(ProductLinkTarget::OpenaiTunnels),
+            "https://platform.openai.com/settings/organization/tunnels"
+        );
+        assert_eq!(
+            product_link_url(ProductLinkTarget::OpenaiApiKeys),
+            "https://platform.openai.com/settings/organization/api-keys"
+        );
+        assert_eq!(product_link_url(ProductLinkTarget::Chatgpt), "https://chatgpt.com/");
+    }
 }

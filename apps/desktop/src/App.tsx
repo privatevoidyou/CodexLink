@@ -9,6 +9,7 @@ import type {
   DesktopState,
 } from "./models/topology";
 import { FirstRun } from "./features/onboarding/FirstRun";
+import { ProductOnboarding, type ProductOnboardingStep } from "./features/onboarding/ProductOnboarding";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { ProjectsPanel } from "./features/projects/ProjectsPanel";
 import { ConnectionPanel } from "./features/connection/ConnectionPanel";
@@ -26,6 +27,32 @@ const CHATGPT_ACTIVITY_OBSERVATION_INTERVAL_MS = 30_000;
 const ACTIVE_OPERATION_OBSERVATION_INTERVAL_MS = 1_000;
 const AUTO_REPAIR_RETRY_INTERVAL_MS = 10_000;
 
+export const ONBOARDING_STORAGE_KEY = "codexlink.desktop.v1.onboarding";
+
+type ProductOnboardingSession = {
+  step: ProductOnboardingStep;
+  required: boolean;
+};
+
+function storedRequiredOnboarding(): ProductOnboardingSession | null {
+  try {
+    const value = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    if (value === "tunnel" || value === "chatgpt") return { step: value, required: true };
+  } catch {
+    // Tutorial progress is presentation state only. Existing activated users
+    // remain usable even if localStorage is unavailable.
+  }
+  return null;
+}
+
+function persistRequiredOnboarding(value: ProductOnboardingStep | "complete") {
+  try {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, value);
+  } catch {
+    // Runtime readiness and licensing never depend on tutorial persistence.
+  }
+}
+
 export default function App() {
   const { locale, setLocale, t } = useLocale();
   const [state, setState] = useState<DesktopState | null>(null);
@@ -36,6 +63,7 @@ export default function App() {
   const [cancelSubmittingId, setCancelSubmittingId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [chooseSetupMode, setChooseSetupMode] = useState(false);
+  const [productOnboarding, setProductOnboarding] = useState<ProductOnboardingSession | null>(storedRequiredOnboarding);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
   const stateVersionRef = useRef(0);
@@ -75,7 +103,7 @@ export default function App() {
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
     mainRef.current?.scrollTo?.({ top: 0 });
-  }, [navigation, showSetup]);
+  }, [navigation, showSetup, productOnboarding?.step]);
 
   useEffect(() => {
     let disposed = false;
@@ -125,8 +153,40 @@ export default function App() {
     commitState(next);
     setShowSetup(false);
     setChooseSetupMode(false);
+    const step: ProductOnboardingStep = next.openai_tunnel_configured ? "chatgpt" : "tunnel";
+    persistRequiredOnboarding(step);
+    setProductOnboarding({ step, required: true });
     setStartupAttempt((attempt) => attempt + 1);
   }, [commitState]);
+
+  const advanceProductOnboarding = (step: ProductOnboardingStep) => {
+    setProductOnboarding((current) => {
+      if (!current) return current;
+      if (current.required) persistRequiredOnboarding(step);
+      return { ...current, step };
+    });
+  };
+
+  const completeProductOnboarding = () => {
+    if (productOnboarding?.required) persistRequiredOnboarding("complete");
+    setProductOnboarding(null);
+    setShowSetup(false);
+    setChooseSetupMode(false);
+    setNavigation("home");
+  };
+
+  const openProductOnboardingFromSettings = () => {
+    setShowSetup(false);
+    setChooseSetupMode(false);
+    setNavigation("home");
+    setProductOnboarding({ step: "tunnel", required: false });
+  };
+
+  const openOtherSetupFromOnboarding = () => {
+    if (productOnboarding?.required) persistRequiredOnboarding("complete");
+    setProductOnboarding(null);
+    openSetup();
+  };
 
   const commitChatgptActivity = useCallback((next: DesktopState) => {
     stateVersionRef.current += 1;
@@ -395,6 +455,19 @@ export default function App() {
     );
   }
 
+  if (productOnboarding) {
+    return (
+      <ProductOnboarding
+        state={state}
+        step={productOnboarding.step}
+        onState={commitState}
+        onStep={advanceProductOnboarding}
+        onComplete={completeProductOnboarding}
+        onOtherSetup={openOtherSetupFromOnboarding}
+      />
+    );
+  }
+
   const needsSetup = showSetup;
 
   return (
@@ -510,7 +583,13 @@ export default function App() {
           />
         )}
         {navigation === "activity" && <ActivityPanel activity={activity} />}
-        {navigation === "settings" && <SettingsPanel state={state} onState={commitState} />}
+        {navigation === "settings" && (
+          <SettingsPanel
+            state={state}
+            onState={commitState}
+            onOpenOnboarding={openProductOnboardingFromSettings}
+          />
+        )}
         </main>
       </div>
     </div>

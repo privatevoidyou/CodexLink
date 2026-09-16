@@ -6,6 +6,8 @@ import type {
   TunnelProxyMode,
 } from "../models/topology";
 
+export type ProductLinkTarget = "openai_tunnels" | "openai_api_keys" | "chatgpt";
+
 export const desktopApi = {
   activateLicense: (activationCode: string) =>
     invoke<DesktopState>("activate_license", { request: { activationCode } }),
@@ -13,6 +15,8 @@ export const desktopApi = {
     invoke<DesktopState>("update_tunnel_config", { request }),
   getState: () => invoke<DesktopState>("get_desktop_state"),
   openPowerShellInstallGuide: () => invoke<void>("open_powershell_install_guide"),
+  openProductLink: (target: ProductLinkTarget) =>
+    invoke<void>("open_product_link", { request: { target } }),
   getLaunchAtLogin: () => invoke<boolean>("get_launch_at_login"),
   setLaunchAtLogin: (enabled: boolean) =>
     invoke<boolean>("set_launch_at_login", { request: { enabled } }),
