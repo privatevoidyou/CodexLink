@@ -60,8 +60,15 @@ pub struct ProcessSnapshot {
     pub owned_by_desktop: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OwnedProcessGeneration {
+    generation: u64,
+    target_key: Option<String>,
+}
+
 struct ManagedProcess {
     child: ManagedChild,
+    generation: u64,
     phase: ProcessPhase,
     exit_code: Option<i32>,
     logs: Arc<Mutex<VecDeque<String>>>,
@@ -207,6 +214,7 @@ fn machine_event_is_terminal(value: &Value) -> bool {
 
 pub struct ProcessSupervisor {
     processes: HashMap<ProcessKind, ManagedProcess>,
+    next_generation: u64,
     activity: ActivityLog,
 }
 
@@ -214,6 +222,7 @@ impl ProcessSupervisor {
     pub fn new(activity: ActivityLog) -> Self {
         Self {
             processes: HashMap::new(),
+            next_generation: 1,
             activity,
         }
     }
@@ -315,10 +324,16 @@ impl ProcessSupervisor {
             ActivityLevel::Info,
             format!("Desktop started the process (PID {pid})"),
         );
+        let generation = self.next_generation;
+        self.next_generation = self
+            .next_generation
+            .checked_add(1)
+            .expect("Desktop process generation counter exhausted");
         self.processes.insert(
             kind,
             ManagedProcess {
                 child,
+                generation,
                 phase: ProcessPhase::Starting,
                 exit_code: None,
                 logs,
@@ -379,6 +394,35 @@ impl ProcessSupervisor {
             pid: Some(process.child.id()),
             exit_code: process.exit_code,
             owned_by_desktop: true,
+        })
+    }
+
+    pub(crate) fn owned_generation(
+        &mut self,
+        kind: ProcessKind,
+    ) -> Option<OwnedProcessGeneration> {
+        self.refresh();
+        self.processes.get(&kind).map(|process| OwnedProcessGeneration {
+            generation: process.generation,
+            target_key: process.target_key.clone(),
+        })
+    }
+
+    pub(crate) fn active_owned_generation(
+        &mut self,
+        kind: ProcessKind,
+    ) -> Option<OwnedProcessGeneration> {
+        self.refresh();
+        let process = self.processes.get(&kind)?;
+        if !matches!(
+            process.phase,
+            ProcessPhase::Starting | ProcessPhase::Running | ProcessPhase::Stopping
+        ) {
+            return None;
+        }
+        Some(OwnedProcessGeneration {
+            generation: process.generation,
+            target_key: process.target_key.clone(),
         })
     }
 

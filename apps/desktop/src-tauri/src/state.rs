@@ -14,7 +14,9 @@ use crate::operation::{
     cancelled_error, CancellationContext, CancellationSignal, OperationAdmission,
     OperationController,
 };
-use crate::process::{MachineEventReceiver, ProcessKind, ProcessPhase, ProcessSupervisor};
+use crate::process::{
+    MachineEventReceiver, OwnedProcessGeneration, ProcessKind, ProcessPhase, ProcessSupervisor,
+};
 use crate::tunnel_config::{
     TunnelConfig, TunnelConfigRequest, LEGACY_TUNNEL_CONFIG_FILE_NAME, TUNNEL_KEY_FILE_NAME,
 };
@@ -514,7 +516,7 @@ impl AppState {
         let mut supervisor = self.supervisor.lock().await;
         ProcessBaseline {
             local_server: process_is_active(supervisor.snapshot(ProcessKind::LocalServer)),
-            local_runner: process_is_active(supervisor.snapshot(ProcessKind::LocalRunner)),
+            local_runner: supervisor.active_owned_generation(ProcessKind::LocalRunner),
             quick_share: process_is_active(supervisor.snapshot(ProcessKind::QuickShare)),
             regular_tunnel: process_is_active(supervisor.snapshot(ProcessKind::RegularTunnel)),
             snapshot,
@@ -527,13 +529,29 @@ impl AppState {
         for (kind, existed) in [
             (ProcessKind::QuickShare, baseline.quick_share),
             (ProcessKind::RegularTunnel, baseline.regular_tunnel),
-            (ProcessKind::LocalRunner, baseline.local_runner),
-            (ProcessKind::LocalServer, baseline.local_server),
         ] {
             if !existed && supervisor.snapshot(kind).is_some() {
                 supervisor.stop(kind).await;
                 cleanup.mark_stopped(kind);
             }
+        }
+
+        let current_runner = supervisor.owned_generation(ProcessKind::LocalRunner);
+        let current_runner_active = process_is_active(supervisor.snapshot(ProcessKind::LocalRunner));
+        let runner_generation_changed = baseline.local_runner != current_runner
+            || (baseline.local_runner.is_some() && !current_runner_active);
+        if runner_generation_changed {
+            if current_runner.is_some() {
+                // The slot still belongs to the Desktop, and the supervisor lock
+                // keeps this comparison and stop scoped to that exact generation.
+                supervisor.stop(ProcessKind::LocalRunner).await;
+            }
+            cleanup.mark_stopped(ProcessKind::LocalRunner);
+        }
+
+        if !baseline.local_server && supervisor.snapshot(ProcessKind::LocalServer).is_some() {
+            supervisor.stop(ProcessKind::LocalServer).await;
+            cleanup.mark_stopped(ProcessKind::LocalServer);
         }
         cleanup
     }
@@ -604,7 +622,7 @@ fn operation_requires_license(kind: DesktopOperationKind) -> bool {
 #[derive(Clone)]
 struct ProcessBaseline {
     local_server: bool,
-    local_runner: bool,
+    local_runner: Option<OwnedProcessGeneration>,
     quick_share: bool,
     regular_tunnel: bool,
     snapshot: DesktopStateSnapshot,
@@ -4739,7 +4757,7 @@ mod tests {
         );
         let baseline = ProcessBaseline {
             local_server: false,
-            local_runner: false,
+            local_runner: None,
             quick_share: false,
             regular_tunnel: false,
             snapshot: baseline_snapshot.clone(),
@@ -5570,6 +5588,163 @@ mod tests {
         );
 
         core.supervisor.lock().await.stop_all().await;
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn failed_remote_setup_cleans_replaced_runner_generation_and_cannot_stay_green() {
+        let data_dir = unique_state_dir("failed-remote-runner-rollback");
+        let resource_dir = data_dir.join("resources");
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        let local_runner_config = data_dir.join("local-runner.toml");
+        let remote_runner_config = data_dir.join("remote-runner.toml");
+        let local_user_token = data_dir.join("local-user-token");
+        let remote_user_token = data_dir.join("remote-user-token");
+        for path in [
+            &local_runner_config,
+            &remote_runner_config,
+            &local_user_token,
+            &remote_user_token,
+        ] {
+            std::fs::write(path, "fixture").unwrap();
+        }
+
+        let state = AppState::new(data_dir.clone(), resource_dir).expect("create Desktop state");
+        state.set_test_license_active();
+        let local_topology = RuntimeTopology {
+            experience: Experience::Full,
+            server: ServerTopology::Local,
+            runner: RunnerTopology::Local,
+            exposure: Exposure::None,
+            enrollment: Enrollment::ManagedPairing,
+        };
+        {
+            let mut slot = state.core.lock().await;
+            let core = slot.as_mut().expect("Desktop core available");
+            core.config.topology = Some(local_topology.clone());
+            core.config.runtime_autostart = Some(true);
+            core.snapshot.topology = Some(local_topology.clone());
+            core.snapshot.readiness = aggregate_readiness(
+                ServerReadiness::Ready,
+                RunnerReadiness::Ready,
+                ExposureReadiness::LocalReady,
+                ProjectReadiness::Ready,
+            );
+            core.publish_snapshot();
+        }
+
+        let local_identity = RunnerRuntimeIdentity {
+            runner_config: local_runner_config,
+            user_token_file: local_user_token,
+            server_url: "http://127.0.0.1:3721".to_string(),
+        };
+        let remote_identity = RunnerRuntimeIdentity {
+            runner_config: remote_runner_config,
+            user_token_file: remote_user_token,
+            server_url: "https://engine-test.example".to_string(),
+        };
+        let command = || {
+            let mut command = std::process::Command::new("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$null = [Console]::In.ReadToEnd()",
+            ]);
+            command
+        };
+        state
+            .supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&local_identity)),
+            )
+            .await
+            .expect("start baseline Local Runner");
+
+        let (operation, cancellation, mut core, baseline) = state
+            .begin_operation(DesktopOperationKind::RemoteSetup, true)
+            .await
+            .expect("begin Remote setup operation");
+        assert!(baseline.local_runner.is_some());
+        let preparation = core
+            .prepare_owned_runner_target(
+                &remote_identity,
+                false,
+                Deadline::after(Duration::from_secs(5)),
+                &cancellation,
+            )
+            .await
+            .expect("replace Local Runner with saved Remote target");
+        assert!(preparation.replaced);
+        core.supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&remote_identity)),
+            )
+            .await
+            .expect("start replacement Remote Runner");
+        let remote_generation = core
+            .supervisor
+            .lock()
+            .await
+            .active_owned_generation(ProcessKind::LocalRunner);
+        assert_ne!(baseline.local_runner, remote_generation);
+
+        // Model a failure after the replacement Runner reached readiness but before
+        // Remote topology/config commit. The rollback must not trust the old bool
+        // baseline and leave this new generation running under the Local config.
+        core.snapshot.readiness = aggregate_readiness(
+            ServerReadiness::Ready,
+            RunnerReadiness::Ready,
+            ExposureReadiness::LocalReady,
+            ProjectReadiness::Ready,
+        );
+        assert!(core.snapshot.readiness.runtime_ready);
+        let result: DesktopResult<DesktopStateSnapshot> = Err(DesktopError::new(
+            "test_remote_precommit_failure",
+            "Forced Remote setup failure before topology commit",
+            "Test-only failure.",
+        ));
+        let error = state
+            .finish_operation(operation, cancellation, core, baseline, result)
+            .await
+            .expect_err("forced Remote setup failure must propagate");
+        assert_eq!(error.code, "test_remote_precommit_failure");
+
+        assert!(state
+            .supervisor
+            .lock()
+            .await
+            .snapshot(ProcessKind::LocalRunner)
+            .is_none());
+        let snapshot = state.get_state();
+        assert!(matches!(
+            snapshot.topology.as_ref().map(|topology| &topology.server),
+            Some(ServerTopology::Local)
+        ));
+        assert_eq!(snapshot.readiness.runner, RunnerReadiness::Stopped);
+        assert!(!snapshot.readiness.runtime_ready);
+        {
+            let slot = state.core.lock().await;
+            let core = slot.as_ref().expect("Desktop core restored after failure");
+            assert!(matches!(
+                core.config.topology.as_ref().map(|topology| &topology.server),
+                Some(ServerTopology::Local)
+            ));
+        }
+
+        state.shutdown().await;
+        drop(state);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
 
