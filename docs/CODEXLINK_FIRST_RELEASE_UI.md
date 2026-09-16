@@ -1,6 +1,6 @@
 # CodexLink First-Release Product Shell & Setup UX
 
-> 状态：**2026-09-16 首版 UI / UX 基线已完成本轮 Remote/zero-root/readiness 源码整改并进入 `ede713a0` checkpoint；下一轮重点是整改后真实系统验收，不再扩大本轮 UI 范围。**
+> 状态：**2026-09-16 首版 Product Shell 与 Remote/zero-root/readiness 已完成整改；v1 冻结前唯一新增的首用 UX 是“激活后两步引导”。除此之外不再扩大首版 UI 范围。**
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
@@ -88,6 +88,64 @@ RC5 Product Shell 之前必须先经过商业设备激活状态机。
 - 激活失败只给客户可理解的重试 / 支持动作，不提供绕过 Activation Gate 的高级开关。
 
 详细商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
+
+---
+
+### 2.6 激活后的两步首次使用引导（v1 P0）
+
+激活成功后的**首次用户**不直接落到首页，而是进入一个只有两页的极简 onboarding。它解决的是“用户不知道 Tunnel / Key / ChatGPT App 下一步怎么配”，不是新增 Runtime 状态机。
+
+#### 第 1 步：连接 ChatGPT
+
+```text
+连接 ChatGPT                         第 1 步，共 2 步
+
+Tunnel ID
+[ tunnel_........................ ]
+还没有？ 创建 Tunnel ↗
+
+Restricted Runtime Key
+[ ................................ ]
+还没有？ 创建 Restricted Key ↗
+
+使用其他连接方式
+
+我已经配置过，跳过                         下一步 →
+```
+
+要求：
+
+- “创建 Tunnel”与“创建 Restricted Key”使用当前官方 OpenAI 创建入口；正式发版前必须再次实测链接；
+- 用户填写两项凭据后复用现有保存/验证路径，Runtime Key 继续使用受保护 secret storage，不回显、不写普通 state；
+- 两项都存在时 `下一步` 才作为主动作；格式/验证失败要在本页给客户可理解的错误；
+- 已经保存过有效 Tunnel 凭据的老用户可以直接跳到第 2 步；
+- 左下 `我已经配置过，跳过` 只表示跳过教程，不改变真实 Tunnel readiness；
+- `使用其他连接方式` 是低强调度高级入口，可进入 Existing Server 等拓扑；普通用户不需要先理解这些概念。
+
+#### 第 2 步：在 ChatGPT 中添加 CodexLink
+
+```text
+添加 CodexLink 到 ChatGPT              第 2 步，共 2 步
+
+1. 打开 ChatGPT 设置 / Apps
+2. 开启所需的 Developer / 自定义 App 能力
+3. 创建/添加 CodexLink App
+4. 选择刚刚配置的 Tunnel
+
+打开 ChatGPT ↗
+查看详细图文教程 ↗
+
+我已经添加过，跳过                       我已完成 →
+```
+
+要求：
+
+- 这是用户确认型步骤，不伪造 ChatGPT 端真实连接；
+- `我已完成` 与 `我已经添加过，跳过` 都可以结束 onboarding 并进入首页；
+- onboarding 完成状态与 Runtime/ChatGPT readiness **完全分离**。用户两页都跳过后，首页仍必须按真实状态显示“待配置 / 待连接”；
+- 设置页长期保留 `ChatGPT 配置教程 / 重新打开首次使用向导`；
+- 百度网盘 / 夸克网盘的下载说明可以提供更完整图文教程，软件内保持短、稳定、可重新打开的版本；
+- OpenAI/ChatGPT UI 易变化，安装包内尽量使用稳定文字和链接，详细截图教程允许随分发资料独立更新。
 
 ---
 
@@ -224,20 +282,20 @@ Restricted Runtime Key
 
 ## 7. 首次使用必须极简
 
-用户已经通过 Deployment Center 验证购买并取得 installer 后，Desktop 内主流程冻结为“激活后自动 bootstrap，项目与连接独立配置”：
+首个商业版本允许通过 Deployment Center 或人工分发渠道（例如百度网盘 / 夸克网盘）取得 installer 与配套教程。Desktop 内主流程冻结为：
 
 ```text
 安装 CodexLink
 → 用购买时的同一枚 MYWS 销售激活码激活设备
 → CodexLink 用 internal runtime anchor 自动准备本机 Engine / Runner
-→ 如果还没有 Tunnel ID + Restricted Runtime Key，在“设置”保存一次
-→ CodexLink 自动准备 / 恢复 Secure Link
+→ 首次引导第 1 步：创建/填写 Tunnel ID + Restricted Runtime Key（已有则跳过）
+→ 首次引导第 2 步：按教程在 ChatGPT 创建/添加 CodexLink App（已有则跳过）
+→ 进入主页面
 → 按需添加一个或多个本地授权路径
-→ 用户去 ChatGPT 创建/添加一个 App
-→ 连接完成
+→ 开始使用
 ```
 
-已有 Tunnel 凭据的老用户不应因为重装或 UI 迁移再次被要求手动“先启动 Runner、再重连 Tunnel”；没有凭据的全新用户则可以停在“待配置 Tunnel”状态，这是正常而且可解释的。
+已有 Tunnel 凭据的老用户不应因为重装或 UI 迁移再次被要求手动“先启动 Runner、再重连 Tunnel”；可以直接进入第 2 步或跳过整个 onboarding。没有凭据的全新用户即使选择跳过，也只是进入真实的“待配置 Tunnel”首页状态，不能因为 onboarding 被标记完成就假装 ready。
 
 普通用户**不应该**再做：
 
@@ -330,6 +388,8 @@ Smoke 2 之后的多轮真机反馈已落实到当前未提交 worktree：
 - 首次无有效 License 时只显示 Activation Gate，后台 runtime 不偷跑；
 - 销售激活码页面保持 RC5 简洁 customer copy，并与 Deployment Center 使用同一商业词汇；
 
+- 激活成功后的首次用户进入两步 onboarding，而不是直接首页；第 1 步配置 Tunnel/Restricted Runtime Key，第 2 步引导 ChatGPT App；两个步骤都允许已配置用户跳过；
+- onboarding dismissed/completed 与实际 Runtime/ChatGPT readiness 分离，设置页可重新打开教程；
 - 首页视觉心智恢复为 RC5 的“一切就绪 + 项目卡 + 连接链路”；
 - 项目页恢复卡片式项目管理；
 - 连接页恢复步骤链 + 当前状态；

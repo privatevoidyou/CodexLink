@@ -40,7 +40,7 @@
 | Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
 | Admin License Operator | 历史上人工/本地 Codex 通过 SSH 调用授权服务器签发 | Windows 本地 GUI 通过管理员 SSH key 固定调用 `issue --json`；私钥留在服务器；销售码不落盘；签发绝不自动重试 | HARDEN | CHECKPOINTED | source/installed self-test + shortcut validation + real SSH probe + 用户真实一键签发体验均已通过 |
 | Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | RC5 心智 + Smoke 3 多项目/状态/动效/品牌收口 | RESTORE | WORKTREE READY/VERIFY | frontend 56/56；BrandFix 已出包；图标缓存后的 Explorer 最终显示仍等用户确认 |
-| First-use setup UX | RC5 的项目 + Tunnel 产品心智 | 激活 → internal runtime 自动 bootstrap → 未配置时保存 Tunnel 凭据 → 按需添加多个授权路径 → ChatGPT App | HARDEN/RESTORE | CHECKPOINTED/VERIFY | Local/Remote 都允许 0 root；Runtime 可连接但 ChatGPT readiness 要求至少一个授权项目；老用户凭据自动恢复 |
+| First-use setup UX | RC5 的项目 + Tunnel 产品心智 | 激活 → 两步 onboarding（Tunnel/Key → ChatGPT App）→ 主页面 → 按需添加多个授权路径；已有配置可跳过且不伪造 readiness | HARDEN/RESTORE | NEXT P0 | Local/Remote 0 root 保持；onboarding 与真实 readiness 分离；设置页可重新打开教程 |
 | User authorized roots | 用户选哪个 root 就授权哪个 root | `projects[]` 多 root；exact canonical authority；0 root 合法；不偷偷用 HOME/anchor 扩大；精确 remove | RESTORE/HARDEN | CHECKPOINTED/VERIFY | Local/Remote 0-root + add/remove lifecycle 有自动化；父 root 仍覆盖子目录时拒绝假撤权 |
 | Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | VERIFY | bounded delete 的 root/wildcard 逻辑已覆盖；显式整盘授权留给新 RC 真机复验 |
 | Internal runtime anchor | 历史 RC 把运行 identity 与项目心智混在一起 | Local AppData anchor 只维持 Runtime identity，不出现在项目列表、不自动成为用户 authority；Remote 直接使用 Runner identity | REDESIGN/HARDEN | CHECKPOINTED/VERIFY | 0-root snapshot 不暴露 anchor；Remote 不再需要假 enrollment project |
@@ -62,7 +62,7 @@
 | Diagnostics | Product/Engine/Tunnel versions 分开 | customer-safe diagnostics | RESTORE/HARDEN | VERIFY | 可复制、无 credential/内部秘密 |
 | Auto update | 明确不做 | 无 updater / 无检查更新网络请求 | KEEP | DONE | binary / UI 无 update path |
 | Installer RC archive | accepted / rejected / archive 分离 | immutable candidate policy | KEEP | VERIFY | 新 RC 不覆盖历史 installer，记录 SHA |
-| Website / tutorial content | 购买、下载、教程、FAQ、版本、许可、支持 | Deployment Center MVP 先进入 P0；完整内容使用新 RC 真实截图收口 | RESTORE | NEXT | 商业 Gate 可用 + 真实截图 + current OpenAI routes |
+| Website / tutorial content | 购买、下载、教程、FAQ、版本、许可、支持 | v1 允许百度/夸克人工分发 + 完整图文教程；Deployment Center 后续自动化同一流程，不阻塞首批 Desktop 发布 | RESTORE | V1 MINIMAL / LATER PORTAL | installer/version/SHA/激活/两步引导教程真实可跟做；OpenAI route 发版前复核 |
 | UI V2 | 非首版需求 | 只有未来用户明确决定重新设计时才立项；默认延续 RC5 Product Shell | LATER | LATER | 不自动推翻已敲定首版 UI |
 
 ## 历史 RC5 固定证据
@@ -299,7 +299,7 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] 本轮 Stage D 自动化：frontend typecheck + focused `49/49`；Rust Desktop `121 passed / 0 failed / 5 ignored`；Runner config `31/31`；CLI lib `318/318`；fmt / diff check 通过；
 - [x] 当前 BrandFix installer SHA256：`B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71`；bundled runtime `0.4.1 / ae858f5360ff / dirty=false`；
 - [ ] Explorer 图标缓存后的最终用户确认；设备激活跨卸载真实复验；长时间断线自愈观察；
-- [x] 安全整改代码已拆为 `d98eeb8b` / `fca59435` / `ede713a0` 三个 checkpoint；[ ] Stage E 文档、全量回归、secret scan 与最终 push 尚待完成。
+- [x] 安全整改代码已拆为 `d98eeb8b` / `fca59435` / `ede713a0` 三个 checkpoint；Stage E 文档、回归、secret scan 与 push 已在 `48f9af16` 收口并固定为 final remediation HEAD。后续纯文档 v1 规划不改变该审计边界。
 
 ### Batch H.0 — Local License Operator — USER VERIFIED / CHECKPOINT
 
@@ -326,34 +326,37 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [ ] Existing Server 完成 Local→Remote→Local→same Remote、Desktop/Windows restart、transient outage、credential revoke、0-root、project add/remove、read/write/Guard smoke；
 - [ ] 上述链路稳定后再退休 WebCodexLauncher 0.7.2 / WebCodex 0.3.9。
 
-### Batch H — Commercial Entitlement / Deployment Center MVP — AFTER SAFETY / REMOTE MIGRATION
+### Batch H — v1 First-Use Onboarding — NEXT P0
 
-完整商业合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
+完整 UI/商业合同见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md) 与 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
-- [ ] 销售激活码验证购买资格；
-- [ ] 有效码展示当前推荐下载、版本与 SHA；
-- [ ] 页面明确说明同一激活码还用于 Desktop 首次激活；
-- [ ] 网站验证不伪装成设备绑定；
-- [ ] Quick Start 覆盖购买验证 → 下载 → 同码设备激活；
-- [ ] invalid / network failure customer copy 可区分。
+- [ ] 激活成功后的首次用户进入两步 onboarding，而不是直接首页；
+- [ ] 第 1 步：Tunnel ID + Restricted Runtime Key，提供创建入口；已有配置可跳过；
+- [ ] 第 2 步：ChatGPT App 创建/添加图文指引；已有配置可跳过；
+- [ ] onboarding 完成/跳过不改变真实 readiness；
+- [ ] 设置页可重新打开教程；
+- [ ] 百度网盘 / 夸克网盘配套资料与软件内引导使用同一客户主链。
 
-### Batch I — New RC / real-machine commercial acceptance
+### Batch I — v1 RC / public Runner convergence
 
-- [ ] unique new RC；
+- [ ] 独立复审 `5ff6d8fd → remediation final HEAD`，只处理真实 P0/P1；
+- [ ] unique new RC，Desktop + CodexLink Engine + Remote Server source/release identity 对齐；
 - [ ] installer SHA + release metadata；
-- [ ] 本机从 Deployment Center 开始跑完整 Windows 商业主链；
-- [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
-- [ ] 朋友按网站完成“验证购买 → 下载 → 同码激活 → Runtime 自动准备 → 两项 Tunnel 凭据 → 按需授权路径 → ChatGPT App”，不解释底层 runtime；
+- [ ] Existing Server 跑首次连接、0-root、project add/remove、Local→Remote→Local→same Remote、Desktop/Windows restart、transient outage 与 ChatGPT read/write/normal execution；
+- [ ] 关闭 WebCodexLauncher 后新链仍完全可用，随后旧 Launcher 才退出产品依赖；
 - [ ] upgrade/uninstall/reinstall；
-- [ ] 收集问题、修复并重新候选，不覆盖历史 artifact。
+- [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
+- [ ] 只修阻塞首发的 P0/P1，不覆盖历史 artifact。
 
-### Batch J — Commercial readiness / Stable
+### Batch J — First commercial release
 
-- [ ] 用最终 RC 截图完成 website/tutorial + security boundary copy；
-- [ ] code signing；
-- [ ] third-party notices；
+- [ ] 人工分发包（百度/夸克或等价渠道）包含 installer、version、SHA256 与图文教程；
+- [ ] License Operator 只做真实销售需要的轻量体验收尾；
+- [ ] third-party notices / privacy / security / support 文案满足最低发布要求；
+- [ ] Windows code signing 强烈推荐；若首批 unsigned，明确标注并提供 SHA256，不因签名基础设施无限期拖延发布；
 - [ ] final clean-machine acceptance；
-- [ ] archive / stable release。
+- [ ] archive / v1 commercial release；
+- [ ] 完整 Deployment Center、自动更新、跨平台、Workers/多 Agent、UI V2 等全部进入 Post-v1 backlog。
 
 ## 规则
 

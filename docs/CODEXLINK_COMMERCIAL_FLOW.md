@@ -1,6 +1,6 @@
 # CodexLink First-Release Commercial Entitlement & Activation Flow
 
-> 状态：**2026-09-15 正式敲定，首个商业版本的购买资格、下载、管理员签发与设备激活合同。**
+> 状态：**2026-09-16 v1 首发收敛合同：设备激活 + 两步首次引导 + 可人工分发的安装/教程资料构成首批商业主链；完整 Deployment Center 不再作为第一版桌面发布的硬阻塞项。**
 >
 > 核心决策：**同一枚 `MYWS-...` 销售激活码既是购买资格凭证，也是 CodexLink 首次设备激活凭证；它不是单纯的下载密码。**
 >
@@ -29,24 +29,23 @@ CodexLink 卖的是**产品使用授权**，不是一个可复制的安装包链
 
 ## 2. 标准客户主链
 
+首批商业发布允许两种下载入口：Deployment Center（若已完成）或人工交付的百度网盘 / 夸克网盘下载链接 + 图文教程。无论安装包从哪里取得，Desktop 客户主链保持一致：
+
 ```text
 购买 CodexLink
-→ 获得 MYWS 销售激活码
-→ 打开 deploy.syzdq.xyz 激活与下载页
-→ 输入激活码验证购买资格
-→ 查看并下载当前推荐版本
+→ 获得 MYWS 销售激活码 + 安装包/下载入口 + 图文教程
 → 安装 CodexLink
-→ 首次启动再次输入同一枚 MYWS 激活码
+→ 首次启动输入 MYWS 激活码
 → 完成设备绑定并取得 Signed License
 → CodexLink 使用 internal runtime anchor 自动准备 Engine / Runner
-→ 若尚未配置，保存 Tunnel ID + Restricted Runtime Key
-→ CodexLink 自动准备 / 恢复 Secure Link
+→ 首次引导 1：创建/填写 Tunnel ID + Restricted Runtime Key（已有则跳过）
+→ 首次引导 2：在 ChatGPT 创建/添加 CodexLink App（已有则跳过）
+→ 进入主页面
 → 按需添加一个或多个本地授权路径
-→ 在 ChatGPT 创建/添加 CodexLink App
 → 开始使用
 ```
 
-这条主链是首版网站、Desktop、教程和 clean-machine 验收共同使用的同一条流程。
+若 Deployment Center 已上线，同一枚 `MYWS-...` 仍可先用于网站验证购买资格，再用于 Desktop 设备激活；如果第一批采用人工分发，则网站验证步骤不是 Desktop v1 的硬依赖。所有渠道必须使用同一套激活、onboarding 与安全说明。
 
 ---
 
@@ -139,23 +138,20 @@ CodexLink Desktop
 
 ---
 
-## 6. Deployment Center 首版 MVP
+## 6. 首批分发与 Deployment Center
 
-当前 `deploy.syzdq.xyz/#activate` 的方向继续保留，但首版必须把产品心智收口成 CodexLink 商业入口，而不是单纯的“下载密码页”。
+`deploy.syzdq.xyz/#activate` 方向继续保留，但**完整 Deployment Center 不再阻塞第一批商业发布**。v1 可以先使用百度网盘 / 夸克网盘等人工管理渠道交付 installer，并随下载资料提供版本、SHA256、激活方式和完整图文 Quick Start。
 
-最低功能：
+首批分发至少要让用户拿到：
 
-- 激活码 / 购买资格验证；
-- 当前推荐 CodexLink Windows 安装包入口；
-- Product version、发布日期、SHA256、签名状态；
-- 明确说明同一激活码还用于 Desktop 首次激活；
-- 图文 Quick Start；
-- 常见问题 / 激活恢复 / 下载问题；
-- 版本历史；
-- 支持与联系方式；
-- 安全边界与第三方许可入口。
+- 当前推荐 CodexLink Windows installer；
+- Product version、发布日期、SHA256、签名状态（若 unsigned 必须明确）；
+- `MYWS-...` 销售激活码及“用于 Desktop 首次激活”的说明；
+- 两步首次引导对应的图文教程：创建 Tunnel / Restricted Runtime Key，以及在 ChatGPT 创建/添加 CodexLink App；
+- 常见失败恢复与支持联系方式；
+- 简明安全边界说明。
 
-下载文件可以托管在现有人工管理渠道；网站不需要为了首版引入自动 updater、CDN 或复杂账号系统。
+Deployment Center 完成后可以把上述人工流程自动化为“验证购买 → 查看下载/教程”，但不应为了首版引入账号系统、自动 updater、CDN 或复杂下载 token 体系。
 
 ### 6.5 管理员销售码签发工具
 
@@ -246,16 +242,16 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 
 在 Stable 之前必须实际证明：
 
-1. 有效 `MYWS-...` 码可以在 Deployment Center 验证购买资格并看到正确下载；
-2. 无效码不能获得受保护的购买下载入口；
-3. 网站明确告诉用户保留激活码用于 Desktop 激活；
-4. 新机器安装后，未激活时 Server / Runner / Tunnel 不偷跑；
-5. 同一枚有效销售激活码可以完成 Desktop 设备激活；
-6. 激活成功后重启可离线验证，不要求每次联网；
-7. 激活码不出现在普通 state、日志、activity、diagnostics；
-8. upgrade / uninstall / reinstall 不删除 `%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格；即使普通 app data 被清理，同设备仍能恢复已激活状态；
-9. clean-machine 外部测试者可以不理解授权实现细节完成“验证购买 → 下载 → 安装 → 激活”；
-10. 网站、Desktop 和教程使用一致的产品词汇和同一条客户主链。
+1. 用户通过当前首批分发渠道可以取得正确 installer、版本、SHA256、激活码和图文教程；
+2. 新机器安装后，未激活时 Server / Runner / Tunnel 不偷跑；
+3. 有效销售激活码可以完成 Desktop 设备激活；无效码给出明确 customer-level 错误；
+4. 激活成功后重启可离线验证，不要求每次联网；
+5. 激活码不出现在普通 state、日志、activity、diagnostics；
+6. 激活成功后首次用户进入两步 onboarding；已有配置用户可跳过，跳过不伪造 readiness；
+7. upgrade / uninstall / reinstall 不删除 `%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格；即使普通 app data 被清理，同设备仍能恢复已激活状态；
+8. clean-machine 外部测试者可以不理解 Server/Runner/端口等底层概念完成“安装 → 激活 → 两步引导 → 主页面 → 授权项目 → ChatGPT 使用”；
+9. 人工分发资料、Desktop 和未来 Deployment Center 使用一致的产品词汇和同一条客户主链；
+10. 若 Deployment Center 在首发时已经可用，再额外验证购买资格 Gate 与 invalid-code 下载保护；否则这两项留给网站上线验收，不阻塞 Desktop v1。
 
 ---
 
