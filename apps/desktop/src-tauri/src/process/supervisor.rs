@@ -67,6 +67,7 @@ struct ManagedProcess {
     logs: Arc<Mutex<VecDeque<String>>>,
     stdout_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
+    target_key: Option<String>,
 }
 
 #[derive(Default)]
@@ -220,8 +221,19 @@ impl ProcessSupervisor {
     pub async fn spawn_owned(
         &mut self,
         kind: ProcessKind,
+        command: Command,
+        machine_stdout: bool,
+    ) -> DesktopResult<Option<MachineEventReceiver>> {
+        self.spawn_owned_with_target(kind, command, machine_stdout, None)
+            .await
+    }
+
+    pub(crate) async fn spawn_owned_with_target(
+        &mut self,
+        kind: ProcessKind,
         mut command: Command,
         machine_stdout: bool,
+        target_key: Option<String>,
     ) -> DesktopResult<Option<MachineEventReceiver>> {
         self.refresh();
         if self.processes.get(&kind).is_some_and(|process| {
@@ -312,6 +324,7 @@ impl ProcessSupervisor {
                 logs,
                 stdout_task,
                 stderr_task,
+                target_key,
             },
         );
         Ok(machine_rx)
@@ -367,6 +380,22 @@ impl ProcessSupervisor {
             exit_code: process.exit_code,
             owned_by_desktop: true,
         })
+    }
+
+    pub(crate) fn active_target_matches(
+        &mut self,
+        kind: ProcessKind,
+        expected_target: &str,
+    ) -> Option<bool> {
+        self.refresh();
+        let process = self.processes.get(&kind)?;
+        if !matches!(
+            process.phase,
+            ProcessPhase::Starting | ProcessPhase::Running | ProcessPhase::Stopping
+        ) {
+            return None;
+        }
+        Some(process.target_key.as_deref() == Some(expected_target))
     }
 
     pub fn logs(&self, kind: ProcessKind) -> Vec<String> {

@@ -646,6 +646,28 @@ fn process_is_active(snapshot: Option<crate::process::ProcessSnapshot>) -> bool 
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnedRunnerPreparation {
+    target_already_active: bool,
+    replaced: bool,
+}
+
+fn runner_process_target_key(identity: &RunnerRuntimeIdentity) -> String {
+    let runner_config = identity
+        .runner_config
+        .canonicalize()
+        .unwrap_or_else(|_| identity.runner_config.clone());
+    let mut runner_config = runner_config.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        runner_config = runner_config.replace('/', "\\").to_ascii_lowercase();
+    }
+    format!(
+        "{}\n{}",
+        identity.server_url.trim_end_matches('/').to_ascii_lowercase(),
+        runner_config
+    )
+}
+
 fn can_refresh_legacy_runner(snapshot: Option<crate::process::ProcessSnapshot>) -> bool {
     snapshot.is_some_and(|process| {
         process.owned_by_desktop
@@ -1501,30 +1523,23 @@ impl DesktopCore {
                 }
             };
 
-        let replacing_owned_runner = identity_replaced
-            && process_is_active(self.process_snapshot(ProcessKind::LocalRunner).await);
+        let runner_identity = identity.runner_identity();
         let runner_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
+        let preparation = self
+            .prepare_owned_runner_target(
+                &runner_identity,
+                identity_replaced,
+                runner_deadline,
+                cancellation,
+            )
+            .await?;
+        let replacing_owned_runner = preparation.replaced;
         let activation: DesktopResult<bool> = async {
-            if replacing_owned_runner {
-                // A Desktop-owned Runner can only serve the exact config it was
-                // started with. Replace that owned process transactionally while
-                // keeping the local Server alive; never broad-kill unrelated Runners.
-                self.stop_process_until(ProcessKind::LocalRunner, runner_deadline)
-                    .await;
-                if runner_deadline.is_elapsed() {
-                    return Err(readiness_timeout_error(
-                        "runner_offline",
-                        "Desktop could not stop its previous Runner before changing projects",
-                        "Retry project setup. Desktop will only replace the Runner it owns.",
-                    ));
-                }
-                cancellation.check()?;
-            }
-
-            let runner_ready = if identity_replaced {
-                // A fresh Desktop enrollment may reuse the same client_id while
-                // changing the Runner token or project registry. An older Runner
-                // with that client_id is not proof that this exact config is active.
+            let runner_ready = if identity_replaced || replacing_owned_runner {
+                // A fresh enrollment may reuse the same path/client_id with new
+                // credentials, while a topology switch may replace a different
+                // Desktop-owned Runner target. Neither old observation proves this
+                // exact generation is active.
                 false
             } else {
                 self.adapter
@@ -1543,10 +1558,12 @@ impl DesktopCore {
                 }
                 self.snapshot.readiness.runner = RunnerReadiness::Connecting;
                 self.publish_snapshot();
-                let command = self.adapter.local_runner_command(&identity.runner_config)?;
-                self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
-                    .await?;
-                true
+                if preparation.target_already_active {
+                    false
+                } else {
+                    self.spawn_owned_runner(&runner_identity, cancellation).await?;
+                    true
+                }
             } else {
                 false
             };
@@ -1595,11 +1612,8 @@ impl DesktopCore {
                             "Retry project setup after checking Runner diagnostics.",
                         ));
                     }
-                    let command = self
-                        .adapter
-                        .local_runner_command(&legacy_identity.runner_config)?;
-                    self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
-                        .await?;
+                    let legacy_runner = legacy_identity.runner_identity();
+                    self.spawn_owned_runner(&legacy_runner, cancellation).await?;
                     self.wait_for_runner(&legacy_identity, cancellation, legacy_deadline, true)
                         .await?;
                     runner_started = true;
@@ -1976,14 +1990,16 @@ impl DesktopCore {
             ));
         }
         let runner_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
-        let replacing_owned_runner = identity_replaced
-            && process_is_active(self.process_snapshot(ProcessKind::LocalRunner).await);
-        if replacing_owned_runner {
-            self.stop_process_until(ProcessKind::LocalRunner, runner_deadline)
-                .await;
-            cancellation.check()?;
-        }
-        let runner_ready = if identity_replaced {
+        let preparation = self
+            .prepare_owned_runner_target(
+                &identity,
+                identity_replaced,
+                runner_deadline,
+                cancellation,
+            )
+            .await?;
+        let replacing_owned_runner = preparation.replaced;
+        let runner_ready = if identity_replaced || replacing_owned_runner {
             false
         } else {
             self.adapter
@@ -2000,10 +2016,12 @@ impl DesktopCore {
                     "Check Server reachability and Runner diagnostics, then retry.",
                 ));
             }
-            let command = self.adapter.local_runner_command(&identity.runner_config)?;
-            self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
-                .await?;
-            true
+            if preparation.target_already_active {
+                false
+            } else {
+                self.spawn_owned_runner(&identity, cancellation).await?;
+                true
+            }
         } else {
             false
         };
@@ -2054,9 +2072,7 @@ impl DesktopCore {
                         ));
                     }
                     identity = legacy_identity.runner_identity();
-                    let command = self.adapter.local_runner_command(&identity.runner_config)?;
-                    self.spawn_owned(ProcessKind::LocalRunner, command, false, cancellation)
-                        .await?;
+                    self.spawn_owned_runner(&identity, cancellation).await?;
                     self.wait_for_runner_identity(&identity, cancellation, legacy_deadline, true)
                         .await?;
                     runner_started = true;
@@ -2669,6 +2685,58 @@ impl DesktopCore {
 
     async fn process_logs(&self, kind: ProcessKind) -> Vec<String> {
         self.supervisor.lock().await.logs(kind)
+    }
+
+    async fn prepare_owned_runner_target(
+        &self,
+        identity: &RunnerRuntimeIdentity,
+        identity_replaced: bool,
+        deadline: Deadline,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<OwnedRunnerPreparation> {
+        let target_key = runner_process_target_key(identity);
+        let target_match = self
+            .supervisor
+            .lock()
+            .await
+            .active_target_matches(ProcessKind::LocalRunner, &target_key);
+        let replaced = target_match.is_some_and(|matches| identity_replaced || !matches);
+        if replaced {
+            self.stop_process_until(ProcessKind::LocalRunner, deadline).await;
+            if deadline.is_elapsed() {
+                return Err(readiness_timeout_error(
+                    "runner_offline",
+                    "Desktop could not stop its previous Runner before switching runtime target",
+                    "Retry setup. Desktop will only replace the exact Runner generation it owns.",
+                ));
+            }
+            cancellation.check()?;
+        }
+        Ok(OwnedRunnerPreparation {
+            target_already_active: target_match == Some(true) && !replaced,
+            replaced,
+        })
+    }
+
+    async fn spawn_owned_runner(
+        &self,
+        identity: &RunnerRuntimeIdentity,
+        cancellation: &CancellationContext,
+    ) -> DesktopResult<()> {
+        cancellation.check()?;
+        let command = self.adapter.local_runner_command(&identity.runner_config)?;
+        let target_key = runner_process_target_key(identity);
+        let mut supervisor = self.supervisor.lock().await;
+        cancellation.check()?;
+        supervisor
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command,
+                false,
+                Some(target_key),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn spawn_owned(
@@ -5360,9 +5428,154 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn saved_remote_switch_replaces_only_the_different_desktop_owned_runner_generation() {
+        let data_dir = unique_state_dir("saved-remote-owned-runner-switch");
+        let resource_dir = data_dir.join("resources");
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        let local_runner_config = data_dir.join("local-runner.toml");
+        let remote_runner_config = data_dir.join("remote-runner.toml");
+        let local_user_token = data_dir.join("local-user-token");
+        let remote_user_token = data_dir.join("remote-user-token");
+        for path in [
+            &local_runner_config,
+            &remote_runner_config,
+            &local_user_token,
+            &remote_user_token,
+        ] {
+            std::fs::write(path, "fixture").unwrap();
+        }
+        let core = DesktopCore::new(data_dir.clone(), resource_dir).unwrap();
+        let cancellation = CancellationContext::never();
+        let local_identity = RunnerRuntimeIdentity {
+            runner_config: local_runner_config,
+            user_token_file: local_user_token,
+            server_url: "http://127.0.0.1:3721".to_string(),
+        };
+        let remote_identity = RunnerRuntimeIdentity {
+            runner_config: remote_runner_config,
+            user_token_file: remote_user_token,
+            server_url: "https://engine-test.example".to_string(),
+        };
+        let command = || {
+            let mut command = std::process::Command::new("powershell.exe");
+            command.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$null = [Console]::In.ReadToEnd()",
+            ]);
+            command
+        };
+
+        core.supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&local_identity)),
+            )
+            .await
+            .expect("start Desktop-owned Local Runner fixture");
+
+        let first_remote = core
+            .prepare_owned_runner_target(
+                &remote_identity,
+                false,
+                Deadline::after(Duration::from_secs(5)),
+                &cancellation,
+            )
+            .await
+            .expect("saved Remote target should replace Local Runner");
+        assert!(first_remote.replaced);
+        assert!(!first_remote.target_already_active);
+        core.supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&remote_identity)),
+            )
+            .await
+            .expect("saved Remote Runner must not hit process_already_running");
+        let same_remote = core
+            .prepare_owned_runner_target(
+                &remote_identity,
+                false,
+                Deadline::after(Duration::from_secs(5)),
+                &cancellation,
+            )
+            .await
+            .expect("same active Remote target should be reusable");
+        assert!(!same_remote.replaced);
+        assert!(same_remote.target_already_active);
+
+        let back_local = core
+            .prepare_owned_runner_target(
+                &local_identity,
+                false,
+                Deadline::after(Duration::from_secs(5)),
+                &cancellation,
+            )
+            .await
+            .expect("Local target should replace Remote Runner");
+        assert!(back_local.replaced);
+        core.supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&local_identity)),
+            )
+            .await
+            .expect("Local Runner restart must not hit process_already_running");
+
+        let second_remote = core
+            .prepare_owned_runner_target(
+                &remote_identity,
+                false,
+                Deadline::after(Duration::from_secs(5)),
+                &cancellation,
+            )
+            .await
+            .expect("same saved Remote target should replace Local Runner again");
+        assert!(second_remote.replaced);
+        core.supervisor
+            .lock()
+            .await
+            .spawn_owned_with_target(
+                ProcessKind::LocalRunner,
+                command(),
+                false,
+                Some(runner_process_target_key(&remote_identity)),
+            )
+            .await
+            .expect("second saved Remote switch must not hit process_already_running");
+        assert_eq!(
+            core.supervisor
+                .lock()
+                .await
+                .active_target_matches(
+                    ProcessKind::LocalRunner,
+                    &runner_process_target_key(&remote_identity),
+                ),
+            Some(true)
+        );
+
+        core.supervisor.lock().await.stop_all().await;
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
     #[tokio::test]
     #[ignore = "requires current-source dogfood binaries and a temporary project"]
-    async fn windows_remote_full_dogfood_reuses_enrollment_without_local_server() {
+    async fn windows_remote_full_dogfood_reuses_saved_profile_across_local_switches() {
         if !cfg!(windows) {
             return;
         }
@@ -5402,50 +5615,61 @@ mod tests {
 
         let mut client = DesktopCore::new(client_data.clone(), client_data.join("test-resources"))
             .expect("create remote dogfood client state");
-        let result: DesktopResult<(DesktopStateSnapshot, DesktopStateSnapshot, bool, bool)> =
-            async {
-                host.wait_for_server(
-                    &server_url,
-                    Some(&env_file),
-                    None,
-                    &cancellation,
-                    Deadline::after(SERVER_READY_TIMEOUT),
-                    true,
-                )
-                .await?;
-                let pairing_code = host
-                    .adapter
-                    .create_local_pairing(&server_url, &env_file, &cancellation)
-                    .await?;
-                let first = client
-                    .configure_remote_setup(&server_url, &pairing_code, Some(&project), &cancellation)
-                    .await?;
-                let first_started_server = client
-                    .process_snapshot(ProcessKind::LocalServer)
-                    .await
-                    .is_some();
-                client.stop_local_runtime(&cancellation).await?;
+        let result: DesktopResult<(
+            DesktopStateSnapshot,
+            DesktopStateSnapshot,
+            DesktopStateSnapshot,
+            DesktopStateSnapshot,
+        )> = async {
+            host.wait_for_server(
+                &server_url,
+                Some(&env_file),
+                None,
+                &cancellation,
+                Deadline::after(SERVER_READY_TIMEOUT),
+                true,
+            )
+            .await?;
 
-                let second = client
-                    .configure_remote_setup(&server_url, "", Some(&project), &cancellation)
-                    .await?;
-                let second_started_server = client
-                    .process_snapshot(ProcessKind::LocalServer)
-                    .await
-                    .is_some();
-                client.stop_local_runtime(&cancellation).await?;
-                Ok((first, second, first_started_server, second_started_server))
-            }
-            .await;
+            let first_local = client
+                .configure_local_setup(Some(&project), &cancellation)
+                .await?;
+            let pairing_code = host
+                .adapter
+                .create_local_pairing(&server_url, &env_file, &cancellation)
+                .await?;
+            let first_remote = client
+                .configure_remote_setup(&server_url, &pairing_code, Some(&project), &cancellation)
+                .await?;
+            let second_local = client
+                .configure_local_setup(Some(&project), &cancellation)
+                .await?;
+            let second_remote = client
+                .configure_remote_setup(&server_url, "", Some(&project), &cancellation)
+                .await?;
+            client.stop_local_runtime(&cancellation).await?;
+            Ok((first_local, first_remote, second_local, second_remote))
+        }
+        .await;
 
         client.supervisor.lock().await.stop_all().await;
         host.supervisor.lock().await.stop_all().await;
         let _ = std::fs::remove_dir_all(&client_data);
         let _ = std::fs::remove_dir_all(&host_data);
 
-        let (first, second, first_started_server, second_started_server) =
-            result.expect("remote full dogfood should complete");
-        for snapshot in [&first, &second] {
+        let (first_local, first_remote, second_local, second_remote) =
+            result.expect("Local -> Remote -> Local -> same Remote dogfood should complete");
+        for snapshot in [&first_local, &second_local] {
+            assert_eq!(snapshot.readiness.server, ServerReadiness::Ready);
+            assert_eq!(snapshot.readiness.runner, RunnerReadiness::Ready);
+            assert_eq!(snapshot.readiness.project, ProjectReadiness::Ready);
+            assert!(snapshot.readiness.runtime_ready);
+            assert!(matches!(
+                snapshot.topology.as_ref().map(|topology| &topology.server),
+                Some(ServerTopology::Local)
+            ));
+        }
+        for snapshot in [&first_remote, &second_remote] {
             assert_eq!(snapshot.readiness.server, ServerReadiness::Ready);
             assert_eq!(snapshot.readiness.runner, RunnerReadiness::Ready);
             assert_eq!(snapshot.readiness.project, ProjectReadiness::Ready);
@@ -5455,8 +5679,6 @@ mod tests {
                 Some(ServerTopology::Remote { .. })
             ));
         }
-        assert!(!first_started_server);
-        assert!(!second_started_server);
     }
 
     #[test]
