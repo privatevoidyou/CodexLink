@@ -195,6 +195,8 @@ CodexLink Desktop
 
 Server、Runner、端口、enrollment、tunnel-client path、health URL 等全部属于实现细节，默认自动处理和隐藏。
 
+高级 `连接现有 Server` 不改变商业 entitlement 语义：设备仍必须先通过同一 Signed License Activation Gate。Remote pairing 只是 Runtime enrollment，不是购买/设备激活凭证；首次成功 enrollment 可在 0 authorized roots 下保存并在后续 Local/Remote 切换或重启后复用，项目授权随后独立添加/撤销，不应再次消费销售激活码或 one-shot pairing code。
+
 所以最终用户心智是：
 
 ```text
@@ -236,6 +238,7 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 - 网站和 Desktop 都只显示客户需要的状态，不泄露内部授权实现；
 - 下载页验证成功不等于设备激活成功；
 - Activation Gate 不得被 UI shortcut、autostart 或 background resume 绕过。
+- Remote enrollment 的长期 user token / token-bearing Runner config 属于 bearer credential，Windows 上必须使用 protected DACL secret-file primitive 持久化；这与销售激活码/设备 License 是不同的凭据域。
 
 ---
 

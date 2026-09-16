@@ -1,6 +1,6 @@
 # CodexLink First-Release Security Boundary
 
-> 状态：**2026-09-15 首版安全边界规范保持有效；Batch F focused Gate 已提交，下一项 release Gate 是通过当前 CodexLink 0.4.1 / tunnel-test 做真实 destructive shell 与 no-child-spawn 验收。**
+> 状态：**2026-09-16 源码安全审计整改后规范；typed operations 与 arbitrary execution capability 已明确分层，Windows enrollment credential hardening 已落地，下一项动态 Gate 是整改后 CodexLink Engine 的 tunnel-test destructive / reparse 专项。**
 >
 > 适用范围：CodexLink Desktop、CodexLink 管理的 WebCodex Server / Runner、模型可见的 typed file tools 与本地 execution admission。
 >
@@ -89,7 +89,14 @@ CodexLink 向模型提供简短、稳定、不啰嗦的规则：
 
 明显 destructive 的 raw shell / process 请求在 spawn 前 fail closed。
 
-Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell / bash / cmd 解释器；它只覆盖高概率、毁灭性、可低成本可靠识别的常见事故模式。
+Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell / bash / cmd 解释器；它只覆盖高概率、毁灭性、可低成本可靠识别的常见事故模式。本轮额外拒绝 PowerShell `-EncodedCommand/-enc/-ec/-e` 这类直接隐藏 payload 的入口，但不会继续扩张成 Python/Node/脚本内部语义分析器。
+
+**关键 capability contract：**
+
+- typed file/Git/project operations 是 CodexLink-managed 强权限边界；
+- raw shell / arbitrary process / script / PowerShell / Python / Node 属于当前 Runner OS 用户权限下的高级 arbitrary-execution capability；
+- `allowed_roots` 与 launch cwd 不等于 OS sandbox，child process 仍拥有该 Windows 用户本来的系统访问能力；
+- Destructive Guard 是 mitigation / 最后一层误操作保护，不是 arbitrary code containment。
 
 ### 2.4 底层已有边界
 
@@ -99,6 +106,7 @@ Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell
 - internal runtime anchor 与 user authorized roots 分离；internal anchor 只维持 CodexLink Runtime identity，不自动成为用户项目 authority；
 - guarded edit / expected SHA；
 - License 与 Tunnel secret 的 DPAPI protection；
+- 长期 Runner enrollment bearer credential 使用统一 Windows protected secret-file primitive：user token 与 token-bearing `runner.toml` 禁用继承，只授予当前 Windows 用户与 SYSTEM FullAccess；ACL/reparse hardening 失败时 fail closed，overwrite/migration 后不得退化；
 - CodexLink-owned process tree / Job Object 生命周期；
 - installer / migration / staging 的明确 ownership；
 - 日志和 diagnostics 的 credential 最小化。
@@ -273,9 +281,9 @@ walk tree once
 
 ## 6. Raw Shell / Process Execution
 
-### 6.1 产品目标
+### 6.1 产品目标与 capability 边界
 
-Batch F 完成后，CodexLink 首版允许正常开发 execution，不因为“用了 shell / Python / Node / PowerShell”就频繁询问用户。
+CodexLink 首版允许正常开发 execution，不因为“用了 shell / Python / Node / PowerShell”就频繁询问用户。选择 arbitrary execution 即表示允许 Agent 以当前 Runner OS account 执行项目命令；这条能力不由 authorized roots 提供完整 filesystem sandbox。能表达成 typed operation 的文件/Git mutation 继续优先使用 typed contract。
 
 正常示例：
 
@@ -320,6 +328,7 @@ root_or_parent_delete
 destructive_git
 mirror_or_purge
 disk_destructive
+opaque_encoded_command
 ```
 
 每个 shell dialect 只识别少数高置信 primitive。
@@ -441,6 +450,7 @@ Batch F 在恢复 CodexLink-managed model-authored normal shell / process / scri
 ### Execution admission
 
 - `cargo test` / `npm test` / 普通 Python / Node / PowerShell script 可通过；
+- PowerShell `-EncodedCommand/-enc/-ec/-e` 作为 opaque direct payload 在 spawn 前拒绝；
 - obvious recursive delete raw shell 在 spawn 前拒绝；
 - destructive Git 在 spawn 前拒绝；
 - mirror / purge 在 spawn 前拒绝；
@@ -473,9 +483,9 @@ ChatGPT / tunnel-test
 
 - 正常 `git status` / build / test / PowerShell / Node / Python 工作流可运行；
 - `run_process` 不接受 shell 语义；需要 shell 的命令必须走专用 shell contract；
-- PowerShell / cmd / shell 的明显 recursive delete 在 spawn 前拒绝；
+- PowerShell / cmd / shell 的明显 recursive delete 在 spawn 前拒绝，并复验 encoded-command direct entry；
 - destructive Git、mirror/purge、disk destructive primitive 在 spawn 前拒绝；
-- project root / parent / drive root / wildcard / protected anchor / reparse 继续 fail closed；
+- project root / parent / drive root / wildcard / protected anchor / reparse 继续 fail closed；junction/reparse TOCTOU 进入后续动态专项，本轮不改写为 handle-based traversal；
 - deny 后验证没有 destructive child process 留下；
 - typed `delete_directory` 只在专门 disposable tree 中验证成功路径；
 - 不对真实 CodexLink 源码树、`D:\Test` 历史证据或用户真实文件做 destructive 负面测试。

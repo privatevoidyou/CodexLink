@@ -1,10 +1,10 @@
 # CodexLink First-Release Product Shell & Setup UX
 
-> 状态：**2026-09-15 首版 UI / UX 基线已通过 Smoke 3 多轮真机收敛，产品心智基本冻结；当前实现仍在未提交 worktree，剩余以真实系统验收和小范围修正为主。**
+> 状态：**2026-09-16 首版 UI / UX 基线已完成本轮 Remote/zero-root/readiness 源码整改并进入 `ede713a0` checkpoint；下一轮重点是整改后真实系统验收，不再扩大本轮 UI 范围。**
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
-> 实施状态：**`cafc0b7e` + `09c48060` 是已提交基线；其后 Smoke 3 / AnchorFix / UIFix / RecoveryFix / BrandFix 已完成多项目 authority、internal runtime anchor 分离、状态语义、动效、i18n 与安装/恢复迭代，尚未形成新的 Git checkpoint。实时状态见 `CODEXLINK_CURRENT_STATUS.md`。**
+> 实施状态：**Smoke 3 之后的多项目 authority、internal runtime anchor 分离以及本轮 Remote saved profile / transactional topology / 0-root / topology-specific readiness 已形成 `ede713a0` 代码 checkpoint。实时 Stage E 状态见 `CODEXLINK_CURRENT_STATUS.md`。**
 >
 > 目标：用户只理解“项目”和“ChatGPT 连接”，Server、Runner、端口、进程、Tunnel client 等实现细节由 CodexLink 自动处理。
 
@@ -22,7 +22,7 @@
 - 普通页面顶部不再显示“当前工作区”；全局状态只在页面自身的产品区域表达；
 - 首页以“一切就绪”或明确的下一步为主，而不是展示底层 runtime 术语；
 - 首页使用大卡片表达第一个授权路径；多个授权路径不拼成长标题，0 个路径时显示“等待配置授权路径”；
-- `本机 → Engine → Secure Link → ChatGPT` 使用清晰的连接链路表达；
+- Local 使用 `本机 → Engine → Secure Link → ChatGPT`；Remote 使用真实 `远程 CodexLink Server` 节点，不把本机 Secure Link 状态混入 Remote topology；
 - “接下来做什么”与“系统状态”只给用户需要的动作和状态；
 - 项目页使用卡片式项目管理；
 - 连接页使用步骤链说明运行环境、Tunnel 凭据、安全链路与 `ChatGPT 可访问`；连接健康不再依赖“是否已经发生过一次真实工具调用”；
@@ -99,7 +99,7 @@ RC5 Product Shell 之前必须先经过商业设备激活状态机。
 2. 当前是否已有用户授权路径，若有则第一个授权路径是什么；
 3. 如果尚未授权路径，下一步在哪里添加。
 
-**重要：连接健康与项目数量分离。** Engine / Secure Link / ChatGPT 已就绪时，即使 `projects.length === 0`，连接链路也保持绿色；项目数量只表达本地 authority，而不是连接故障。
+**重要：Runtime 连接健康与项目数量分离。** `projects.length === 0` 时 Server/Runner Runtime 可以保持健康，但 ChatGPT readiness 必须保持 pending，因为没有任何 customer-authorized path 可供工具使用；项目缺失不是 Server/Runner 故障，也不能用 internal runtime anchor 偷补 authority。
 
 目标结构：
 
@@ -183,6 +183,13 @@ Tunnel 凭据 已配置
 - 停止安全隧道。
 
 用户不需要理解 tunnel-client 二进制、动态本地 health port 或 Server/Runner 启动参数。
+
+Existing Server 高级模式使用不同投影：
+
+- `Server URL 已保存` 不等于 online；Server 状态必须来自真实 probe，并允许 ready / offline / unknown / degraded；
+- Remote HTTPS 已是外部入口，本机 OpenAI Tunnel 不再是 readiness 前置条件；
+- 首次 pairing 后 enrollment 与 active topology 独立保存，用户切 Local、重启 Desktop/Windows、再回到同一 Remote Server 时不应重新要求 pairing；
+- Remote 允许 0 项目先把 Runner 连上，项目可随后独立 add/remove；setup 失败不得先把 UI 切成假的 Remote 状态。
 
 ---
 
@@ -301,18 +308,18 @@ RC5 是视觉基准，不要求旧实现技术栈逐字节复刻。
 
 Smoke 2 之后的多轮真机反馈已落实到当前未提交 worktree：
 
-- internal runtime anchor 与 user authorized roots 分离；0 个项目不再阻塞 Runtime/Tunnel readiness；
-- 多授权路径 + 精确 remove authority；项目页响应式 3/2/1 列；
-- 首页只显示第一个授权路径，0 项目时给明确“添加项目”动作；
-- `ChatGPT 可访问` 与“实际访问过一次”解耦；系统状态使用“已连接”；
+- internal runtime anchor 与 user authorized roots 分离；Local/Remote 0 个项目都不阻塞 Server/Runner Runtime readiness，但 ChatGPT readiness 保持 pending；
+- 多授权路径 + 精确 remove authority；Remote add/remove 不切 Local、不重新 pairing；项目页响应式 3/2/1 列；
+- 首页只显示 customer-authorized path，0 项目时给明确“添加项目”动作，internal anchor 永不冒充项目；
+- Remote Dashboard/Connection 使用真实 Server readiness，不依赖本机 OpenAI Tunnel，也不因 URL 已保存假绿；
 - 连接链路视觉收紧，状态线更连续；
 - RC5 风格渐变、动作列表、hover/page transition 已收口；
 - Tray 只保留“打开 CodexLink / 退出 CodexLink”，并跟随 UI locale；
 - 激活错误本地化，6 个用户语言包增加大小写不敏感 CodexLink 品牌守卫；
-- 当前自动化证据：frontend `56/56`，Rust Desktop `114 passed / 0 failed / 5 ignored`，production build / fmt / diff check 通过；
+- 本轮 Stage D 自动化证据：frontend typecheck + focused `49/49`，Rust Desktop `121 passed / 0 failed / 5 ignored`，Runner config `31/31`，CLI lib `318/318`，fmt / diff check 通过；
 - 最新 BrandFix installer SHA256：`B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71`。
 
-仍待真实系统收口：Explorer 缓存后的最终图标确认、设备激活跨卸载再验、意外断线长期自愈、Remote Existing Server 同源迁移。
+仍待真实系统收口：Explorer 缓存后的最终图标确认、设备激活跨卸载再验、意外断线长期自愈，以及用整改后新 Desktop/Engine build 完成 Remote Local→Remote→Local→same Remote / restart / outage / revoke smoke。
 
 ---
 
@@ -328,8 +335,9 @@ Smoke 2 之后的多轮真机反馈已落实到当前未提交 worktree：
 - 连接页恢复步骤链 + 当前状态；
 - 设置页可保存 Tunnel ID + DPAPI Runtime Key；
 - 保存凭据后无需用户手动启动 Server/Runner/Tunnel client；
-- 默认本机主流程中不出现 Server URL、Runner enrollment、端口等高级概念；Existing Server 只放在“其他配置方式”高级入口；
-- 当前项目、Tunnel、ChatGPT readiness 来自真实状态，不是假绿灯；
+- 默认本机主流程中不出现 Server URL、Runner enrollment、端口等高级概念；Existing Server 只放在“其他配置方式”高级入口，并支持首次 enrollment 后 saved-profile reuse；
+- Local/Remote 都允许 0 authorized roots；0 root 时 Runtime 可健康但 ChatGPT pending；
+- 当前项目、Local Tunnel、Remote Server、ChatGPT readiness 都来自对应 topology 的真实状态，不是假绿灯；
 - 中英文与至少现有受支持语言不因 UI 恢复而破坏；
 - 键盘 focus、滚动、窗口最小尺寸和高 DPI 可用；
 - 新 UI 不削弱 `CODEXLINK_SECURITY_BOUNDARY.md` 中的安全 Gate。
