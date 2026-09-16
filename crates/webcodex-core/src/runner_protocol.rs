@@ -1727,13 +1727,20 @@ pub fn process_uses_shell_command_mode(process: &ShellProcessArgv) -> bool {
         "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => process
             .args
             .iter()
-            .any(|arg| matches!(arg.to_ascii_lowercase().as_str(), "-command" | "-c")),
+            .any(|arg| powershell_command_payload_flag(arg)),
         "cmd" | "cmd.exe" => process
             .args
             .iter()
             .any(|arg| arg.eq_ignore_ascii_case("/c")),
         _ => false,
     }
+}
+
+fn powershell_command_payload_flag(arg: &str) -> bool {
+    matches!(
+        arg.to_ascii_lowercase().as_str(),
+        "-command" | "-c" | "-encodedcommand" | "-enc" | "-ec" | "-e"
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4452,6 +4459,21 @@ mod envelope_tests {
             })
             .unwrap_err()
             .contains("shell command mode"));
+        }
+
+        for flag in ["-EncodedCommand", "-enc", "-ec", "-e"] {
+            assert!(
+                validate_process_argv(&ShellProcessArgv {
+                    executable: "powershell.exe".to_string(),
+                    args: vec![
+                        flag.to_string(),
+                        "ZQBjAGgAbwAgAG8AcABhAHEAdQBlAA==".to_string()
+                    ],
+                })
+                .unwrap_err()
+                .contains("shell command mode"),
+                "{flag}"
+            );
         }
     }
 

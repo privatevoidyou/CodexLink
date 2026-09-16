@@ -37,6 +37,12 @@ const DISK_DESTRUCTIVE: DestructiveGuardDecision = DestructiveGuardDecision {
     recovery_action: "manual_terminal_required",
 };
 
+const OPAQUE_ENCODED_COMMAND: DestructiveGuardDecision = DestructiveGuardDecision {
+    code: "opaque_encoded_command",
+    reason: "opaque encoded PowerShell commands are blocked because their execution semantics are hidden from the pre-spawn mitigation guard",
+    recovery_action: "use_visible_shell_or_script",
+};
+
 pub(crate) fn inspect_tool_call(call: &ToolCall) -> Option<DestructiveGuardDecision> {
     match call {
         ToolCall::RunShell { command, .. }
@@ -56,7 +62,7 @@ pub(crate) fn inspect_tool_call(call: &ToolCall) -> Option<DestructiveGuardDecis
 fn inspect_process(executable: &str, args: &[String]) -> Option<DestructiveGuardDecision> {
     let executable = executable_name(executable);
     match executable.as_str() {
-        "powershell" | "pwsh" => inspect_wrapped_command(args, &["-command", "-c"]),
+        "powershell" | "pwsh" => inspect_powershell(args),
         "cmd" => inspect_wrapped_command(args, &["/c", "/k"]),
         "sh" | "bash" | "zsh" => inspect_wrapped_command(args, &["-c"]),
         "rm" | "del" | "erase" | "rd" | "rmdir" | "git" | "robocopy" | "format" | "diskpart"
@@ -65,6 +71,20 @@ fn inspect_process(executable: &str, args: &[String]) -> Option<DestructiveGuard
         }
         _ => None,
     }
+}
+
+fn inspect_powershell(args: &[String]) -> Option<DestructiveGuardDecision> {
+    if args.iter().any(|arg| powershell_encoded_command_flag(arg)) {
+        return Some(OPAQUE_ENCODED_COMMAND);
+    }
+    inspect_wrapped_command(args, &["-command", "-c"])
+}
+
+fn powershell_encoded_command_flag(arg: &str) -> bool {
+    matches!(
+        arg.to_ascii_lowercase().as_str(),
+        "-encodedcommand" | "-enc" | "-ec" | "-e"
+    )
 }
 
 fn inspect_wrapped_command(
@@ -98,7 +118,7 @@ fn inspect_segment_tokens(tokens: &[String]) -> Option<DestructiveGuardDecision>
     let args = &tokens[command_index + 1..];
 
     match command.as_str() {
-        "powershell" | "pwsh" => inspect_wrapped_command(args, &["-command", "-c"]),
+        "powershell" | "pwsh" => inspect_powershell(args),
         "cmd" => inspect_wrapped_command(args, &["/c", "/k"]),
         "sh" | "bash" | "zsh" => inspect_wrapped_command(args, &["-c"]),
         _ => inspect_command_tokens(&command, args),
@@ -455,6 +475,24 @@ mod tests {
             inspect_process("powershell.exe", &args).map(|decision| decision.code),
             Some("recursive_delete")
         );
+        for flag in ["-EncodedCommand", "-enc", "-ec", "-e"] {
+            let encoded = vec![
+                flag.to_string(),
+                "ZQBjAGgAbwAgAG8AcABhAHEAdQBlAA==".to_string(),
+            ];
+            assert_eq!(
+                inspect_process("powershell.exe", &encoded).map(|decision| decision.code),
+                Some("opaque_encoded_command"),
+                "{flag}"
+            );
+            assert_eq!(
+                code(&format!(
+                    "powershell {flag} ZQBjAGgAbwAgAG8AcABhAHEAdQBlAA=="
+                )),
+                Some("opaque_encoded_command"),
+                "{flag}"
+            );
+        }
         let python = vec!["script.py".to_string()];
         assert_eq!(inspect_process("python.exe", &python), None);
     }
