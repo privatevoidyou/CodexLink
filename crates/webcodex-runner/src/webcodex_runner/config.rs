@@ -1423,11 +1423,27 @@ fn validate_shell_profile_toml_shape(content: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn policy_explicitly_sets_empty_allowed_roots(content: &str) -> bool {
+    let Ok(value) = toml::from_str::<toml::Value>(content) else {
+        return false;
+    };
+    value
+        .get("policy")
+        .and_then(toml::Value::as_table)
+        .and_then(|policy| policy.get("allowed_roots"))
+        .and_then(toml::Value::as_array)
+        .is_some_and(Vec::is_empty)
+}
+
 pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read config {}: {}", path.display(), e))?;
     validate_shell_profile_toml_shape(&content)
         .map_err(|e| format!("failed to parse config {}: {}", path.display(), e))?;
+    // An explicitly serialized empty list is a real zero-authority policy used
+    // by product-managed enrollment. Only an omitted key keeps the historical
+    // HOME fallback for ordinary Runner configs.
+    let allow_empty_allowed_roots = policy_explicitly_sets_empty_allowed_roots(&content);
     let mut cfg: RunnerConfig = toml::from_str(&content)
         .map_err(|e| format!("failed to parse config {}: {}", path.display(), e))?;
     if cfg.server_url.trim().is_empty() {
@@ -1474,8 +1490,11 @@ pub(crate) fn load_config(path: &Path) -> Result<RunnerConfig, String> {
     // predictably. If HOME is unavailable and allow_cwd_anywhere is false,
     // surface a clear configuration error. Explicit allowed_roots is preserved
     // as-is and overrides the HOME default.
-    let effective =
-        effective_allowed_roots(&cfg.policy.allowed_roots, cfg.policy.allow_cwd_anywhere)?;
+    let effective = effective_allowed_roots(
+        &cfg.policy.allowed_roots,
+        cfg.policy.allow_cwd_anywhere,
+        allow_empty_allowed_roots,
+    )?;
     cfg.policy.allowed_roots = effective;
     // Normalize old/new config spellings into one effective registry path. Two
     // explicit fields are ambiguous and fail closed rather than guessing

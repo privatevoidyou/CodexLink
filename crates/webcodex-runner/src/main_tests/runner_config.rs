@@ -23,6 +23,24 @@ fn runner_config_accepts_legacy_projects_dir_alias_and_normalizes_it() {
 }
 
 #[test]
+fn runner_config_preserves_explicit_zero_authority_allowed_roots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("runner.toml");
+    let registry = tmp.path().join("project-registry");
+    std::fs::write(
+        &path,
+        format!(
+            "server_url = \"http://127.0.0.1:8000\"\ntoken = \"t\"\nclient_id = \"oe\"\nproject_registry_dir = {:?}\n[policy]\nallow_cwd_anywhere = false\nallowed_roots = []\n",
+            registry.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.policy.allowed_roots.is_empty());
+}
+
+#[test]
 fn runner_config_alias_only_migration_does_not_require_restart() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("runner.toml");
