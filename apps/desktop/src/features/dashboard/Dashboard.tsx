@@ -42,7 +42,7 @@ export function Dashboard({
   const authorizedProjects = state.projects ?? [];
   const chatgptAccessible = isRemote
     ? state.readiness.ready_for_chatgpt
-    : runtimeReady && authorizedProjects.length > 0 && localSecureLinkReady;
+    : runtimeReady && localSecureLinkReady;
   const connectionHealthy = isRemote
     ? ["ready", "degraded"].includes(state.readiness.server) && state.readiness.runner === "ready"
     : runtimeReady && tunnelConfigured && localSecureLinkReady;
@@ -106,7 +106,7 @@ export function Dashboard({
           <h2 className="authorized-path-title" title={authorizedPathTitle}>{authorizedPathTitle}</h2>
           <p>{t("home.authorizedPathsSummary", { count: authorizedProjects.length })}</p>
           <div className="project-status-row">
-            <StatusPill ready={chatgptAccessible} label={t("home.aiConnection")} value={chatgptAccessible ? t("connection.chatgptAccessible") : t("home.notConnected")} />
+            <StatusPill ready={chatgptAccessible} label={t("home.aiConnection")} value={chatgptAccessible ? t("home.available") : t("home.notConnected")} />
             <StatusPill ready={runtimeReady} label={t("home.runtimeStatus")} value={runtimeReady ? t("common.ready") : t("common.stopped")} />
             <StatusPill ready={runtimeReady} label={t("home.projects")} value={String(authorizedProjects.length)} />
           </div>
@@ -147,7 +147,7 @@ export function Dashboard({
           <span className={`chain-line ${linkReady ? "ready" : ""}`} aria-hidden="true" />
           <ChainNode label={isRemote ? t("connection.remoteServer") : "Secure Link"} ready={linkReady} status={linkReady ? t("common.ready") : t("home.configuring")} />
           <span className={`chain-line ${chatgptAccessible ? "ready" : ""}`} aria-hidden="true" />
-          <ChainNode label="ChatGPT" ready={chatgptAccessible} status={chatgptAccessible ? t("connection.chatgptAccessible") : t("home.configuring")} />
+          <ChainNode label="ChatGPT" ready={chatgptAccessible} status={chatgptAccessible ? t("home.available") : t("home.configuring")} />
         </div>
       </section>
 

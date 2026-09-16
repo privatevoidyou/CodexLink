@@ -35,8 +35,15 @@ export function ProductOnboarding({
     setTunnelId(config.saved_tunnel_id ?? config.effective_tunnel_id ?? "");
   }, [config.effective_tunnel_id, config.saved_tunnel_id]);
 
+  const currentTunnelId = config.saved_tunnel_id ?? config.effective_tunnel_id ?? "";
   const savedKeyExists = config.source === "file" && config.api_key_present;
+  const existingCredentialsReady = state.openai_tunnel_configured
+    && config.api_key_present
+    && currentTunnelId.trim().length > 0
+    && tunnelId.trim() === currentTunnelId.trim()
+    && runtimeKey.trim().length === 0;
   const canSave = tunnelId.trim().length > 0 && (savedKeyExists || runtimeKey.trim().length > 0);
+  const canContinue = existingCredentialsReady || canSave;
   const mutationBusy = busy || Boolean(state.current_operation);
 
   const openProductLink = async (target: ProductLinkTarget) => {
@@ -49,7 +56,12 @@ export function ProductOnboarding({
   };
 
   const saveAndContinue = async () => {
-    if (mutationBusy || !canSave) return;
+    if (mutationBusy || !canContinue) return;
+    if (existingCredentialsReady) {
+      setError(null);
+      onStep("chatgpt");
+      return;
+    }
     const key = runtimeKey;
     setRuntimeKey("");
     setBusy(true);
@@ -150,10 +162,10 @@ export function ProductOnboarding({
               </div>
             )}
             <div className="onboarding-actions">
-              <button className="text-button onboarding-skip" type="button" onClick={onComplete} data-webcodex-action="onboarding-skip-configured">
+              <button className="text-button onboarding-skip" type="button" onClick={() => onStep("chatgpt")} data-webcodex-action="onboarding-skip-configured">
                 {t("onboarding.skipConfigured")}
               </button>
-              <button className="primary-button" type="button" onClick={() => void saveAndContinue()} disabled={mutationBusy || !canSave} data-webcodex-action="onboarding-next">
+              <button className="primary-button" type="button" onClick={() => void saveAndContinue()} disabled={mutationBusy || !canContinue} data-webcodex-action="onboarding-next">
                 {mutationBusy ? t("common.checking") : t("onboarding.next")}
               </button>
             </div>

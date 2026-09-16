@@ -153,7 +153,7 @@ export default function App() {
     commitState(next);
     setShowSetup(false);
     setChooseSetupMode(false);
-    const step: ProductOnboardingStep = next.openai_tunnel_configured ? "chatgpt" : "tunnel";
+    const step: ProductOnboardingStep = "tunnel";
     persistRequiredOnboarding(step);
     setProductOnboarding({ step, required: true });
     setStartupAttempt((attempt) => attempt + 1);

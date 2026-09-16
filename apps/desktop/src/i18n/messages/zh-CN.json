@@ -361,7 +361,7 @@
   "settings.tunnelProxyAutoHelpLocal": "自动优先使用 Desktop 环境代理，也会检测正在运行的本机代理。",
   "home.workspace": "当前工作区",
   "home.configuring": "待完成配置",
-  "home.available": "可以使用",
+  "home.available": "可访问",
   "home.finishSetup": "再完成一步即可使用",
   "home.runtimeStatus": "运行环境",
   "home.aiConnection": "AI 连接",

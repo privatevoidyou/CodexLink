@@ -263,9 +263,12 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
 
     await waitFor(() => expect(api.activateLicense).toHaveBeenCalledWith("MYWS-ABCDE-12345-FGHIJ-67890"));
+    expect(await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("tunnel");
+    await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "我已经配置过，跳过" }));
     expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
-    await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "我已经添加过，跳过" }));
     await findHomeHeading();
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
@@ -352,7 +355,33 @@ describe("semantic Desktop UI", () => {
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
   });
 
-  it("lets first-use onboarding be skipped without changing runtime readiness", async () => {
+  it("continues past saved Tunnel credentials without asking for the Runtime Key again", async () => {
+    const configured: DesktopState = {
+      ...readyState,
+      openai_tunnel_configured: true,
+      openai_tunnel_config: {
+        tunnel_id_present: true,
+        api_key_present: true,
+        source: "file",
+        saved_tunnel_id: "tunnel_fixture",
+        effective_tunnel_id: "tunnel_fixture",
+      },
+    };
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue(configured);
+
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    expect(screen.getByLabelText("Tunnel ID")).toHaveValue("tunnel_fixture");
+    expect(screen.getByRole("button", { name: "下一步" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(api.updateTunnelConfig).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
+  });
+
+  it("skips only the current first-use onboarding step without changing runtime readiness", async () => {
     const missing: DesktopState = {
       ...readyState,
       readiness: { ...readyState.readiness, runtime_ready: false, ready_for_chatgpt: false },
@@ -371,8 +400,11 @@ describe("semantic Desktop UI", () => {
     await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
     fireEvent.click(screen.getByRole("button", { name: "我已经配置过，跳过" }));
 
-    await findHomeHeading();
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
     expect(api.updateTunnelConfig).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
+    fireEvent.click(screen.getByRole("button", { name: "我已经添加过，跳过" }));
+    await findHomeHeading();
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
     expect(screen.getAllByText("尚未连接").length).toBeGreaterThan(0);
   });
@@ -400,6 +432,9 @@ describe("semantic Desktop UI", () => {
     expect(await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 })).toBeInTheDocument();
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "我已经配置过，跳过" }));
+    expect(await screen.findByRole("heading", { name: "添加 CodexLink 到 ChatGPT", level: 1 })).toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "我已经添加过，跳过" }));
     await findHomeHeading();
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
   });
@@ -854,7 +889,9 @@ describe("semantic Desktop UI", () => {
     expect(screen.getByRole("listitem", { name: "本机" })).toHaveClass("ready");
     expect(screen.getByRole("listitem", { name: "Engine" })).toHaveClass("ready");
     expect(screen.getByRole("listitem", { name: "Secure Link" })).toHaveClass("ready");
-    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("pending");
+    expect(screen.getByRole("listitem", { name: "ChatGPT" })).toHaveClass("ready");
+    expect(screen.getByText("等待配置授权路径")).toBeInTheDocument();
+    expect(screen.getAllByText("可访问").length).toBeGreaterThan(0);
     const nextActions = screen.getByRole("heading", { level: 2, name: "接下来做什么" }).closest("section") as HTMLElement | null;
     expect(nextActions).not.toBeNull();
     expect(within(nextActions!).getByRole("button", { name: /^添加项目/ })).toBeEnabled();
@@ -862,7 +899,7 @@ describe("semantic Desktop UI", () => {
     expect(systemStatus).not.toBeNull();
     const chatgptStatus = within(systemStatus!).getByText("ChatGPT 连接").closest(".system-status-line") as HTMLElement | null;
     expect(chatgptStatus).not.toBeNull();
-    expect(within(chatgptStatus!).getByText("尚未连接")).toBeInTheDocument();
+    expect(within(chatgptStatus!).getByText("已连接")).toBeInTheDocument();
   });
 
   it("treats a verified ready Secure Link as customer-facing ChatGPT accessibility", async () => {
