@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 pub(crate) fn write_text_file(
     path: &Path,
     content: &str,
@@ -62,7 +63,7 @@ pub(crate) fn write_text_file(
     Ok(())
 }
 
-pub(crate) fn write_server_secret_text_file(
+pub(crate) fn write_secret_text_file(
     path: &Path,
     content: &str,
     overwrite: bool,
@@ -75,6 +76,14 @@ pub(crate) fn write_server_secret_text_file(
     {
         write_text_file(path, content, overwrite, true)
     }
+}
+
+pub(crate) fn write_server_secret_text_file(
+    path: &Path,
+    content: &str,
+    overwrite: bool,
+) -> Result<(), String> {
+    write_secret_text_file(path, content, overwrite)
 }
 
 #[cfg(windows)]

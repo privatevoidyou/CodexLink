@@ -91,6 +91,40 @@ fn runner_init_writes_0600_permissions() {
     assert_eq!(mode, 0o600);
 }
 
+#[cfg(windows)]
+#[test]
+fn runner_init_writes_protected_windows_dacl() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("config/runner.toml");
+    let opts = parse_cli_runner_init(&args(&[
+        "--server-url",
+        "https://v4.example.test",
+        "--token",
+        "agent_fake_perms_token",
+        "--client-id",
+        "alice-laptop",
+        "--owner",
+        "alice",
+        "--allowed-root",
+        "C:\\projects",
+        "--output",
+        output.to_str().unwrap(),
+    ]))
+    .unwrap();
+    run_runner_init(opts).unwrap();
+
+    let sddl = crate::webcodex_cli::system::windows_dacl_sddl(&output).unwrap();
+    assert!(sddl.starts_with("D:P"), "DACL must be protected: {sddl}");
+    assert!(sddl.contains(";;;SY)"), "SYSTEM access must remain: {sddl}");
+    assert_eq!(sddl.matches("(A;").count(), 2, "{sddl}");
+    for forbidden in [";;;WD)", ";;;BU)", ";;;BA)"] {
+        assert!(
+            !sddl.contains(forbidden),
+            "unexpected inherited/read ACE {forbidden}: {sddl}"
+        );
+    }
+}
+
 #[test]
 fn runner_init_token_file_and_env_fallback() {
     let tmp = tempfile::tempdir().unwrap();

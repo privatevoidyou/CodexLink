@@ -554,14 +554,13 @@ pub(crate) fn stage_connection(
         )
     })?;
 
-    super::system::write_text_file(
+    super::system::write_secret_text_file(
         &paths.user_token,
         &format!("{}\n", identity.user_token),
         true,
-        true,
     )?;
 
-    crate::runner_config::run_runner_init(crate::runner_config::RunnerInitOptions {
+    crate::run_runner_init(crate::runner_config::RunnerInitOptions {
         server_url: server_url.to_string(),
         token: Some(identity.runner_token.clone()),
         token_file: None,
@@ -1607,6 +1606,33 @@ mod tests {
         assert!(!message.contains(CODE), "message leaked the pairing code");
         assert!(!message.contains(AGENT_TOKEN), "message leaked a token");
         assert!(!message.contains(USER_TOKEN), "message leaked a token");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn published_credentials_have_protected_windows_dacl_after_overwrite() {
+        let temp = canonical_test_tempdir();
+        let base = temp.path();
+        publish_login(base, "https://api.example.com", false).unwrap();
+
+        for overwrite in [false, true] {
+            if overwrite {
+                publish_login(base, "https://api.example.com", true).unwrap();
+            }
+            let paths = all_connections(base)[0].paths.clone();
+            for path in [&paths.user_token, &paths.runner_config] {
+                let sddl = crate::webcodex_cli::system::windows_dacl_sddl(path).unwrap();
+                assert!(sddl.starts_with("D:P"), "DACL must be protected: {sddl}");
+                assert!(sddl.contains(";;;SY)"), "SYSTEM access must remain: {sddl}");
+                assert_eq!(sddl.matches("(A;").count(), 2, "{sddl}");
+                for forbidden in [";;;WD)", ";;;BU)", ";;;BA)"] {
+                    assert!(
+                        !sddl.contains(forbidden),
+                        "unexpected inherited/read ACE {forbidden}: {sddl}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

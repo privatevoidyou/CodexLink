@@ -28,8 +28,8 @@ use admin_cli::{
     parse_admin_cli, run_admin_command, AdminCliCommand, AdminOptions, ServerHttpOptions,
 };
 use runner_config::{
-    run_runner_init, RunnerInitOptions, DEFAULT_INIT_PROJECT_REGISTRY_DIR,
-    DEFAULT_POLL_INTERVAL_MS, TRANSPORT_WEBSOCKET,
+    RunnerInitOptions, DEFAULT_INIT_PROJECT_REGISTRY_DIR, DEFAULT_POLL_INTERVAL_MS,
+    TRANSPORT_WEBSOCKET,
 };
 use webcodex_cli::ops::ops_exit_code;
 use webcodex_cli::{
@@ -2496,8 +2496,31 @@ fn parse_pairing_create(args: &[String]) -> Result<PairingCreateOptions, String>
     Ok(opts)
 }
 
-/// Small flag parser for `webcodex runner init`. Produces an
-/// `RunnerInitOptions` consumed by the shared `runner_config::run_runner_init`.
+/// Write token-bearing Runner config through the platform secret-file primitive.
+/// Windows uses a protected DACL before any secret bytes are written; other
+/// platforms retain the shared runner-config writer and its Unix 0600 contract.
+fn run_runner_init(opts: RunnerInitOptions) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let content = runner_config::generated_runner_config_toml(&opts)?;
+        if opts.output.as_os_str() == "-" {
+            return Ok(content);
+        }
+        if opts.output.exists() && !opts.overwrite {
+            return Err(format!(
+                "{} already exists; pass --overwrite to replace it",
+                opts.output.display()
+            ));
+        }
+        webcodex_cli::system::write_secret_text_file(&opts.output, &content, opts.overwrite)?;
+        return Ok(format!("wrote {}\n", opts.output.display()));
+    }
+    #[cfg(not(windows))]
+    {
+        runner_config::run_runner_init(opts)
+    }
+}
+
 fn parse_cli_runner_init(args: &[String]) -> Result<RunnerInitOptions, String> {
     let mut opts = RunnerInitOptions {
         server_url: String::new(),
