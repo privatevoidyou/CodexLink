@@ -333,6 +333,7 @@ pub async fn run_project_activation_json<T: DeserializeOwned>(
     args: &[String],
     cancellation: &CancellationContext,
 ) -> DesktopResult<T> {
+
     let output = run_bounded_until(
         executable,
         args,
@@ -377,6 +378,51 @@ pub async fn run_project_activation_json<T: DeserializeOwned>(
         DesktopError::new(
             "webcodex_contract_invalid",
             "CodexLink returned invalid project activation output",
+            "Verify that Desktop and CodexLink binaries come from the same source baseline.",
+        )
+    })
+}
+
+pub async fn run_project_removal_json<T: DeserializeOwned>(
+    executable: &Path,
+    args: &[String],
+    cancellation: &CancellationContext,
+) -> DesktopResult<T> {
+    let output = run_bounded_until(
+        executable,
+        args,
+        None,
+        false,
+        cancellation,
+        Deadline::after(PROJECT_ACTIVATION_TIMEOUT),
+    )
+    .await?;
+    if output.exit_code != Some(0) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let known = [
+            "project_removal_capability_unavailable",
+            "project_removal_restart_required",
+            "project_removal_invalid_config",
+            "project_removal_config_conflict",
+            "project_removal_reconcile_required",
+            "project_removal_still_authorized_by_parent",
+            "runner_config_concurrent_change",
+        ];
+        let code = known
+            .into_iter()
+            .find(|code| stderr.trim_start().starts_with(code))
+            .unwrap_or("project_removal_failed");
+        return Err(DesktopError::new(
+            code,
+            "CodexLink could not remove the selected project access",
+            "Check the current Runner/project state and retry only after the exact failure is resolved.",
+        )
+        .with_details(serde_json::json!({ "exit_code": output.exit_code })));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|_| {
+        DesktopError::new(
+            "webcodex_contract_invalid",
+            "CodexLink returned invalid project removal output",
             "Verify that Desktop and CodexLink binaries come from the same source baseline.",
         )
     })

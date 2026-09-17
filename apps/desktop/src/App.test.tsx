@@ -370,6 +370,81 @@ describe("semantic Desktop UI", () => {
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("chatgpt");
   });
 
+  it("explains OpenAI network or proxy reachability when Secure Link startup cannot reach the control plane", async () => {
+    const missing: DesktopState = {
+      ...readyState,
+      openai_tunnel_configured: false,
+      openai_tunnel_config: {
+        tunnel_id_present: false,
+        api_key_present: false,
+        source: "environment",
+        saved_tunnel_id: null,
+      },
+    };
+    const configured: DesktopState = {
+      ...missing,
+      openai_tunnel_configured: true,
+      openai_tunnel_config: {
+        tunnel_id_present: true,
+        api_key_present: true,
+        source: "file",
+        saved_tunnel_id: "tunnel_fixture",
+        effective_tunnel_id: "tunnel_fixture",
+      },
+    };
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue(missing);
+    api.updateTunnelConfig.mockResolvedValue(configured);
+    api.startRegularTunnel.mockRejectedValue({
+      code: "tunnel_proxy_unavailable",
+      message: "Automatic Tunnel networking could not reach the OpenAI control plane",
+      next_action: "Open Tunnel network settings and retry.",
+    });
+
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    fireEvent.change(screen.getByLabelText("Tunnel ID"), { target: { value: "tunnel_fixture" } });
+    fireEvent.change(screen.getByLabelText("Restricted Runtime Key"), { target: { value: "runtime-key-fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(await screen.findByText("无法连接 OpenAI")).toBeInTheDocument();
+    expect(screen.getByText(/设置 → OpenAI Tunnel 网络/)).toBeInTheDocument();
+    expect(screen.queryByText("操作未完成")).not.toBeInTheDocument();
+  });
+
+  it("shows tutorial screenshots as thumbnails and closes enlarged previews from the backdrop or Escape", async () => {
+    const configured: DesktopState = {
+      ...readyState,
+      openai_tunnel_configured: true,
+      openai_tunnel_config: {
+        tunnel_id_present: true,
+        api_key_present: true,
+        source: "file",
+        saved_tunnel_id: "tunnel_fixture",
+        effective_tunnel_id: "tunnel_fixture",
+      },
+    };
+    window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
+    api.getState.mockResolvedValue(configured);
+
+    renderApp();
+    await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
+    fireEvent.click(screen.getByText("查看 Tunnel / Runtime Key 图文教程"));
+
+    const tunnelPreview = screen.getByRole("button", { name: "创建 Tunnel ID · 步骤 1" });
+    fireEvent.click(tunnelPreview);
+    const dialog = screen.getByRole("dialog", { name: "创建 Tunnel ID · 步骤 1" });
+    expect(within(dialog).getByRole("img", { name: "创建 Tunnel ID · 步骤 1" })).toBeInTheDocument();
+
+    fireEvent.click(dialog);
+    expect(screen.queryByRole("dialog", { name: "创建 Tunnel ID · 步骤 1" })).not.toBeInTheDocument();
+
+    fireEvent.click(tunnelPreview);
+    expect(screen.getByRole("dialog", { name: "创建 Tunnel ID · 步骤 1" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "创建 Tunnel ID · 步骤 1" })).not.toBeInTheDocument();
+  });
+
   it("continues past saved Tunnel credentials without asking for the Runtime Key again", async () => {
     const configured: DesktopState = {
       ...readyState,
@@ -763,6 +838,35 @@ describe("semantic Desktop UI", () => {
     await waitFor(() => expect(api.removeLocalProject).toHaveBeenCalledWith(secondProject.path));
     expect(screen.queryByRole("heading", { level: 2, name: "Mina_UE" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "repo" })).toBeInTheDocument();
+  });
+
+  it("presents project removal failures as authorization problems rather than enrollment failures", async () => {
+    const secondProject = {
+      path: "D:\\Mina_UE",
+      allowed_root: "D:\\Mina_UE",
+      is_git_repository: true,
+      runtime_project_id: "agent:desktop:mina-ue",
+    };
+    const multiProject: DesktopState = {
+      ...readyState,
+      projects: [...readyState.projects, secondProject],
+    };
+    api.getState.mockResolvedValue(multiProject);
+    api.observeChatgptActivity.mockResolvedValue(multiProject);
+    api.removeLocalProject.mockRejectedValue({
+      code: "project_removal_still_authorized_by_parent",
+      message: "Project remains reachable through broader allowed root",
+      next_action: "Remove the broader authorization first.",
+    });
+
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: "项目" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "移除项目" })[1]);
+
+    expect(await screen.findByText("无法移除项目访问")).toBeInTheDocument();
+    expect(screen.getByText(/更宽的父目录授权/)).toBeInTheDocument();
+    expect(screen.queryByText("注册未完成")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Mina_UE" })).toBeInTheDocument();
   });
 
   it("adds a first authorized path on an already-ready local runtime without reopening topology choices", async () => {

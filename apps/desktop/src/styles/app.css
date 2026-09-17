@@ -1382,6 +1382,26 @@ input:not([type="radio"]):not([type="checkbox"]), select {
 .onboarding-details p { margin: 10px 0 0; }
 .onboarding-details ol { margin: 9px 0 0; padding-left: 20px; }
 .onboarding-details li + li { margin-top: 6px; }
+.tutorial-details { background: #fbfcff; }
+.tutorial-preview-hint { color: #7d899d; }
+.tutorial-gallery-stack { margin-top: 14px; display: grid; gap: 16px; }
+.tutorial-group { min-width: 0; padding: 13px; border: 1px solid #e2e7ef; border-radius: 12px; background: #fff; }
+.tutorial-group-heading { margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tutorial-group-heading strong { color: #43516a; font-size: 12px; }
+.tutorial-group-heading span { color: #9aa4b5; font-size: 10px; }
+.tutorial-thumbnail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 10px; }
+.tutorial-thumbnail { min-width: 0; padding: 7px; border: 1px solid #e1e6ee; border-radius: 10px; background: #f7f9fc; cursor: zoom-in; text-align: left; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.tutorial-thumbnail:hover { border-color: #9cacef; box-shadow: 0 5px 16px rgba(52,74,143,.10); transform: translateY(-1px); }
+.tutorial-thumbnail:focus-visible { outline: 2px solid #5873e7; outline-offset: 2px; }
+.tutorial-thumbnail img { width: 100%; height: 84px; display: block; object-fit: contain; border-radius: 7px; background: #eef1f6; }
+.tutorial-thumbnail span { display: block; margin-top: 6px; color: #65738a; font-size: 10px; font-weight: 650; text-align: center; }
+.tutorial-lightbox { position: fixed; inset: 0; z-index: 3000; padding: 32px; display: grid; place-items: center; background: rgba(14,20,32,.78); cursor: zoom-out; }
+.tutorial-lightbox-content { position: relative; max-width: min(1120px, calc(100vw - 64px)); max-height: calc(100vh - 64px); padding: 12px 12px 9px; border-radius: 14px; background: #fff; box-shadow: 0 24px 80px rgba(0,0,0,.34); cursor: default; }
+.tutorial-lightbox-content img { max-width: 100%; max-height: calc(100vh - 118px); display: block; object-fit: contain; border-radius: 9px; background: #f4f6fa; }
+.tutorial-lightbox-caption { display: block; padding: 8px 38px 1px 4px; color: #5c6980; font-size: 11px; font-weight: 650; }
+.tutorial-lightbox-close { position: absolute; top: 18px; right: 18px; z-index: 1; width: 34px; height: 34px; border: 1px solid rgba(255,255,255,.52); border-radius: 50%; display: grid; place-items: center; background: rgba(20,28,43,.72); color: #fff; cursor: pointer; font-size: 23px; line-height: 1; box-shadow: 0 3px 12px rgba(0,0,0,.22); }
+.tutorial-lightbox-close:hover { background: rgba(20,28,43,.9); }
+.tutorial-lightbox-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .setting-line > div > strong { color: #3d485e; font-size: 13px; font-weight: 650; }
 
 @media (max-width: 1080px) {
@@ -1410,6 +1430,10 @@ input:not([type="radio"]):not([type="checkbox"]), select {
   .onboarding-actions { align-items: stretch; flex-direction: column-reverse; }
   .onboarding-actions .primary-button { width: 100%; }
   .onboarding-skip { text-align: center; }
+  .tutorial-thumbnail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tutorial-lightbox { padding: 14px; }
+  .tutorial-lightbox-content { max-width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
+  .tutorial-lightbox-content img { max-height: calc(100vh - 84px); }
 }
 
 @media (max-width: 650px) {

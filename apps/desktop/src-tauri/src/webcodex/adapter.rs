@@ -1,4 +1,4 @@
-use super::cli::{run_json, run_json_until, run_project_activation_json, ResolvedBinaries};
+use super::cli::{run_json, run_json_until, run_project_activation_json, run_project_removal_json, ResolvedBinaries};
 use super::models::{
     AuthStatusOutput, LegacyProjectRegisterOutput, LoginOutput, OpsProjectsOutput, OpsWindowsOutput,
     PairingCreateOutput, ProjectActivationOutput, ProjectRemovalOutput, RunnerStatusOutput,
@@ -708,7 +708,7 @@ impl WebCodexAdapter {
             "--json".into(),
         ];
         let output: ProjectRemovalOutput =
-            run_json(&webcodex, &args, None, false, cancellation).await?;
+            run_project_removal_json(&webcodex, &args, cancellation).await?;
         if !same_path(&output.project.path, &project.path)
             || !matches!(
                 output.outcome.as_str(),

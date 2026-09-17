@@ -808,7 +808,7 @@ impl DesktopCore {
         {
             return None;
         }
-        let identity = identity_from_config(&self.config)?;
+        let identity = customer_project_identity_from_config(&self.config)?;
         let webcodex = self.adapter.binaries().ok()?.webcodex.clone();
         Some(ChatGptActivityProbe { identity, webcodex })
     }
@@ -819,7 +819,7 @@ impl DesktopCore {
         last_meaningful_activity_at_ms: Option<i64>,
     ) -> DesktopResult<DesktopStateSnapshot> {
         if !self.snapshot.readiness.runtime_ready
-            || identity_from_config(&self.config).as_ref() != Some(expected_identity)
+            || customer_project_identity_from_config(&self.config).as_ref() != Some(expected_identity)
             || self
                 .snapshot
                 .chatgpt_activity
@@ -1417,12 +1417,18 @@ impl DesktopCore {
             exposure: Exposure::None,
             enrollment: Enrollment::ManagedPairing,
         });
-        self.stage_project_scope(project.clone());
+        self.snapshot.project = project_snapshot(&self.config);
+        self.snapshot.projects = projects_snapshot(&self.config);
+        self.snapshot.chatgpt_activity = None;
         self.snapshot.readiness = aggregate_readiness(
             ServerReadiness::Starting,
             RunnerReadiness::Stopped,
             ExposureReadiness::Disabled,
-            ProjectReadiness::Configured,
+            if self.config.projects.is_empty() && requested_user_project.is_none() {
+                ProjectReadiness::None
+            } else {
+                ProjectReadiness::Configured
+            },
         );
         self.publish_snapshot();
 
@@ -1453,7 +1459,9 @@ impl DesktopCore {
             ensure_desktop_server_defaults(&env_file)?;
             status.probe_url
         };
-        let reusable_identity = identity_from_config(&self.config)
+        let reusable_identity = (!local_runtime_requires_zero_root_reenrollment(&self.config))
+            .then(|| runner_identity_from_config(&self.config))
+            .flatten()
             .filter(|identity| same_server(&identity.server_url, &server_url));
         let saved_runner_client_id = stored_runner_client_id(&self.config);
         cancellation.check()?;
@@ -1501,7 +1509,7 @@ impl DesktopCore {
         let reusable_observation = match reusable_identity.as_ref() {
             Some(identity) => self
                 .adapter
-                .observe_runner_connection(
+                .observe_runner_identity(
                     identity,
                     saved_runner_client_id.as_deref(),
                     cancellation,
@@ -1510,12 +1518,14 @@ impl DesktopCore {
                 .ok(),
             None => None,
         };
-        let (mut identity, identity_replaced, runner_client_id) =
+        let (runner_identity, identity_replaced, runner_client_id) =
             match (reusable_identity, reusable_observation) {
                 (Some(identity), Some(observation)) => (identity, false, observation.client_id),
                 _ => {
-                    // Login publishes with --overwrite. Keep the saved connection's
-                    // files intact until activation and config persistence succeed.
+                    // Product-managed Local enrollment starts with true zero customer
+                    // authority. Existing user projects are replayed only after the
+                    // exact Runner identity is online; the internal runtime anchor is
+                    // never registered as a Project or allowed_root.
                     let connections_dir = local_enrollment_directory(&self.data_dir, &self.config);
                     let pairing_code = self
                         .adapter
@@ -1523,11 +1533,10 @@ impl DesktopCore {
                         .await?;
                     let identity = self
                         .adapter
-                        .login_with_pairing(
+                        .login_runner_with_pairing(
                             &server_url,
                             &pairing_code,
                             &connections_dir,
-                            &project,
                             cancellation,
                         )
                         .await?;
@@ -1535,13 +1544,11 @@ impl DesktopCore {
                     cancellation.check()?;
                     let observation = self
                         .adapter
-                        .observe_runner_connection(&identity, None, cancellation)
+                        .observe_runner_identity(&identity, None, cancellation)
                         .await?;
                     (identity, true, observation.client_id)
                 }
             };
-
-        let runner_identity = identity.runner_identity();
         let runner_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
         let preparation = self
             .prepare_owned_runner_target(
@@ -1561,12 +1568,12 @@ impl DesktopCore {
                 false
             } else {
                 self.adapter
-                    .runner_ready_until(&identity, cancellation, runner_deadline)
+                    .runner_identity_ready_until(&runner_identity, cancellation, runner_deadline)
                     .await
                     .unwrap_or(false)
             };
             cancellation.check()?;
-            let mut runner_started = if !runner_ready {
+            let runner_started = if !runner_ready {
                 if runner_deadline.is_elapsed() {
                     return Err(readiness_timeout_error(
                         "runner_offline",
@@ -1585,61 +1592,15 @@ impl DesktopCore {
             } else {
                 false
             };
-            self.wait_for_runner(&identity, cancellation, runner_deadline, runner_started)
-                .await?;
+            self.wait_for_runner_identity(
+                &runner_identity,
+                cancellation,
+                runner_deadline,
+                runner_started,
+            )
+            .await?;
             self.snapshot.readiness.runner = RunnerReadiness::Ready;
             self.publish_snapshot();
-            identity = match self
-                .adapter
-                .activate_project(&identity, &runner_client_id, &project, cancellation)
-                .await
-            {
-                Ok(identity) => identity,
-                Err(error)
-                    if matches!(
-                        error.code.as_str(),
-                        "project_activation_capability_unavailable"
-                            | "project_activation_restart_required"
-                    ) =>
-                {
-                    if !can_refresh_legacy_runner(
-                        self.process_snapshot(ProcessKind::LocalRunner).await,
-                    ) {
-                        return Err(DesktopError::new(
-                            "project_activation_legacy_runner",
-                            "This Runner needs to be refreshed before the new project can be activated",
-                            "Refresh the Runner, then select this project again.",
-                        ));
-                    }
-                    let legacy_identity = self
-                        .adapter
-                        .legacy_register_project(
-                            &identity,
-                            &runner_client_id,
-                            &project,
-                            cancellation,
-                        )
-                        .await?;
-                    let legacy_deadline = Deadline::after(RUNNER_READY_TIMEOUT);
-                    self.stop_process_until(ProcessKind::LocalRunner, legacy_deadline)
-                        .await;
-                    if legacy_deadline.is_elapsed() {
-                        return Err(readiness_timeout_error(
-                            "runner_offline",
-                            "Desktop could not refresh its legacy Runner",
-                            "Retry project setup after checking Runner diagnostics.",
-                        ));
-                    }
-                    let legacy_runner = legacy_identity.runner_identity();
-                    self.spawn_owned_runner(&legacy_runner, cancellation).await?;
-                    self.wait_for_runner(&legacy_identity, cancellation, legacy_deadline, true)
-                        .await?;
-                    runner_started = true;
-                    legacy_identity
-                }
-                Err(error) => return Err(error),
-            };
-            self.wait_for_project(&identity, cancellation).await?;
             cancellation.check()?;
             Ok(runner_started)
         }
@@ -1671,25 +1632,24 @@ impl DesktopCore {
             }
         };
 
-        // Commit the internal runtime anchor only after the owned Runner and
-        // anchor project have both reached readiness. Customer-authorized roots
-        // are stored independently in `projects[]` and never replace this
-        // identity.
+        // Commit the internal runtime anchor only as Desktop recovery metadata.
+        // It is deliberately not a Runner allowed_root and has no runtime Project
+        // identity; only explicit customer projects in `projects[]` are activated.
         let previous_config = self.config.clone();
         let mut committed_anchor = project.clone();
-        committed_anchor.runtime_project_id = Some(identity.runtime_project_id.clone());
+        committed_anchor.runtime_project_id = None;
         self.config.topology = self.snapshot.topology.clone();
-        self.config.runtime_anchor = Some(committed_anchor.clone());
+        self.config.runtime_anchor = Some(committed_anchor);
         self.config.project = None;
         self.config.runtime_autostart = Some(true);
         self.config.runtime = Some(StoredRuntime {
-            server_url: identity.server_url.clone(),
+            server_url: runner_identity.server_url.clone(),
             server_env_file: Some(env_file.clone()),
-            runner_config: Some(identity.runner_config.clone()),
-            user_token_file: Some(identity.user_token_file.clone()),
+            runner_config: Some(runner_identity.runner_config.clone()),
+            user_token_file: Some(runner_identity.user_token_file.clone()),
             runner_client_id: Some(runner_client_id.clone()),
-            project_id: Some(identity.project_id.clone()),
-            runtime_project_id: Some(identity.runtime_project_id.clone()),
+            project_id: None,
+            runtime_project_id: None,
         });
         if let Err(error) = self.save_config().await {
             self.config = previous_config;
@@ -1733,7 +1693,7 @@ impl DesktopCore {
 
         if identity_replaced || requested_user_project.is_some() {
             self.reconcile_authorized_projects(
-                &identity,
+                &runner_identity,
                 &runner_client_id,
                 requested_user_project.as_deref(),
                 identity_replaced,
@@ -1767,7 +1727,7 @@ impl DesktopCore {
 
     async fn reconcile_authorized_projects(
         &mut self,
-        anchor_identity: &ProjectRuntimeIdentity,
+        runner_identity: &RunnerRuntimeIdentity,
         runner_client_id: &str,
         requested_user_project: Option<&str>,
         authority_rebuilt_from_anchor: bool,
@@ -1823,7 +1783,12 @@ impl DesktopCore {
             };
             let activated = self
                 .adapter
-                .activate_project(anchor_identity, runner_client_id, &project, cancellation)
+                .activate_project_for_runner(
+                    runner_identity,
+                    runner_client_id,
+                    &project,
+                    cancellation,
+                )
                 .await?;
             self.wait_for_project(&activated, cancellation).await?;
             let mut committed = project;
@@ -3245,6 +3210,34 @@ fn stored_runner_client_id(config: &StoredDesktopConfig) -> Option<String> {
         .map(str::to_string)
 }
 
+fn local_runtime_requires_zero_root_reenrollment(config: &StoredDesktopConfig) -> bool {
+    let local_full = config.topology.as_ref().is_some_and(|topology| {
+        topology.experience == Experience::Full && matches!(topology.server, ServerTopology::Local)
+    });
+    if !local_full {
+        return false;
+    }
+    // Pre-zero-root Local builds stored the internal runtime anchor as a real
+    // runtime Project and persisted its ids in StoredRuntime. Force exactly one
+    // managed re-enrollment so that stale anchor authority is not reused.
+    config.runtime_anchor.is_none()
+        || config
+            .runtime_anchor
+            .as_ref()
+            .and_then(|anchor| anchor.runtime_project_id.as_deref())
+            .is_some_and(|value| !value.trim().is_empty())
+        || config.runtime.as_ref().is_some_and(|runtime| {
+            runtime
+                .project_id
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+                || runtime
+                    .runtime_project_id
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
 fn runner_identity_from_config(config: &StoredDesktopConfig) -> Option<RunnerRuntimeIdentity> {
     let runtime = config.runtime.as_ref()?;
     let runner_config = runtime.runner_config.clone()?;
@@ -3286,6 +3279,7 @@ fn customer_project_identity_from_config(
     })
 }
 
+#[cfg(test)]
 fn identity_from_config(config: &StoredDesktopConfig) -> Option<ProjectRuntimeIdentity> {
     let runtime = config.runtime.as_ref()?;
     let project = runtime_identity_project(config)?;
@@ -3975,7 +3969,7 @@ mod tests {
     }
 
     #[test]
-    fn local_runtime_identity_uses_internal_anchor_not_customer_authorized_project() {
+    fn local_runtime_anchor_is_metadata_only_and_customer_authority_stays_in_projects() {
         let mut config = StoredDesktopConfig::default();
         config.topology = Some(RuntimeTopology {
             experience: Experience::Full,
@@ -3988,23 +3982,31 @@ mod tests {
             path: r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor".to_string(),
             allowed_root: r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor".to_string(),
             is_git_repository: false,
-            runtime_project_id: Some("agent:desktop:internal".to_string()),
+            runtime_project_id: None,
         });
-        config.project = Some(ProjectSelection {
+        config.project = None;
+        config.projects = vec![ProjectSelection {
             path: r"D:\customer".to_string(),
             allowed_root: r"D:\customer".to_string(),
             is_git_repository: true,
             runtime_project_id: Some("agent:desktop:customer".to_string()),
-        });
-        config.projects = vec![config.project.clone().expect("customer project")];
+        }];
 
+        let anchor = runtime_identity_project(&config).expect("runtime anchor metadata");
         assert_eq!(
-            runtime_identity_project(&config)
-                .expect("runtime anchor")
-                .path,
+            anchor.path,
             r"C:\Users\test\AppData\Local\CodexLink\runtime-anchor"
         );
+        assert!(anchor.runtime_project_id.is_none());
         assert_eq!(projects_snapshot(&config)[0].path, r"D:\customer");
+        assert!(!local_runtime_requires_zero_root_reenrollment(&config));
+
+        config
+            .runtime_anchor
+            .as_mut()
+            .expect("runtime anchor")
+            .runtime_project_id = Some("agent:desktop:legacy-internal".to_string());
+        assert!(local_runtime_requires_zero_root_reenrollment(&config));
     }
 
     #[test]
@@ -4092,24 +4094,25 @@ mod tests {
 
         let mut core = DesktopCore::new(data_dir.clone(), resource_dir).unwrap();
         core.snapshot.readiness.runtime_ready = true;
-        core.config.project = Some(ProjectSelection {
+        core.config.projects = vec![ProjectSelection {
             path: data_dir.join("project-b").to_string_lossy().to_string(),
             allowed_root: data_dir.to_string_lossy().to_string(),
             is_git_repository: false,
             runtime_project_id: Some("agent:desktop:project-b".to_string()),
-        });
+        }];
+        core.config.project = None;
         core.config.runtime = Some(StoredRuntime {
             server_url: "http://127.0.0.1:8080".to_string(),
             server_env_file: None,
             runner_config: Some(runner_config),
             user_token_file: Some(user_token_file),
             runner_client_id: Some("desktop".to_string()),
-            project_id: Some("project-b".to_string()),
-            runtime_project_id: Some("agent:desktop:project-b".to_string()),
+            project_id: None,
+            runtime_project_id: None,
         });
 
-        let current_identity =
-            identity_from_config(&core.config).expect("current project identity");
+        let current_identity = customer_project_identity_from_config(&core.config)
+            .expect("current customer project identity");
         let mut stale_identity = current_identity.clone();
         stale_identity.project_id = "project-a".to_string();
         stale_identity.runtime_project_id = "agent:desktop:project-a".to_string();

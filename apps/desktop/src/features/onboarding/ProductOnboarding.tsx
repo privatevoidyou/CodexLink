@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import brandIcon from "../../assets/brand.png";
+import { ChatGptAppTutorials, TunnelCredentialTutorials } from "./TutorialGallery";
 import { useLocale } from "../../i18n/locale";
 import { desktopErrorPresentation, normalizeDesktopError } from "../../i18n/presentation";
 import { desktopApi, type ProductLinkTarget } from "../../lib/desktop-api";
@@ -150,6 +151,11 @@ export function ProductOnboarding({
               </div>
             </div>
             <p className="onboarding-security-note">{t("onboarding.credentialStorage")}</p>
+            <details className="onboarding-details tutorial-details">
+              <summary>{t("onboarding.credentialGuide")}</summary>
+              <p>{t("onboarding.tutorialPreviewHint")}</p>
+              <TunnelCredentialTutorials />
+            </details>
             {error && (
               <div className="error-card" role="alert">
                 <strong>{presentation?.title}</strong>
@@ -184,6 +190,8 @@ export function ProductOnboarding({
             <details className="onboarding-details">
               <summary>{t("onboarding.detailedGuide")}</summary>
               <p>{t("onboarding.detailIntro")}</p>
+              <p className="tutorial-preview-hint">{t("onboarding.tutorialPreviewHint")}</p>
+              <ChatGptAppTutorials />
               <ol>
                 <li>{t("onboarding.detail1")}</li>
                 <li>{t("onboarding.detail2")}</li>

@@ -137,6 +137,15 @@ const projectErrors = new Set([
   "project_not_directory",
   "project_not_loaded",
 ]);
+const projectRemovalErrors = new Set([
+  "project_removal_capability_unavailable",
+  "project_removal_restart_required",
+  "project_removal_invalid_config",
+  "project_removal_config_conflict",
+  "project_removal_reconcile_required",
+  "project_removal_still_authorized_by_parent",
+  "project_removal_failed",
+]);
 const enrollmentErrors = new Set([
   "webcodex_command_failed",
   "webcodex_command_start_failed",
@@ -160,10 +169,12 @@ const processErrors = new Set([
 export function desktopErrorPresentation(error: DesktopError, t: Translate): ErrorPresentation {
   if (error.code === "tunnel_config_invalid") return { title: t("error.tunnelTitle"), action: t("tunnelConfig.invalidInput") };
   if (error.code === "tunnel_config_save_failed") return { title: t("error.fallbackTitle"), action: t("tunnelConfig.saveFailed") };
+  if (error.code === "tunnel_proxy_unavailable") return { title: t("error.tunnelNetworkTitle"), action: t("error.tunnelNetworkAction") };
   if (binaryErrors.has(error.code)) return { title: t("error.binaryTitle"), action: t("error.binaryAction") };
   if (serverErrors.has(error.code) || error.code === "server_url_invalid") return { title: t("error.serverTitle"), action: t("error.serverAction") };
   if (error.code === "runtime_not_ready") return { title: t("error.runtimeTitle"), action: t("error.runtimeAction") };
   if (runnerErrors.has(error.code)) return { title: t("error.runnerTitle"), action: t("error.runnerAction") };
+  if (projectRemovalErrors.has(error.code)) return { title: t("error.projectRemovalTitle"), action: t("error.projectRemovalAction") };
   if (projectErrors.has(error.code)) return { title: t("error.projectTitle"), action: t("error.projectAction") };
   if (error.code === "pairing_code_invalid") return { title: t("error.pairingTitle"), action: t("error.pairingAction") };
   if (enrollmentErrors.has(error.code)) return { title: t("error.enrollmentTitle"), action: t("error.enrollmentAction") };

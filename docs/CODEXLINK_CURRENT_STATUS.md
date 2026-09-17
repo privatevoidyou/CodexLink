@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。下一步直接冻结 v1 RC，并进入朋友 clean-machine 全流程、截图教程与最终发布验收。**
+> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。朋友真机采集的 16 张图文教程已内置到 onboarding，以缩略图 + 点击放大预览提供，支持点击遮罩 / 关闭按钮 / Esc 关闭。下一步冻结 v1 RC，并进入 clean-machine 全流程与最终发布验收。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -136,17 +136,20 @@ Deployment Center / 商业下载 Gate 仍未作为 CodexLink repo 内的完整 M
 
 前端已经为“运行一段时间后 Tunnel 再掉线”的场景增加回归测试；真实用户长时间运行中的断线自愈仍继续观察，发现问题再修。
 
+**V1 RC 网络提示已收敛（2026-09-17 外部真机反馈）：**当用户所在网络需要代理、但代理未开启而导致 OpenAI control plane 不可达时，Secure Link 仍会按预期 fail closed；`tunnel_proxy_unavailable` 现在单独映射为“无法连接 OpenAI”，直接提示启动用户平时使用的代理，或前往“设置 → OpenAI Tunnel 网络”选择可用代理/直接连接后重试。实现不猜固定代理端口、不自动开启第三方代理，也不把网络不可达误报成 Tunnel 凭据错误。
+
 ## 6. Project authority
 
 当前项目模型已经从历史的单 `project` 产品心智迁移为多授权路径：
 
-- `projects[]` 是用户可见 authority 集合；
-- 旧 `project` 仅保留必要的向后兼容/内部 runtime state；
+- `projects[]` 是用户可见 authority 集合，也是 Local Full Runtime 唯一的 customer project authority 来源；
+- Local Full Runtime 以 zero-root Runner enrollment 建立内部运行身份；`runtime_anchor` 只保留 Desktop 恢复元数据，不注册 Project、不进入 `allowed_roots`，旧版本留下的 anchor Project identity 会触发一次受控重注册并重放真实 `projects[]`；
+- 旧 `project` 仅保留 Remote/向后兼容所需的状态，不再作为 Local internal anchor 的权限载体；
 - `project activate` 可以只增加授权，不要求切换 Runtime identity；
 - 新增 `project remove` 用于精确撤销 authority；
 - 若一个待移除子目录仍被更宽的父授权 root 覆盖，必须拒绝“假撤权”，提示先处理父授权；
 - 删除最后一个授权路径不能留下一个隐藏、仍可被 ChatGPT 使用的用户权限 root；
-- internal runtime anchor 不属于用户项目列表。
+- internal runtime anchor 不属于用户项目列表，也不能出现在 ChatGPT 可读取的 Project inventory。
 
 ## 7. Security boundary
 
@@ -191,9 +194,9 @@ CodexLink Desktop
 整改 + onboarding 收敛阶段已实际取得的主要自动化证据：
 
 - Frontend TypeScript typecheck：通过；
-- 最新 onboarding 测试线 Frontend 全部 Vitest：`67/67`，并通过 form-control CSS contract、TypeScript typecheck 与 production build；
+- 最新 onboarding 测试线 Frontend 全部 Vitest：`70/70`，其中包含教程缩略图/lightbox、OpenAI 网络提示和 Project remove 错误分类回归；同时通过 form-control CSS contract、TypeScript typecheck 与 production build；
 - Frontend production build：通过；
-- 最近一次完整 Desktop Rust suite：`124 passed / 0 failed / 5 ignored`；后续 onboarding 文案/前端小修未扩大 Rust 状态机；
+- 最近一次完整 Desktop Rust suite：`124 passed / 0 failed / 5 ignored`；Local zero-root runtime-anchor / ChatGPT activity identity 调整已纳入该轮验证；
 - `webcodex-runner-config`：`31/31`；
 - `webcodex-cli --lib`：`318/318`，其中包含 Windows credential DACL overwrite regression；
 - P1 Destructive Guard focused：`7/7`；`webcodex-core` structured process encoded/shell-command-mode regression：`1/1`；tool contracts：`95/95`；
