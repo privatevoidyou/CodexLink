@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。朋友真机采集的 16 张图文教程已内置到 onboarding，以缩略图 + 点击放大预览提供，支持点击遮罩 / 关闭按钮 / Esc 关闭。下一步冻结 v1 RC，并进入 clean-machine 全流程与最终发布验收。**
+> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。朋友真机采集的 18 张图文教程已内置到 onboarding，以缩略图 + 点击放大预览提供，支持点击遮罩 / 关闭按钮 / Esc 关闭。Windows v1 客户安装树的 bundled runtime 已统一为 `CodexLink Core` 外层品牌。下一步进入最终安全/破解面审计、clean-machine RC 全流程与正式发布验收。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -11,11 +11,11 @@
 - 安全恢复锚点：`5ff6d8fda07e5172f272e07b8b4b9bdd74ad0bb7` — `CodexLink: checkpoint pre-scale-test hardening`；不得改写历史。
 - 五项整改与 D.1 lifecycle 收口已经形成 `d98eeb8b` → `fca59435` → `ede713a0` → `112d08cc` → `31ef8186`；其中 `31ef8186` 已推送到 `origin/codexlink-rebuild`，并作为当前远端安全基线。
 - 五项整改的独立审计范围仍固定为 `5ff6d8fd → 48f9af16`；D.1 saved-Remote Runner replacement 与 failure rollback 另行定点复审并通过，不重新打开整改范围。
-- 当前首发产品/测试源码 checkpoint 在远端基线之上继续形成 `b818a4ff`（v1 first-use onboarding）→ `62703c44`（preserve explicit zero-root runner policy）→ `8d5a16aa`（tighten first-use onboarding flow）。`8d5a16aa` 是当前测试安装包对应的产品源码；后续 docs-only checkpoint 可以继续向前而不改变该测试包 source identity。这些首发收敛提交暂未 push，等待最后一轮用户反馈与 v1 RC 冻结。
-- 当前完整测试安装包已经使用同源 `8d5a16aa` runtime 构建；测试 artifact 为 `CodexLink_0.4.1_8d5a16aab50a_onboardingfix_x64-setup.exe`，SHA256 `B831FE427C04697584DA4DC9E25DBEAFC3D18F216D5CD68A6F5FA62ED30F1A59`。它仍是内部测试包，不是最终 v1 release artifact。
+- 当前首发产品/测试源码在远端安全基线之上继续形成 `b818a4ff` → `62703c44` → `8d5a16aa` → `7788c6fe` → `042e0c2b` → `d1c23c8a` → `e3c970ff`。其中 `e3c970ffd666ce6b4b8971690d1bbb935c55a0f0` 是当前 Windows v1 代码 checkpoint：已包含 zero-root Local authority、最终 onboarding/错误分类、18 张图文教程，以及客户安装树的 `CodexLink Core` 品牌映射。这些首发收敛提交暂未 push，等待最终审计与 RC 冻结。
+- 当前最后一个**已生成的完整测试安装包**仍是 `d1c23c8a` 对应的 `CodexLink_0.4.1_d1c23c8affec_handsontest_x64-setup.exe`，SHA256 `5F4C7B2EEA274B9810E873F706F7F398FBB5485BA9764A525CDB075BFE6170EA`。它早于 `e3c970ff` 的 CodexLink Core 品牌收口，因此只保留为上一轮 hands-on evidence；最终审计后必须从新的精确源码 checkpoint 重建 RC。
 - 历史 `ae858f...` runtime 与 BrandFix installer 继续只作为整改前证据，不再代表当前测试线。
 
-历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；当前 v1 dogfood 测试包 runtime 已经是 CodexLink fork 上的 `8d5a16aa` 构建，历史 `ae858f...` 只保留为整改前证据，三者不能混写成同一个 source identity。
+历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；上一轮完整 hands-on installer 的 bundled Engine 来自 `d1c23c8a`，当前源码已继续推进到 `e3c970ff`，历史 `ae858f...` 只保留为整改前证据。上游恢复基线、历史整改证据、已生成测试 installer 与当前源码 checkpoint 必须分别记录，不能混写成同一个 source identity。
 
 ## 2. 当前产品架构
 
@@ -35,10 +35,10 @@ CodexLink Compatibility + Safety Layer
   ├─ Tunnel routing / secret storage
   └─ Destructive Guard / bounded delete
             ↓
-Bundled WebCodex 0.4.1 Runtime
-  ├─ CLI
-  ├─ Server
-  └─ Runner
+CodexLink Core (bundled Engine 0.4.1)
+  ├─ Core CLI
+  ├─ Core Server
+  └─ Core Runner
 ```
 
 ### 2.1 Internal runtime anchor 与用户授权路径已经分离
@@ -56,7 +56,7 @@ Bundled WebCodex 0.4.1 Runtime
 
 ### 2.2 v1 产品表面冻结为单一 Local 拓扑
 
-v1 正式用户只走：`本机 CodexLink Engine/Runner → OpenAI Secure Tunnel → ChatGPT`。普通界面不再提供 topology chooser，也不再显示 `连接现有 Server`、`快速共享项目` 或 `其他配置方式`。
+v1 正式用户只走：`本机 CodexLink Core → OpenAI Secure Tunnel → ChatGPT`。普通界面不再提供 topology chooser，也不再显示 `连接现有 Server`、`快速共享项目` 或 `其他配置方式`。
 
 Existing Server / Remote enrollment 与 Quick Share 的底层实现**不删除**：前者已经完成 saved profile、transactional topology、0-root、真实 readiness 与 D.1 Runner replacement/rollback 源码整改，后者也继续留在代码和测试中；但两者从 v1 customer surface、首发教程与 release gate 移到 hidden experimental / Post-v1。后续只有真实用户需求证明值得产品化时，才重新开放高级入口并单独做同源 Server / Remote lifecycle 验收。
 
@@ -113,7 +113,19 @@ Windows Explorer 图标资源已经证明最终 EXE 内嵌图标与当前蓝色 
 
 `license.json` 里的签名字段 `product: "webcodex-deployment"` 当前**故意保留**。它属于服务端签名 payload / 协议兼容字段，不能只在客户端改名，否则现有签名立即失效。未来若要改成 CodexLink，需要授权服务签发端与客户端验证端一起做协议版本迁移。
 
-同理，`webcodex.exe`、`webcodex-server.exe`、`webcodex-runner.exe`、`WebCodexAdapter` 等技术名属于 Engine 内部兼容面，不等同于 customer-facing 品牌泄漏。
+Windows v1 客户安装目录不再暴露 `webcodex-runtime` 或 `webcodex*.exe` 文件名；正式 bundle 映射为：
+
+```text
+<CodexLink install>\codexlink-core\
+  codexlink-core.exe
+  codexlink-core-server.exe
+  codexlink-core-runner.exe
+  tools\tunnel-client.exe
+```
+
+源码内部仍保留 `webcodex*` Cargo package/crate、`WEBCODEX_*` 环境变量、`WebCodexAdapter` 以及构建阶段 `target\dogfood\webcodex*.exe` 等兼容标识。Windows 打包脚本先验证这些同源 Engine bytes 的版本 / commit / `dirty=false`，再按上面的 CodexLink Core 文件名做字节不变的复制映射；这避免在 v1 最后一公里引入 6000+ 处全仓 fork rename。三个 branded Core exe 的内部 `--version` identity 目前仍使用 Engine 的兼容名称，它属于诊断/构建协议，不是 Explorer 文件名。
+
+最终 Windows RC 的品牌 Gate 以**干净安装**为准：新 installer 不应生成任何 customer-visible `webcodex` 文件/目录名。为避免在安装器里新增不必要的递归删除面，不通过 `RMDir /r` 自动清理内部测试时期的旧 `webcodex-runtime`；测试旧包升级时应先正常卸载旧测试包，再验证 clean install。
 
 ### 4.3 License Operator
 
