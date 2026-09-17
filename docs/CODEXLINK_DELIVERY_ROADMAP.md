@@ -1,6 +1,6 @@
 # CodexLink Delivery Roadmap
 
-> 状态：**2026-09-17 v1 Release Convergence 路线图；五项整改 + D.1 已复审通过，两步 onboarding 已进入真机反馈。v1 正式产品表面冻结为 Local + OpenAI Tunnel + ChatGPT，Existing Server、Quick Share 与“其他配置方式”移出首版 UI / release gate，底层实现保留。当前只做最后一个已知 bug、v1 surface freeze、Local-only RC/clean lifecycle、真实 P0/P1 与 License Operator/分发资料收尾，然后发布。**
+> 状态：**2026-09-17 v1 Release Convergence 路线图；五项整改 + D.1 已复审通过，两步 onboarding、首页状态化主动作与 Local-only surface freeze 已实现并通过前端回归。Existing Server、Quick Share 与“其他配置方式”已退出正式产品路径，底层实现保留。下一步直接冻结 Local-only v1 RC，跑朋友 clean-machine 全流程并采集教程截图；此后只修真实 P0/P1，再做销售资料收尾并发布。**
 >
 > 目标：把 CodexLink 从 WebCodex 0.4.1 Engine 基线恢复成可商业交付、可维护、可回滚、可长期跟随上游 Engine 的 Windows 产品。
 >
@@ -247,7 +247,7 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 | P0 | Batch H.0：本地 License Operator | **USER VERIFIED / CHECKPOINTED** | `4b4043ca`；Windows GUI 已完成真实一键签发体验验收；管理员 SSH key 只留本机；私钥留在服务器；签发不自动重试 |
 | P0 | 五项整改 + D.1 独立复审 | **DONE** | 五项 `5ff6d8fd → 48f9af16` + D.1 定点复审通过；无已知 release-blocking security P0/P1 |
 | P0 | 首次两步 onboarding | **CHECKPOINTED / USER VERIFY** | `b818a4ff` + `8d5a16aa`；激活后 Tunnel/Key → ChatGPT App，两页可滚动/可重开，saved credentials 可直接继续，step 1 skip 只跳当前页 |
-| P0 | v1 surface freeze | **NEXT** | 正式 UI 移除/隐藏 Existing Server、Quick Share、topology chooser、`其他配置方式`；底层代码不删除 |
+| P0 | v1 surface freeze | **DONE / VERIFY IN RC** | 正式 App 已移除 Existing Server、Quick Share、topology chooser、`其他配置方式`；底层代码保留；首页主按钮按恢复/启动/添加项目/查看项目状态切换 |
 | P0 | v1 Local-only RC | **NEXT** | Desktop + bundled CodexLink Engine 同源；Local Engine/Runner + OpenAI Tunnel + ChatGPT 主链通过，Remote Server 不再是首发 Gate |
 | P0 | Windows clean lifecycle | **NEXT** | install/activate/onboarding/use → restart → uninstall/reinstall；设备资格与连接恢复符合合同；至少一台 clean machine |
 | P1 | License Operator + 首发资料轻量收尾 | **LAST BEFORE RELEASE** | 只改善真实销售所需复制/提示/防误签发；百度/夸克包附 installer/version/SHA/教程 |

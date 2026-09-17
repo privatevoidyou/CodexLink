@@ -1,6 +1,6 @@
 # CodexLink First-Release Product Shell & Setup UX
 
-> 状态：**2026-09-17 v1 Product Shell 已进入最终 surface freeze：两步 onboarding 已实现并完成第一轮真机反馈；正式用户界面只保留 Local + OpenAI Tunnel + ChatGPT。Existing Server、Quick Share、模式选择页与“其他配置方式”从 v1 UI 移出，底层能力保留为 hidden experimental / Post-v1。**
+> 状态：**2026-09-17 v1 Product Shell 的 surface freeze 已实现：两步 onboarding 与首页状态化主动作已通过前端回归；正式用户界面只保留 Local + OpenAI Tunnel + ChatGPT。Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层能力保留为 hidden experimental / Post-v1。下一步直接进入 RC / clean-machine 验收。**
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
@@ -384,6 +384,7 @@ Smoke 2 之后的多轮真机反馈已落实到当前未提交 worktree：
 - 激活成功后的首次用户进入两步 onboarding，而不是直接首页；第 1 步配置 Tunnel/Restricted Runtime Key，第 2 步引导 ChatGPT App；两个步骤都允许已配置用户跳过；
 - onboarding dismissed/completed 与实际 Runtime/ChatGPT readiness 分离，设置页可重新打开教程；
 - 首页视觉心智恢复为 RC5 的“一切就绪 + 项目卡 + 连接链路”；
+- 首页主卡蓝色主按钮必须跟随真实状态：连接需要修复时显示恢复连接；受管运行环境已停止时显示启动；Runtime 健康但 0 授权项目时显示添加项目；Runtime 健康且已有项目时显示查看项目；所有恢复/启动动作复用既有受管恢复路径，不另造并行状态机；
 - 项目页恢复卡片式项目管理；
 - 连接页恢复步骤链 + 当前状态；
 - 设置页可保存 Tunnel ID + DPAPI Runtime Key；

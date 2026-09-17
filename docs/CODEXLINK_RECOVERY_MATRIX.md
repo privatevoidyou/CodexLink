@@ -339,8 +339,8 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 ### Batch I — v1 Surface Freeze + Local-only RC
 
 - [x] 五项整改与 D.1 独立复审完成；没有已知 release-blocking security P0/P1；
-- [ ] 收口用户接下来反馈的最后一个已知 bug，只补直接 regression；
-- [ ] 正式 UI 隐藏 Existing Server、Quick Share、模式选择页和 `其他配置方式`；底层实现不删除；
+- [x] 最后一轮用户体验反馈已收口：首页显著主按钮按真实状态切换为恢复连接 / 启动 / 添加项目 / 查看项目，并复用既有安全恢复路径；
+- [x] 正式 App 路径隐藏 Existing Server、Quick Share、模式选择页、onboarding 高级连接入口和 `其他配置方式`；底层实现与 focused tests 保留；
 - [ ] unique new RC，Desktop + bundled CodexLink Engine exact source/release identity 对齐；
 - [ ] installer SHA + release metadata；
 - [ ] Local 主链跑 activation/onboarding/0-root/project add-remove/ChatGPT/read-write/normal execution/Desktop+Windows restart/Tunnel recovery；

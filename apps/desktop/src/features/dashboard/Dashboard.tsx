@@ -13,7 +13,6 @@ interface DashboardProps {
   onRefresh: () => void;
   onResumeRuntime: () => void;
   onChooseProject: () => void;
-  onChangeSetup: () => void;
   onNavigate: (page: "projects" | "connection" | "settings") => void;
   onStopRuntime: () => void;
 }
@@ -24,7 +23,6 @@ export function Dashboard({
   onRefresh,
   onResumeRuntime,
   onChooseProject,
-  onChangeSetup,
   onNavigate,
   onStopRuntime,
 }: DashboardProps) {
@@ -47,7 +45,7 @@ export function Dashboard({
     ? ["ready", "degraded"].includes(state.readiness.server) && state.readiness.runner === "ready"
     : runtimeReady && tunnelConfigured && localSecureLinkReady;
   const allSet = authorizedProjects.length > 0 && chatgptAccessible;
-  const canResumeRuntime = Boolean(state.topology) && !runtimeReady;
+  const canResumeRuntime = !runtimeReady;
   const needsConnectionRepair = Boolean(
     state.runtime_autostart
       && state.topology?.experience === "full"
@@ -113,20 +111,28 @@ export function Dashboard({
         </div>
         <div className="project-card-actions">
           <button
-            className={needsConnectionRepair ? "primary-button" : "secondary-button"}
-            onClick={needsConnectionRepair
+            className="primary-button"
+            onClick={needsConnectionRepair || canResumeRuntime
               ? onResumeRuntime
               : authorizedProjects.length === 0
                 ? onChooseProject
                 : () => onNavigate("projects")}
             disabled={operationBusy}
-            data-webcodex-action={needsConnectionRepair ? "repair-managed-connection" : undefined}
+            data-webcodex-action={needsConnectionRepair
+              ? "repair-managed-connection"
+              : canResumeRuntime
+                ? "resume-managed-runtime"
+                : authorizedProjects.length === 0
+                  ? "add-authorized-project"
+                  : "view-authorized-projects"}
           >
             {needsConnectionRepair
               ? t("home.repairConnection")
-              : authorizedProjects.length === 0
-                ? t("project.add")
-                : t("home.viewProject")}
+              : canResumeRuntime
+                ? t("home.resumeRuntime")
+                : authorizedProjects.length === 0
+                  ? t("project.add")
+                  : t("home.viewProject")}
           </button>
           <button className="secondary-button" onClick={() => onNavigate("connection")} disabled={operationBusy}>{t("home.connectionDetails")}</button>
         </div>
@@ -155,11 +161,8 @@ export function Dashboard({
         <section className="home-action-card" aria-labelledby="home-next-title">
           <h2 id="home-next-title">{t("home.nextActions")}</h2>
           <div className="home-action-list">
-            {authorizedProjects.length === 0 && <HomeActionButton icon="project" label={t("project.add")} description={t("home.addProjectHint")} onClick={onChooseProject} />}
-            {needsConnectionRepair
-              ? <HomeActionButton icon="runtime" label={t("home.repairConnection")} description={t("home.repairConnectionHint")} onClick={onResumeRuntime} />
-              : canResumeRuntime && <HomeActionButton icon="runtime" label={t("home.resumeRuntime")} description={t("home.resumeRuntimeHint")} onClick={onResumeRuntime} />}
-            {authorizedProjects.length > 0 && <HomeActionButton icon="project" label={t("home.viewProject")} description={t("home.viewProjectHint")} onClick={() => onNavigate("projects")} />}
+            {runtimeReady && authorizedProjects.length === 0 && <HomeActionButton icon="project" label={t("project.add")} description={t("home.addProjectHint")} onClick={onChooseProject} />}
+            {runtimeReady && authorizedProjects.length > 0 && <HomeActionButton icon="project" label={t("home.viewProject")} description={t("home.viewProjectHint")} onClick={() => onNavigate("projects")} />}
             <HomeActionButton icon="connection" label={t("home.manageConnection")} description={t("home.manageConnectionHint")} onClick={() => onNavigate("connection")} />
           </div>
         </section>
@@ -176,7 +179,6 @@ export function Dashboard({
       <div className="runtime-ownership-row">
         <p>{t("home.runtimeOwnership")}</p>
         <div className="runtime-action-buttons">
-          <button className="secondary-button" onClick={onChangeSetup} disabled={operationBusy} data-webcodex-action="change-runtime-setup">{t("home.otherSetup")}</button>
           <button className="secondary-button" onClick={onStopRuntime} disabled={operationBusy || !runtimeReady} data-webcodex-action="stop-runtime">{t("home.stopRuntime")}</button>
         </div>
       </div>

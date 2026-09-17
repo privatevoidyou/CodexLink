@@ -1365,10 +1365,9 @@ input:not([type="radio"]):not([type="checkbox"]), select {
 .onboarding-step-row > i { height: 1px; background: #e2e7ef; }
 .onboarding-lede { margin-bottom: 22px; }
 .onboarding-credentials { padding: 20px; border: 1px solid #dce3ed; border-radius: 15px; background: #fbfcff; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.onboarding-link, .onboarding-other-setup { width: fit-content; border: 0; background: transparent; color: #3152db; padding: 2px 0; cursor: pointer; font-size: 12px; font-weight: 650; text-align: left; }
-.onboarding-link:hover, .onboarding-other-setup:hover { text-decoration: underline; }
+.onboarding-link { width: fit-content; border: 0; background: transparent; color: #3152db; padding: 2px 0; cursor: pointer; font-size: 12px; font-weight: 650; text-align: left; }
+.onboarding-link:hover { text-decoration: underline; }
 .onboarding-security-note { margin: 12px 0 0; color: #8490a4; font-size: 11px; line-height: 1.55; }
-.onboarding-other-setup { margin-top: 15px; color: #68758c; }
 .onboarding-actions { margin-top: 26px; padding-top: 18px; border-top: 1px solid #e7ebf2; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .onboarding-actions .primary-button { min-width: 120px; background: #3f5ee8; border-color: #3f5ee8; }
 .onboarding-actions .primary-button:hover:not(:disabled) { background: #304bc4; }

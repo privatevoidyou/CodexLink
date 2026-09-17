@@ -8,7 +8,6 @@ import type {
   DesktopError,
   DesktopState,
 } from "./models/topology";
-import { FirstRun } from "./features/onboarding/FirstRun";
 import { ProductOnboarding, type ProductOnboardingStep } from "./features/onboarding/ProductOnboarding";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { ProjectsPanel } from "./features/projects/ProjectsPanel";
@@ -61,8 +60,6 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<DesktopError | null>(null);
   const [cancelSubmittingId, setCancelSubmittingId] = useState<string | null>(null);
-  const [showSetup, setShowSetup] = useState(false);
-  const [chooseSetupMode, setChooseSetupMode] = useState(false);
   const [productOnboarding, setProductOnboarding] = useState<ProductOnboardingSession | null>(storedRequiredOnboarding);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [windowFocused, setWindowFocused] = useState(true);
@@ -103,15 +100,13 @@ export default function App() {
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
     mainRef.current?.scrollTo?.({ top: 0 });
-  }, [navigation, showSetup, productOnboarding?.step]);
+  }, [navigation, productOnboarding?.step]);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen<unknown>("desktop:navigate", (event) => {
       if (event.payload !== "activity" && event.payload !== "settings") return;
-      setShowSetup(false);
-      setChooseSetupMode(false);
       setNavigation(event.payload);
     }).then((stopListening) => {
       if (disposed) stopListening();
@@ -138,12 +133,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", navigateWithKeyboard);
   }, []);
 
-  const openSetup = () => {
-    setChooseSetupMode(true);
-    setShowSetup(true);
-    setNavigation("home");
-  };
-
   const commitState = useCallback((next: DesktopState) => {
     stateVersionRef.current += 1;
     setState(next);
@@ -151,8 +140,6 @@ export default function App() {
 
   const commitActivatedState = useCallback((next: DesktopState) => {
     commitState(next);
-    setShowSetup(false);
-    setChooseSetupMode(false);
     const step: ProductOnboardingStep = "tunnel";
     persistRequiredOnboarding(step);
     setProductOnboarding({ step, required: true });
@@ -170,22 +157,12 @@ export default function App() {
   const completeProductOnboarding = () => {
     if (productOnboarding?.required) persistRequiredOnboarding("complete");
     setProductOnboarding(null);
-    setShowSetup(false);
-    setChooseSetupMode(false);
     setNavigation("home");
   };
 
   const openProductOnboardingFromSettings = () => {
-    setShowSetup(false);
-    setChooseSetupMode(false);
     setNavigation("home");
     setProductOnboarding({ step: "tunnel", required: false });
-  };
-
-  const openOtherSetupFromOnboarding = () => {
-    if (productOnboarding?.required) persistRequiredOnboarding("complete");
-    setProductOnboarding(null);
-    openSetup();
   };
 
   const commitChatgptActivity = useCallback((next: DesktopState) => {
@@ -220,7 +197,6 @@ export default function App() {
           const next = await restoreManagedConnection();
           if (cancelled) return;
           commitState(next);
-          setShowSetup(false);
         } catch (value) {
           if (!cancelled) setError(normalizeDesktopError(value));
         } finally {
@@ -357,7 +333,6 @@ export default function App() {
         } else {
           commitState(await desktopApi.configureLocal(selection));
         }
-        setShowSetup(false);
         return;
       }
 
@@ -379,7 +354,6 @@ export default function App() {
           commitState(await desktopApi.configureLocal(selection));
         }
       }
-      setShowSetup(false);
     } catch (value) {
       setError(normalizeDesktopError(value));
     }
@@ -463,12 +437,9 @@ export default function App() {
         onState={commitState}
         onStep={advanceProductOnboarding}
         onComplete={completeProductOnboarding}
-        onOtherSetup={openOtherSetupFromOnboarding}
       />
     );
   }
-
-  const needsSetup = showSetup;
 
   return (
     <div className="app-shell">
@@ -508,11 +479,6 @@ export default function App() {
       <div className="workspace-shell">
 
         <main className="main-content" ref={mainRef} tabIndex={-1}>
-        {navigation === "home" && chooseSetupMode && state.topology && (
-          <button className="back-button" onClick={() => { setShowSetup(false); setChooseSetupMode(false); }}>
-            <span aria-hidden="true">← </span>{t("home.backToOverview")}
-          </button>
-        )}
         {state.current_operation && (
           <section
             className={`operation-status ${state.current_operation.phase}`}
@@ -549,25 +515,17 @@ export default function App() {
           </section>
         )}
         {error && <AppError error={error} />}
-        {navigation === "home" && (needsSetup ? (
-          <FirstRun
-            state={state}
-            onState={commitState}
-            chooseModeFirst={chooseSetupMode}
-            onComplete={() => { setShowSetup(false); setChooseSetupMode(false); }}
-          />
-        ) : (
+        {navigation === "home" && (
           <Dashboard
             state={state}
             refreshing={refreshing}
             onRefresh={() => void refresh()}
             onResumeRuntime={() => void resumeRuntime()}
             onChooseProject={() => void chooseLocalProject()}
-            onChangeSetup={openSetup}
             onNavigate={setNavigation}
             onStopRuntime={() => void runStateOperation(desktopApi.stopLocalRuntime)}
           />
-        ))}
+        )}
         {navigation === "projects" && (
           <ProjectsPanel
             state={state}

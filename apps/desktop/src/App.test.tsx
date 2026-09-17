@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopState } from "./models/topology";
@@ -52,6 +53,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import App from "./App";
 import { open } from "@tauri-apps/plugin-dialog";
+import { FirstRun } from "./features/onboarding/FirstRun";
 
 const readyState: DesktopState = {
   license: { status: "activated" },
@@ -200,6 +202,19 @@ function renderApp() {
   return render(
     <LocaleProvider>
       <App />
+    </LocaleProvider>,
+  );
+}
+
+function ExperimentalFirstRunHarness({ initialState }: { initialState: DesktopState }) {
+  const [state, setState] = useState(initialState);
+  return <FirstRun state={state} onState={setState} chooseModeFirst />;
+}
+
+function renderExperimentalFirstRun(state: DesktopState) {
+  return render(
+    <LocaleProvider>
+      <ExperimentalFirstRunHarness initialState={state} />
     </LocaleProvider>,
   );
 }
@@ -439,7 +454,7 @@ describe("semantic Desktop UI", () => {
     expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBeNull();
   });
 
-  it("routes the onboarding advanced link into the existing setup chooser", async () => {
+  it("keeps v1 onboarding local-only and hides advanced connection modes", async () => {
     window.localStorage.setItem("codexlink.desktop.v1.onboarding", "tunnel");
     api.getState.mockResolvedValue({
       ...readyState,
@@ -453,11 +468,11 @@ describe("semantic Desktop UI", () => {
     });
     renderApp();
     await screen.findByRole("heading", { name: "连接 ChatGPT", level: 1 });
-    fireEvent.click(screen.getByRole("button", { name: "使用其他连接方式" }));
 
-    expect(await screen.findByRole("heading", { name: "你希望如何使用这台电脑？", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
-    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("complete");
+    expect(screen.queryByRole("button", { name: "使用其他连接方式" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /连接现有 Server/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /快速共享项目/ })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem("codexlink.desktop.v1.onboarding")).toBe("tunnel");
   });
 
   it("localizes activation failures instead of showing backend English", async () => {
@@ -499,20 +514,29 @@ describe("semantic Desktop UI", () => {
     expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
   });
 
-  it("keeps a user stop consistent after refresh and offers Start", async () => {
+  it("keeps a user stop consistent and binds the prominent primary action to Start", async () => {
     const stopped = setupState();
     api.getState.mockResolvedValue(stopped);
     api.refresh.mockResolvedValue(stopped);
+    api.resumeSavedRuntime.mockResolvedValue(readyState);
     renderApp();
     await findHomeHeading();
-    expect(screen.getByRole("button", { name: /^启动/ })).toBeEnabled();
+
+    const primaryStart = document.querySelector<HTMLButtonElement>('[data-webcodex-action="resume-managed-runtime"]');
+    expect(primaryStart).not.toBeNull();
+    expect(primaryStart).toHaveClass("primary-button");
+    expect(primaryStart).toHaveTextContent("启动");
+    expect(primaryStart).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "其他配置方式" })).not.toBeInTheDocument();
     expect(screen.queryByText("当前工作区")).not.toBeInTheDocument();
-    expect(screen.queryByText(/运行环境正常/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/服务需要处理/)).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(api.refresh).toHaveBeenCalledOnce());
-    expect(screen.getByRole("button", { name: /^启动/ })).toBeEnabled();
+    expect(document.querySelector('[data-webcodex-action="resume-managed-runtime"]')).toBeInTheDocument();
     expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-webcodex-action="resume-managed-runtime"]')!);
+    await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledOnce());
   });
 
   it("shows the active Tunnel ID without exposing the Restricted Runtime Key", async () => {
@@ -810,16 +834,13 @@ describe("semantic Desktop UI", () => {
     api.observeChatgptActivity.mockResolvedValue(tunneledState);
     api.configureLocal.mockResolvedValue(tunneledState);
 
-    renderApp();
-    await findHomeHeading();
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
+    renderExperimentalFirstRun(tunneledState);
     fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     expect(screen.queryByRole("checkbox", { name: "配置完成后连接 ChatGPT" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
 
     await waitFor(() => expect(api.configureLocal).toHaveBeenCalledWith(tunneledState.project!.path));
     expect(api.startRegularTunnel).not.toHaveBeenCalled();
-    expect(await findHomeHeading()).toBeInTheDocument();
   });
 
   it("exposes exactly the four first-release navigation pages and no provider chooser", async () => {
@@ -842,6 +863,9 @@ describe("semantic Desktop UI", () => {
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
     expect(screen.getByText("运行环境就绪")).toBeInTheDocument();
     expect(screen.getByText("Tunnel 凭据已配置")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "其他配置方式" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /连接现有 Server/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /快速共享项目/ })).not.toBeInTheDocument();
   });
 
   it("marks ChatGPT accessible when the verified Secure Link is ready without requiring observed activity", async () => {
@@ -1082,12 +1106,10 @@ describe("semantic Desktop UI", () => {
         windows_powershell_available: true,
       },
     };
-    api.getState.mockResolvedValueOnce(missingPwsh).mockResolvedValueOnce(detectedPwsh);
-    renderApp();
-    await findHomeHeading();
+    api.getState.mockResolvedValue(detectedPwsh);
+    renderExperimentalFirstRun(missingPwsh);
     expect(screen.queryByText("建议安装 PowerShell 7")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     fireEvent.click(screen.getByText("诊断"));
     const guidance = screen.getByText("建议安装 PowerShell 7").closest("article");
@@ -1098,7 +1120,7 @@ describe("semantic Desktop UI", () => {
     fireEvent.click(within(guidance!).getByRole("button", { name: "打开 Microsoft 安装说明" }));
     await waitFor(() => expect(api.openPowerShellInstallGuide).toHaveBeenCalledTimes(1));
     fireEvent.click(within(guidance!).getByRole("button", { name: "重新检测" }));
-    await waitFor(() => expect(screen.queryByText("建议安装 PowerShell 7")).not.toBeInTheDocument());
+    await waitFor(() => expect(api.getState).toHaveBeenCalledTimes(1));
   });
 
   it("keeps a fresh internal-runtime bootstrap failure visible without forcing a project choice", async () => {
@@ -1117,7 +1139,11 @@ describe("semantic Desktop UI", () => {
 
     expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1);
     expect(api.configureLocal).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "其他配置方式" })).toBeEnabled();
+    const primaryStart = document.querySelector<HTMLButtonElement>('[data-webcodex-action="resume-managed-runtime"]');
+    expect(primaryStart).not.toBeNull();
+    expect(primaryStart).toHaveClass("primary-button");
+    expect(primaryStart).toHaveTextContent("启动");
+    expect(screen.queryByRole("button", { name: "其他配置方式" })).not.toBeInTheDocument();
   });
 
   it("shows an initial status failure and retries the complete fresh-start bootstrap", async () => {
@@ -1211,9 +1237,7 @@ describe("semantic Desktop UI", () => {
         next_action: "Retry project setup.",
       })
       .mockResolvedValueOnce(readyState);
-    renderApp();
-    await findHomeHeading();
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
+    renderExperimentalFirstRun(readyState);
     fireEvent.click(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ }));
     fireEvent.click(screen.getByRole("button", { name: "配置 CodexLink" }));
 
@@ -1646,17 +1670,14 @@ describe("semantic Desktop UI", () => {
       is_git_repository: true,
       runtime_project_id: null,
     };
-    api.getState.mockResolvedValue(remoteState);
     api.inspectProject.mockResolvedValue(projectB);
     api.configureRemote.mockResolvedValue({
       ...remoteState,
       project: { ...projectB, runtime_project_id: "agent:desktop:project-b" },
     });
     vi.mocked(open).mockResolvedValue(projectB.path);
-    renderApp();
-    await findHomeHeading();
+    renderExperimentalFirstRun(remoteState);
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
     expect(screen.getByText("将复用现有连接")).toBeInTheDocument();
     expect(screen.queryByLabelText("一次性登录码")).not.toBeInTheDocument();
@@ -1699,7 +1720,6 @@ describe("semantic Desktop UI", () => {
       is_git_repository: true,
       runtime_project_id: null,
     };
-    api.getState.mockResolvedValue(remoteState);
     api.inspectProject.mockResolvedValue(projectB);
     api.configureRemote
       .mockRejectedValueOnce({
@@ -1712,10 +1732,8 @@ describe("semantic Desktop UI", () => {
         project: { ...projectB, runtime_project_id: "agent:desktop:project-b" },
       });
     vi.mocked(open).mockResolvedValue(projectB.path);
-    renderApp();
-    await findHomeHeading();
+    renderExperimentalFirstRun(remoteState);
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(screen.getByRole("button", { name: /连接现有 Server/ }));
     fireEvent.click(screen.getByRole("button", { name: "更改文件夹" }));
     await waitFor(() => expect(api.inspectProject).toHaveBeenCalledWith(projectB.path));
@@ -1741,14 +1759,10 @@ describe("semantic Desktop UI", () => {
     );
   });
 
-  it("keeps Remote Server as a first-class runtime choice after local setup", async () => {
-    api.getState.mockResolvedValue(readyState);
-    renderApp();
-    await findHomeHeading();
+  it("keeps Remote Server and Quick Share only in the hidden experimental setup component", () => {
+    renderExperimentalFirstRun(readyState);
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
-
-    expect(await screen.findByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /连接现有 Server/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /在此电脑使用 CodexLink/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /快速共享项目/ })).toBeInTheDocument();
   });
@@ -1769,12 +1783,9 @@ describe("semantic Desktop UI", () => {
         next_action_kind: "add_or_reload_project",
       },
     };
-    api.getState.mockResolvedValue(zeroRootLocal);
     api.configureLocal.mockResolvedValue(zeroRootLocal);
-    renderApp();
-    await findHomeHeading();
+    renderExperimentalFirstRun(zeroRootLocal);
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-webcodex-action="choose-local-setup"]')!);
     const submit = document.querySelector<HTMLButtonElement>('[data-webcodex-action="configure-local"]')!;
     expect(submit).toBeEnabled();
@@ -1825,12 +1836,9 @@ describe("semantic Desktop UI", () => {
         next_action_kind: "add_or_reload_project",
       },
     };
-    api.getState.mockResolvedValue(localZeroRootStart);
     api.configureRemote.mockResolvedValue(remoteZeroRoot);
-    renderApp();
-    await findHomeHeading();
+    renderExperimentalFirstRun(localZeroRootStart);
 
-    fireEvent.click(screen.getByRole("button", { name: "其他配置方式" }));
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-webcodex-action="choose-remote-setup"]')!);
     fireEvent.change(document.querySelector<HTMLInputElement>('#setup-server-url')!, {
       target: { value: "https://server.example.test" },

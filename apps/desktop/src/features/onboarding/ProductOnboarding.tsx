@@ -13,7 +13,6 @@ interface ProductOnboardingProps {
   onState: (state: DesktopState) => void;
   onStep: (step: ProductOnboardingStep) => void;
   onComplete: () => void;
-  onOtherSetup: () => void;
 }
 
 export function ProductOnboarding({
@@ -22,7 +21,6 @@ export function ProductOnboarding({
   onState,
   onStep,
   onComplete,
-  onOtherSetup,
 }: ProductOnboardingProps) {
   const { t } = useLocale();
   const config = state.openai_tunnel_config;
@@ -152,9 +150,6 @@ export function ProductOnboarding({
               </div>
             </div>
             <p className="onboarding-security-note">{t("onboarding.credentialStorage")}</p>
-            <button className="onboarding-other-setup" type="button" onClick={onOtherSetup} data-webcodex-action="onboarding-other-setup">
-              {t("onboarding.otherConnection")}
-            </button>
             {error && (
               <div className="error-card" role="alert">
                 <strong>{presentation?.title}</strong>

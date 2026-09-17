@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 已实现并进入真机迭代。v1 用户表面正式冻结为 Local + OpenAI Tunnel + ChatGPT 单一路径，Existing Server、Quick Share 与“其他配置方式”从首版 UI / release gate 移出，底层实现保留为 hidden experimental / Post-v1。当前只剩最后一轮用户反馈 bug、v1 RC、Local 主链真机稳定性/安装重装验收与少量销售工具收尾。**
+> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。下一步直接冻结 v1 RC，并进入朋友 clean-machine 全流程、截图教程与最终发布验收。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -209,13 +209,15 @@ CodexLink Desktop
 
 项目已经停止横向扩功能。五项整改、D.1 与两步 onboarding 主体均已完成；v1 现在只保留会直接影响普通付费用户“安装后能否顺利用到第二天”的工作：
 
-1. **最后一轮用户反馈 bug 收口**：只处理用户当前明确复现的最后一个产品 bug，以及其直接 regression；不顺手扩范围；
-2. **v1 surface freeze**：正式 UI 移除/隐藏 Existing Server、Quick Share、`其他配置方式` 与 topology chooser；底层实现保留，不删除；
-3. **冻结同源 v1 RC**：Desktop + bundled CodexLink Engine/runtime 来自同一 exact source identity，记录 installer SHA / build metadata；v1 不要求部署同源公网 Remote Server；
-4. **Local 主链生命周期验收**：激活 → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop restart → Windows restart/登录启动 → 短暂 Tunnel/Runtime 恢复，在 Launcher 关闭时仍正常；
-5. **clean install / uninstall / reinstall Gate**：设备激活资格、Tunnel 凭据、授权项目与用户可恢复路径符合合同；至少一台真正 clean Windows 环境完成首次使用主链；
-6. **发布前 targeted 安全抽检**：对 typed authority、credential DACL、明显 destructive deny/no-child-spawn 做 disposable-root smoke；未证实极端项记录风险，不为了理论完美阻塞首发；
-7. **License Operator 轻量收尾**：只改善真实销售所需复制、提示、防误重复签发体验，不扩成 SaaS/CRM/完整后台。
+已完成的首发收敛前置项：五项整改 + D.1、两步 onboarding、首页主动作状态化、以及 Local-only v1 surface freeze。
+
+当前剩余硬 Gate：
+
+1. **冻结同源 v1 RC**：Desktop + bundled CodexLink Engine/runtime 来自同一 exact source identity，记录 installer SHA / build metadata；v1 不要求部署同源公网 Remote Server；
+2. **Local 主链生命周期验收**：激活 → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop restart → Windows restart/登录启动 → 短暂 Tunnel/Runtime 恢复，在 Launcher 关闭时仍正常；
+3. **clean install / uninstall / reinstall Gate**：设备激活资格、Tunnel 凭据、授权项目与用户可恢复路径符合合同；至少一台真正 clean Windows 环境完成首次使用主链；
+4. **发布前 targeted 安全抽检**：对 typed authority、credential DACL、明显 destructive deny/no-child-spawn 做 disposable-root smoke；未证实极端项记录风险，不为了理论完美阻塞首发；
+5. **License Operator / 图文资料轻量收尾**：只改善真实销售所需体验，并补齐朋友真机过程中采集的截图教程，不扩成 SaaS/CRM/完整后台。
 
 以下不再作为首个商业版本的硬 Gate：Existing Server / Remote enrollment 产品化、Quick Share、完整 Deployment Center、自动更新、macOS/Linux、Workers、多 Agent、浏览器/桌面控制、Engine 拆仓、完整 OS sandbox、机器 PKI、subscription anti-rollback、UI V2。百度网盘 / 夸克网盘 + 配套图文教程可以作为首批分发渠道。Windows code signing 强烈推荐；若第一批暂时 unsigned，必须明确标注并提供 SHA256，但不把签名基础设施本身变成无限期阻塞首发的理由。
 
@@ -223,13 +225,11 @@ CodexLink Desktop
 
 ## 11. v1 首发严格顺序
 
-1. **接收并修掉最后一个用户反馈 bug**，补直接 regression；
-2. **实施 v1 surface freeze**：从正式 UI 隐藏 Existing Server / Quick Share / `其他配置方式`，默认主链只剩 Local + Tunnel + ChatGPT；
-3. **冻结 v1 RC**，记录 Desktop / bundled CodexLink Engine exact source identity、installer SHA 与签名状态；
-4. **跑 Local-only 真机生命周期**：首次安装/激活/onboarding、ChatGPT、项目 add/remove、Desktop/Windows restart、autostart、Tunnel/Runtime 恢复，且关闭 WebCodexLauncher 后仍完全可用；
-5. **clean install / uninstall / reinstall + 至少一台外部 clean Windows 机器验收**；
-6. **只修 release-blocking P0/P1**：数据丢失/越权、安装/激活/连接/恢复失败、频繁 crash、项目撤权失效或明显假绿导致主链不可用；其余进入 Post-v1 backlog；
-7. **License Operator 小收尾，补齐图文教程/分发元数据，生成最终销售包并发布 v1。**
+1. **冻结 v1 RC**，记录 Desktop / bundled CodexLink Engine exact source identity、installer SHA 与签名状态；
+2. **跑 Local-only 真机生命周期**：首次安装/激活/onboarding、ChatGPT、项目 add/remove、Desktop/Windows restart、autostart、Tunnel/Runtime 恢复，且关闭 WebCodexLauncher 后仍完全可用；
+3. **clean install / uninstall / reinstall + 至少一台外部 clean Windows 机器验收**；朋友真机同时采集最终教程截图；
+4. **只修 release-blocking P0/P1**：数据丢失/越权、安装/激活/连接/恢复失败、频繁 crash、项目撤权失效或明显假绿导致主链不可用；其余进入 Post-v1 backlog；
+5. **License Operator 小收尾，补齐图文教程/分发元数据，生成最终销售包并发布 v1。**
 
 ## 12. 操作红线
 
