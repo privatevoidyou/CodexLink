@@ -63,6 +63,20 @@ fn options(root: PathBuf, state: PathBuf) -> ProjectCommandOptions {
 }
 
 #[test]
+fn codexlink_core_companion_aliases_cover_bundled_engine_binaries() {
+    assert_eq!(codexlink_core_companion_alias("webcodex"), "codexlink-core");
+    assert_eq!(
+        codexlink_core_companion_alias("webcodex-server"),
+        "codexlink-core-server"
+    );
+    assert_eq!(
+        codexlink_core_companion_alias("webcodex-runner"),
+        "codexlink-core-runner"
+    );
+    assert_eq!(codexlink_core_companion_alias("other"), "other");
+}
+
+#[test]
 fn connector_project_registry_environment_clears_legacy_alias() {
     let mut command = tokio::process::Command::new("unused-test-command");
     command.env(LEGACY_CONNECTOR_PROJECTS_DIR_ENV, "/legacy/projects.d");

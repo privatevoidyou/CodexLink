@@ -1016,24 +1016,42 @@ fn locate_runner_binary() -> Option<PathBuf> {
     locate_companion_binary("webcodex-runner")
 }
 
+fn codexlink_core_companion_alias(name: &str) -> &str {
+    match name {
+        "webcodex" => "codexlink-core",
+        "webcodex-server" => "codexlink-core-server",
+        "webcodex-runner" => "codexlink-core-runner",
+        _ => name,
+    }
+}
+
 fn locate_companion_binary(name: &str) -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?;
     let parent = current.parent()?;
-    for candidate in [
-        parent.join(executable_name(name)),
-        parent
-            .parent()
-            .map(|path| path.join(executable_name(name)))
-            .unwrap_or_default(),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
+    let names = [codexlink_core_companion_alias(name), name];
+    for candidate_name in names {
+        for candidate in [
+            parent.join(executable_name(candidate_name)),
+            parent
+                .parent()
+                .map(|path| path.join(executable_name(candidate_name)))
+                .unwrap_or_default(),
+        ] {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|directory| directory.join(executable_name(name)))
-        .find(|candidate| candidate.is_file())
+    for directory in std::env::split_paths(&path) {
+        for candidate_name in names {
+            let candidate = directory.join(executable_name(candidate_name));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 pub(super) fn executable_name(name: &str) -> String {

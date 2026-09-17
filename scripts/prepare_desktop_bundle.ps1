@@ -1,9 +1,9 @@
-# Stage exact WebCodex runtime bytes for a Windows x64 Tauri Desktop bundle.
+# Stage exact CodexLink Core bytes for a Windows x64 Tauri Desktop bundle.
 #
 # This helper consumes already-built release binaries, verifies one exact
 # source/version/build identity, copies them into an ignored generated tree,
 # proves the copies are byte-for-byte identical, and writes a Tauri config
-# overlay that maps only those staged files into `webcodex-runtime`.
+# overlay that maps only those staged files into the customer-visible `codexlink-core` tree.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BinDir,
@@ -46,18 +46,24 @@ if ($tunnelClientHash -ne $tunnelClientSha256) {
     throw "unexpected OpenAI tunnel-client SHA-256: $tunnelClientHash"
 }
 
-$runtimeDir = Join-Path $OutputDir "resources\webcodex-runtime"
+$runtimeDir = Join-Path $OutputDir "resources\codexlink-core"
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
 $toolsDir = Join-Path $runtimeDir "tools"
 New-Item -ItemType Directory -Path $toolsDir | Out-Null
 $shortSource = $SourceSha.Substring(0, 12).ToLowerInvariant()
-$binaryNames = @("webcodex", "webcodex-server", "webcodex-runner")
+$binaryMap = @(
+    [pscustomobject]@{ Source = "webcodex"; Destination = "codexlink-core" },
+    [pscustomobject]@{ Source = "webcodex-server"; Destination = "codexlink-core-server" },
+    [pscustomobject]@{ Source = "webcodex-runner"; Destination = "codexlink-core-runner" }
+)
 $resourceMap = [ordered]@{}
 $fileMetadata = [ordered]@{}
 
 try {
-    foreach ($name in $binaryNames) {
-        $source = Join-Path $BinDir "$name.exe"
+    foreach ($binary in $binaryMap) {
+        $sourceName = $binary.Source
+        $destinationName = $binary.Destination
+        $source = Join-Path $BinDir "$sourceName.exe"
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             throw "missing Desktop runtime binary: $source"
         }
@@ -74,26 +80,26 @@ try {
         $exitCode = $LASTEXITCODE
         $line = @($output | Select-Object -First 1)
         if ($exitCode -ne 0 -or $line.Count -eq 0 -or -not $line[0]) {
-            throw "$name.exe --version failed while staging Desktop resources (exit code $exitCode)"
+            throw "$sourceName.exe --version failed while staging Desktop resources (exit code $exitCode)"
         }
         $line = $line[0].TrimEnd()
-        $expected = "$name $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
+        $expected = "$sourceName $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
         if ($line -ne $expected) {
-            throw "unexpected $name.exe identity: '$line' (expected '$expected')"
+            throw "unexpected $sourceName.exe identity: '$line' (expected '$expected')"
         }
 
         $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
-        $destination = Join-Path $runtimeDir "$name.exe"
+        $destination = Join-Path $runtimeDir "$destinationName.exe"
         Copy-Item -LiteralPath $source -Destination $destination
         $destinationItem = Get-Item -LiteralPath $destination
         $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($destinationItem.Length -ne $sourceItem.Length -or $destinationHash -ne $sourceHash) {
-            throw "staged Desktop runtime byte verification failed for $name.exe"
+            throw "staged CodexLink Core byte verification failed for $destinationName.exe"
         }
 
-        $resourceMap[[System.IO.Path]::GetFullPath($destination)] = "webcodex-runtime/$name.exe"
-        $fileMetadata[$name] = [ordered]@{
-            filename = "$name.exe"
+        $resourceMap[[System.IO.Path]::GetFullPath($destination)] = "codexlink-core/$destinationName.exe"
+        $fileMetadata[$destinationName] = [ordered]@{
+            filename = "$destinationName.exe"
             size = [Int64]$destinationItem.Length
             sha256 = $destinationHash
         }
@@ -106,7 +112,7 @@ try {
     if ($stagedTunnelItem.Length -ne $tunnelClientItem.Length -or $stagedTunnelHash -ne $tunnelClientSha256) {
         throw "staged OpenAI tunnel-client byte verification failed"
     }
-    $resourceMap[[System.IO.Path]::GetFullPath($stagedTunnelClient)] = "webcodex-runtime/tools/tunnel-client.exe"
+    $resourceMap[[System.IO.Path]::GetFullPath($stagedTunnelClient)] = "codexlink-core/tools/tunnel-client.exe"
     $fileMetadata["tunnel-client"] = [ordered]@{
         filename = "tools/tunnel-client.exe"
         version = $tunnelClientVersion
@@ -136,7 +142,7 @@ try {
         version = $Version
         source_sha = $SourceSha.ToLowerInvariant()
         built_at = $BuiltAt
-        resource_dir = "resources/webcodex-runtime"
+        resource_dir = "resources/codexlink-core"
         tunnel_client_required_for_codexlink = $true
         tunnel_client_sha256 = $tunnelClientSha256
         files = $fileMetadata
@@ -144,7 +150,7 @@ try {
     $metadataPath = Join-Path $OutputDir "desktop-bundle.json"
     [System.IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 8) + "`n", $utf8)
 
-    Write-Output "Desktop runtime staged from exact source $($SourceSha.ToLowerInvariant())"
+    Write-Output "CodexLink Core staged from exact source $($SourceSha.ToLowerInvariant())"
     Write-Output "Tauri config overlay: $overlayPath"
     Write-Output "Runtime resources: $runtimeDir"
 } catch {

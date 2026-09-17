@@ -408,7 +408,7 @@ MYWS 销售激活码
 目标路径归 CodexLink 安装目录所有，例如：
 
 ```text
-<CodexLink install>\webcodex-runtime\tools\tunnel-client.exe
+<CodexLink install>\codexlink-core\tools\tunnel-client.exe
 ```
 
 缺失或 SHA 不匹配必须 fail closed。

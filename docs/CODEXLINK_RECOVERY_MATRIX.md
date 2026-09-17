@@ -128,7 +128,7 @@ sha256: 6649169733686805CA16CCCD91774594D0C017FD729C37AD4CE1CD18323D9AE8
 目标：
 
 ```text
-<CodexLink install>\webcodex-runtime\tools\tunnel-client.exe
+<CodexLink install>\codexlink-core\tools\tunnel-client.exe
 ```
 
 CodexLink release 不允许在 bundled client 缺失时悄悄回退到：

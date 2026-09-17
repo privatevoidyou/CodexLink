@@ -753,7 +753,11 @@ impl DesktopCore {
             tunnel_config,
             snapshot,
             resolved_tunnel_proxy: None,
-            adapter: WebCodexAdapter::new(Some(resource_dir.join("webcodex-runtime"))),
+            adapter: WebCodexAdapter::new(Some(resource_dir.join(if cfg!(windows) {
+                "codexlink-core"
+            } else {
+                "webcodex-runtime"
+            }))),
             supervisor,
             activity,
             published,

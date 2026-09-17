@@ -80,7 +80,7 @@ impl ResolvedBinaries {
             } else if !cfg!(debug_assertions) {
                 let expected = bundled_runtime_dir
                     .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "<Desktop resource directory>/webcodex-runtime".to_string());
+                    .unwrap_or_else(|| "<Desktop resource directory>/codexlink-core".to_string());
                 return Err(DesktopError::new(
                     "bundled_runtime_missing",
                     format!("The installed CodexLink runtime is missing: {expected}"),
@@ -132,9 +132,10 @@ impl ResolvedBinaries {
                 missing_directory_action,
             )
         })?;
-        let webcodex = directory.join(executable_name("webcodex"));
-        let server = directory.join(executable_name("webcodex-server"));
-        let runner = directory.join(executable_name("webcodex-runner"));
+        let (cli_name, server_name, runner_name) = runtime_binary_names(source);
+        let webcodex = directory.join(executable_name(cli_name));
+        let server = directory.join(executable_name(server_name));
+        let runner = directory.join(executable_name(runner_name));
         for path in [&webcodex, &server, &runner] {
             if !path.is_file() {
                 return Err(DesktopError::new(
@@ -991,6 +992,20 @@ fn read_bounded<R: Read>(mut reader: R) -> Vec<u8> {
     output
 }
 
+fn runtime_binary_names(
+    source: ResolvedBinarySource,
+) -> (&'static str, &'static str, &'static str) {
+    if source == ResolvedBinarySource::Bundled && cfg!(windows) {
+        (
+            "codexlink-core",
+            "codexlink-core-server",
+            "codexlink-core-runner",
+        )
+    } else {
+        ("webcodex", "webcodex-server", "webcodex-runner")
+    }
+}
+
 fn executable_name(name: &str) -> String {
     if cfg!(windows) {
         format!("{name}.exe")
@@ -1016,6 +1031,23 @@ mod tests {
     #[test]
     fn bundled_source_label_is_stable() {
         assert_eq!(ResolvedBinarySource::Bundled.label(), "Bundled");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundled_binary_names_use_codexlink_core_brand() {
+        assert_eq!(
+            runtime_binary_names(ResolvedBinarySource::Bundled),
+            (
+                "codexlink-core",
+                "codexlink-core-server",
+                "codexlink-core-runner"
+            )
+        );
+        assert_eq!(
+            runtime_binary_names(ResolvedBinarySource::SourceDogfoodTarget),
+            ("webcodex", "webcodex-server", "webcodex-runner")
+        );
     }
 
     #[cfg(all(windows, target_arch = "x86_64"))]

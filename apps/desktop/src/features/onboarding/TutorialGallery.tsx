@@ -15,6 +15,8 @@ import appsBusiness4 from "../../assets/tutorials/apps-business-4.png";
 import appsBusiness5 from "../../assets/tutorials/apps-business-5.png";
 import appsBusiness6 from "../../assets/tutorials/apps-business-6.png";
 import howToUse1 from "../../assets/tutorials/how-to-use-1.png";
+import howToUse2 from "../../assets/tutorials/how-to-use-2.png";
+import howToUse3 from "../../assets/tutorials/how-to-use-3.png";
 import { useLocale } from "../../i18n/locale";
 
 const TUNNEL_IMAGES = [tunnelIdGuide] as const;
@@ -35,7 +37,7 @@ const BUSINESS_IMAGES = [
   appsBusiness5,
   appsBusiness6,
 ] as const;
-const USAGE_IMAGES = [howToUse1] as const;
+const USAGE_IMAGES = [howToUse1, howToUse2, howToUse3] as const;
 
 function TutorialGallery({ title, images }: { title: string; images: readonly string[] }) {
   const { t } = useLocale();

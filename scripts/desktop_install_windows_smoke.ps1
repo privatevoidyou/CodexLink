@@ -145,22 +145,35 @@ try {
     if (-not (Test-Path -LiteralPath $desktopExe -PathType Leaf)) {
         throw "installed CodexLink executable is missing: $desktopExe"
     }
-    $runtimeDir = Join-Path $installedDir "webcodex-runtime"
+    $runtimeDir = Join-Path $installedDir "codexlink-core"
     if (-not (Test-Path -LiteralPath $runtimeDir -PathType Container)) {
-        throw "installed bundled runtime directory is missing: $runtimeDir"
+        throw "installed CodexLink Core directory is missing: $runtimeDir"
     }
 
     $shortSource = $SourceSha.Substring(0, 12).ToLowerInvariant()
-    foreach ($name in @("webcodex", "webcodex-server", "webcodex-runner")) {
-        $binary = Join-Path $runtimeDir "$name.exe"
+    $binaryMap = @(
+        [pscustomobject]@{ File = "codexlink-core.exe"; Identity = "webcodex" },
+        [pscustomobject]@{ File = "codexlink-core-server.exe"; Identity = "webcodex-server" },
+        [pscustomobject]@{ File = "codexlink-core-runner.exe"; Identity = "webcodex-runner" }
+    )
+    foreach ($entry in $binaryMap) {
+        $binary = Join-Path $runtimeDir $entry.File
         if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
-            throw "installed bundled binary is missing: $binary"
+            throw "installed CodexLink Core binary is missing: $binary"
         }
-        $line = Get-VersionLine $binary $name
-        $expected = "$name $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
+        $line = Get-VersionLine $binary ([System.IO.Path]::GetFileNameWithoutExtension($entry.File))
+        $expected = "$($entry.Identity) $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
         if ($line -ne $expected) {
-            throw "unexpected installed $name.exe identity: '$line' (expected '$expected')"
+            throw "unexpected installed $($entry.File) identity: '$line' (expected '$expected')"
         }
+    }
+
+    $legacyBrandPaths = @(
+        Get-ChildItem -LiteralPath $installedDir -Recurse -Force -ErrorAction Stop |
+            Where-Object { $_.Name -match '(?i)webcodex' }
+    )
+    if ($legacyBrandPaths.Count -ne 0) {
+        throw "customer-visible install tree still contains legacy WebCodex path names: $($legacyBrandPaths.FullName -join ', ')"
     }
 
     $tunnelClient = Join-Path $runtimeDir "tools\tunnel-client.exe"
@@ -174,7 +187,7 @@ try {
     }
 
     Write-Output "Desktop install smoke passed: $installedDir"
-    Write-Output "Bundled runtime: $runtimeDir"
+    Write-Output "Bundled CodexLink Core: $runtimeDir"
 } finally {
     if ($installed) {
         if (-not $uninstaller) {
@@ -189,7 +202,7 @@ try {
             Wait-Until { $null -eq (Get-CodexLinkUninstallEntry) } 30 "Desktop uninstall entry remained after silent uninstall"
             if ($installedDir) {
                 $desktopExe = Join-Path $installedDir "CodexLink.exe"
-                $runtimeDir = Join-Path $installedDir "webcodex-runtime"
+                $runtimeDir = Join-Path $installedDir "codexlink-core"
                 Wait-Until {
                     -not (Test-Path -LiteralPath $desktopExe) -and
                     -not (Test-Path -LiteralPath $runtimeDir) -and
