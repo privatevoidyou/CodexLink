@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-16，源码安全审计五项整改与 Stage E 已完成并推送；项目正式进入 v1 Release Convergence（首发收敛）阶段。除首次两步引导、整改后二次复审、同源 RC/公网链生命周期验收、clean install/reinstall 与少量销售工具收尾外，不再新增首发功能。**
+> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 已实现并进入真机迭代。v1 用户表面正式冻结为 Local + OpenAI Tunnel + ChatGPT 单一路径，Existing Server、Quick Share 与“其他配置方式”从首版 UI / release gate 移出，底层实现保留为 hidden experimental / Post-v1。当前只剩最后一轮用户反馈 bug、v1 RC、Local 主链真机稳定性/安装重装验收与少量销售工具收尾。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -9,12 +9,13 @@
 - 仓库：`D:\GitHub\CodexLink`
 - 分支：`codexlink-rebuild`
 - 安全恢复锚点：`5ff6d8fda07e5172f272e07b8b4b9bdd74ad0bb7` — `CodexLink: checkpoint pre-scale-test hardening`；不得改写历史。
-- 本轮源码整改已形成三个代码 checkpoint：`d98eeb8b`（arbitrary execution boundary）、`fca59435`（Windows enrollment credentials）、`ede713a0`（Remote profiles / zero-root / topology readiness）。
-- Stage E 文档/回归收口 checkpoint：`48f9af16 — CodexLink: document security remediation state`；它已经推送到 `origin/codexlink-rebuild`，并固定为五项整改后二次审计的 final remediation HEAD。后续纯文档 v1 规划可以继续向前，不改变 `5ff6d8fd → 48f9af16` 的整改审计范围。
-- 之前真实 bundled CodexLink Engine identity 为 `0.4.1 / ae858f5360ff / dirty=false`；本轮源码已经发生整改，`ae858f...` 只作为整改前 dogfood 证据，不能作为下一次 Desktop / Engine 重建后的最终 source identity。
-- 历史 BrandFix installer `target\CodexLink_0.4.1_RC5-BrandFix_x64-setup.exe` / SHA256 `B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71` 继续作为整改前包证据，不代表本轮整改后的新安装包。
+- 五项整改与 D.1 lifecycle 收口已经形成 `d98eeb8b` → `fca59435` → `ede713a0` → `112d08cc` → `31ef8186`；其中 `31ef8186` 已推送到 `origin/codexlink-rebuild`，并作为当前远端安全基线。
+- 五项整改的独立审计范围仍固定为 `5ff6d8fd → 48f9af16`；D.1 saved-Remote Runner replacement 与 failure rollback 另行定点复审并通过，不重新打开整改范围。
+- 当前首发产品/测试源码 checkpoint 在远端基线之上继续形成 `b818a4ff`（v1 first-use onboarding）→ `62703c44`（preserve explicit zero-root runner policy）→ `8d5a16aa`（tighten first-use onboarding flow）。`8d5a16aa` 是当前测试安装包对应的产品源码；后续 docs-only checkpoint 可以继续向前而不改变该测试包 source identity。这些首发收敛提交暂未 push，等待最后一轮用户反馈与 v1 RC 冻结。
+- 当前完整测试安装包已经使用同源 `8d5a16aa` runtime 构建；测试 artifact 为 `CodexLink_0.4.1_8d5a16aab50a_onboardingfix_x64-setup.exe`，SHA256 `B831FE427C04697584DA4DC9E25DBEAFC3D18F216D5CD68A6F5FA62ED30F1A59`。它仍是内部测试包，不是最终 v1 release artifact。
+- 历史 `ae858f...` runtime 与 BrandFix installer 继续只作为整改前证据，不再代表当前测试线。
 
-历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；当前实际 dogfood runtime 已经是 CodexLink fork 上的 `ae858f...` 构建，不能再把两者写成同一个 source identity。
+历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；当前 v1 dogfood 测试包 runtime 已经是 CodexLink fork 上的 `8d5a16aa` 构建，历史 `ae858f...` 只保留为整改前证据，三者不能混写成同一个 source identity。
 
 ## 2. 当前产品架构
 
@@ -49,21 +50,17 @@ Bundled WebCodex 0.4.1 Runtime
 - internal anchor 不应出现在普通“项目”页面；
 - 用户可以同时保留多个授权 root；
 - 添加/移除项目只改变 authority，不再切换 Runtime identity；
-- 0 个用户项目时，Server/Runner Runtime 连接可以是健康的；但 `ready_for_chatgpt=false`，因为还没有任何 customer-authorized project 可以交给 ChatGPT 使用；UI 应提示添加授权路径，而不是把内部 anchor 当项目。
+- 0 个用户项目时，Server/Runner/Secure Link 可以是健康的，ChatGPT transport 也可以显示绿色“可访问”；但 aggregate `ready_for_chatgpt=false`，因为还没有任何 customer-authorized project 可供工具使用。UI 应继续提示“等待配置授权路径”，而不是把内部 anchor 当项目或把 transport 可达误写成项目已就绪。
 - Local 与 Remote 都允许真正的 0 authorized roots；CodexLink-managed enrollment 不再用 HOME、盘符根或 internal runtime anchor 偷偷填充 customer authority。
 - internal runtime anchor 只用于 Local Runner 恢复，不再投影到普通项目 UI；Remote enrollment 直接使用 Runner identity，因此也不需要用“假项目”维持连接。
 
-### 2.2 本机与 Remote Server 是两种不同拓扑
+### 2.2 v1 产品表面冻结为单一 Local 拓扑
 
-- 默认本机模式：CodexLink 管理本机 Server + Runner + OpenAI Secure Tunnel。
-- Existing Server 模式：远端保留 Server，CodexLink Desktop 只 enrollment/监管本机 Runner。
-- Remote 模式的长期 enrollment 已与 active topology 解耦：Desktop 会按 normalized Server URL 从 `connections` profile 中发现并复用 Runner identity，Local 与多个 Remote enrollment 可以并存。
-- 切到 Local、重启 CodexLink 或 Windows 后，再切回同一个 Remote Server 不应因为 active config 已变成 `127.0.0.1` 就要求重新 pairing。
-- Remote setup 采用事务语义：先验证 saved profile / pairing、Server revision、Runner 和可选 project，再提交 active topology；失败保持原 Local/Remote topology，不留下“半成功 Remote UI”。
-- transient network/offline 与 credential invalid 已分开：断网保留 enrollment 并重试；401/403 才进入 credential invalid / re-enroll；client identity mismatch 与 revision mismatch 保持独立错误。
-- Remote Server readiness 来自真实 probe；HTTPS Remote 不再依赖本机 OpenAI Tunnel readiness，HTTP Remote 会显示 degraded，而 URL 已保存本身不代表绿色 online。
+v1 正式用户只走：`本机 CodexLink Engine/Runner → OpenAI Secure Tunnel → ChatGPT`。普通界面不再提供 topology chooser，也不再显示 `连接现有 Server`、`快速共享项目` 或 `其他配置方式`。
 
-因此旧 WebCodexLauncher **现在还不能删除**：它仍是本轮维修通道；等重新 build CodexLink Desktop + CodexLink Engine，并在同源 Remote Server 上完成真实 restart/reuse smoke 后再退休。
+Existing Server / Remote enrollment 与 Quick Share 的底层实现**不删除**：前者已经完成 saved profile、transactional topology、0-root、真实 readiness 与 D.1 Runner replacement/rollback 源码整改，后者也继续留在代码和测试中；但两者从 v1 customer surface、首发教程与 release gate 移到 hidden experimental / Post-v1。后续只有真实用户需求证明值得产品化时，才重新开放高级入口并单独做同源 Server / Remote lifecycle 验收。
+
+旧 WebCodexLauncher 继续留在开发机作为维修/历史回滚通道，但**不再是 v1 产品依赖，也不再以 Remote Server 迁移完成作为 v1 发布 Gate**。首发只需证明 CodexLink 自己的 Local + Tunnel 主链在 Launcher 关闭时正常工作。
 
 ## 3. Product Shell / UI 状态
 
@@ -71,12 +68,12 @@ Smoke 3 期间已经从“恢复 RC5 大概样子”推进到产品语义和交�
 
 - 主导航固定为 `首页 / 项目 / 连接 / 设置`；顶部“当前工作区”已从普通页面删除；
 - 首页主卡只显示第一个用户授权路径；0 项目时显示“等待配置授权路径”；
-- 首页连接链路按 topology 投影：Local 为 `本机 → Engine → Secure Link → ChatGPT`，Remote 使用真实 `远程 CodexLink Server` 节点；0 项目时 Runtime 可健康，但 ChatGPT 节点保持 pending，直到用户授权至少一个项目；
+- v1 首页连接链固定为 `本机 → Engine → Secure Link → ChatGPT`；0 项目时前 3 层与 ChatGPT transport 可真实显示绿色“可访问”，但整体仍保持“待完成配置 / 等待配置授权路径”，直到用户授权至少一个项目；
 - 项目页是真正的多授权 root 管理，不是单一 active workspace；支持显式盘符根和普通文件夹；
 - 项目卡响应式 3 / 2 / 1 列；移除项目是 authority revoke，不删除磁盘文件；
 - `ChatGPT 已访问` 产品语义改为 `ChatGPT 可访问` / 系统状态 `已连接`，不再要求先发生一次真实 tool call 才点亮健康状态；
 - “接下来做什么”、系统状态、渐变主卡、hover/page transition 已按 RC5 心智收口；
-- 设置页只保留用户需要的 Tunnel 凭据、语言、登录启动和高级网络；内部诊断信息已从普通 UI 移除；
+- 设置页只保留用户需要的 Tunnel 凭据、语言、登录启动、ChatGPT 配置教程和必要的高级网络；v1 不暴露 Remote Server / Quick Share 产品入口，内部诊断信息继续从普通 UI 移除；
 - Tray 当前产品目标只保留“打开 CodexLink / 退出 CodexLink”；语言跟随 Desktop locale；
 - 6 个用户语言包已经增加大小写不敏感品牌守卫，customer-facing i18n 不允许重新出现 `WebCodex` 产品品牌。
 
@@ -161,7 +158,7 @@ Deployment Center / 商业下载 Gate 仍未作为 CodexLink repo 内的完整 M
 - typed create/edit/rename/delete、bounded `delete_directory`、root/parent/wildcard/protected anchor/reparse fail-closed 等既有强边界继续保持。
 - Windows 长期 bearer credential（user token、Runner token-bearing `runner.toml`）现在与已有 Server secret 共用同一 protected secret-file primitive：当前用户 + SYSTEM FullAccess、禁用继承，ACL/reparse hardening 失败时 fail closed，overwrite 后不得退化。
 
-**下一项最高优先级动态安全 Gate**仍是 `tunnel-test` disposable-root 专项：验证 normal execution、direct destructive deny、no-child-spawn，以及 junction/reparse TOCTOU 等本轮明确未重构的动态风险。不得拿真实源码仓库或真实用户文件做 destructive 负面测试。
+发布前仍保留一次 **targeted disposable-root 安全抽检**：验证 normal execution、direct destructive deny、no-child-spawn，以及必要的 junction/reparse fail-closed 行为。它不再扩成首发前的大型安全专项；不得拿真实源码仓库或真实用户文件做 destructive 负面测试，未证实的理论 TOCTOU 风险继续记录到 Post-v1。
 
 ## 8. 当前两套本地开发/连接链路
 
@@ -175,27 +172,28 @@ WebCodexLauncher 0.7.2
 → 旧公网 Server / Runner enrollment
 ```
 
-它仍承担当前网页会话中的一部分开发访问能力，因此在 Remote Server 迁移完成前不要删除。
+它仍承担当前网页会话中的一部分开发/维修访问能力，因此首发收敛期间先保留，不做删除或升级操作；但它不再是 v1 产品依赖，是否退休/卸载属于 Post-v1 清理。
 
-### 新链路（CodexLink dogfood）
+### 新链路（CodexLink v1 dogfood）
 
 ```text
 CodexLink Desktop
-→ bundled WebCodex 0.4.1 ae858f...
-→ CodexLink-managed Server/Runner 或 Existing Server 模式
-→ tunnel-test / ChatGPT
+→ bundled WebCodex 0.4.1（当前测试线 source 8d5a16aa）
+→ CodexLink-managed Local Server/Runner
+→ OpenAI Secure Tunnel
+→ ChatGPT
 ```
 
-`tunnel-test` 已经能看到/操作 CodexLink 0.4.1 Runner，是后续安全验收和最终替换 Launcher 的目标链路。
+这条 Local 主链是 v1 唯一产品目标。Existing Server / Quick Share 仍存在于代码中但不进入首发 UI；`tunnel-test` 只用于 targeted 安全抽检，不再承担“必须先完成 Remote 迁移才能发布”的职责。
 
 ## 9. 当前验证证据
 
-Stage E 已实际运行的自动化证据：
+整改 + onboarding 收敛阶段已实际取得的主要自动化证据：
 
 - Frontend TypeScript typecheck：通过；
-- Frontend 全部 Vitest：`60/60`，并通过 form-control CSS contract；
+- 最新 onboarding 测试线 Frontend 全部 Vitest：`67/67`，并通过 form-control CSS contract、TypeScript typecheck 与 production build；
 - Frontend production build：通过；
-- Rust Desktop `--all-targets`：`121 passed / 0 failed / 5 ignored`；5 个 ignored 均为既有显式 real-process/dogfood lane；
+- 最近一次完整 Desktop Rust suite：`124 passed / 0 failed / 5 ignored`；后续 onboarding 文案/前端小修未扩大 Rust 状态机；
 - `webcodex-runner-config`：`31/31`；
 - `webcodex-cli --lib`：`318/318`，其中包含 Windows credential DACL overwrite regression；
 - P1 Destructive Guard focused：`7/7`；`webcodex-core` structured process encoded/shell-command-mode regression：`1/1`；tool contracts：`95/95`；
@@ -205,34 +203,33 @@ Stage E 已实际运行的自动化证据：
 
 **Workspace full-suite caveat：** `cargo test --workspace --lib` 在 Windows 的根 `webcodex` 巨型 test binary 中出现 suite-order `STATUS_STACK_OVERFLOW`。首次触发在 `runtime_console_http::...window_activity_lookup...`；该测试单独 `1/1` 通过且对应源码自 `5ff6d8fd` 起无 diff。串行 `--test-threads=1` 仍复现；跳过该条后又在更晚的既有 `tool_runtime::tests::jobs::list_jobs...` 发生同类 stack overflow，该条单独也 `1/1` 通过且对应源码无 diff。因此不能宣称“workspace combined suite 全绿”，也不在本轮五项整改范围外修改这些测试。其余本轮相关 focused/产品 Gate 如上均为绿色。
 
-这些自动化证据仍不替代重新 build 后的同源 Remote 真机 smoke。
+这些自动化证据仍不替代最终 v1 Local RC 的 clean install / restart / uninstall-reinstall / ChatGPT 真机 smoke；Remote Server 不再属于 v1 验收矩阵。
 
 ## 10. v1 Release Convergence：仍未完成的首发硬 Gate
 
-从 `48f9af16` 起，项目停止横向扩功能。首版只保留会直接影响普通付费用户“安装后能否顺利用到第二天”的工作：
+项目已经停止横向扩功能。五项整改、D.1 与两步 onboarding 主体均已完成；v1 现在只保留会直接影响普通付费用户“安装后能否顺利用到第二天”的工作：
 
-1. **整改后二次独立复审**：重新审 `5ff6d8fd → final remediation HEAD`，确认没有遗留 P0/P1 或整改引入的新高优先级回归；
-2. **两步首次使用引导**：激活后先引导 Tunnel ID + Restricted Runtime Key，再引导用户在 ChatGPT 创建/添加 CodexLink App；两个步骤均允许已配置用户跳过，且 onboarding 状态绝不伪造 runtime readiness；
-3. **冻结同源 v1 RC**：重新 build CodexLink Desktop + CodexLink Engine，公网测试 Server 使用同一 source/release identity；
-4. **公网 Runner / Launcher retirement 生命周期验收**：首次连接、0-root、project add/remove、Local → Remote → Local → same Remote、CodexLink/Windows restart、短暂断网自动恢复、ChatGPT read/write/normal execution 均通过且不重新 pairing；通过后 WebCodexLauncher 才退出产品依赖；
-5. **clean install / uninstall / reinstall Gate**：设备激活资格、授权项目、连接状态和用户可恢复路径符合合同；至少一台外部或真正 clean Windows 环境完成首次使用主链；
-6. **发布前安全抽检**：对我们实际承诺的 typed authority、credential DACL、明显 destructive deny 做 targeted dynamic smoke；junction/reparse race 等未证实极端项记录风险，不为了理论完美阻塞首发；
-7. **License Operator 轻量收尾**：只改善真实销售所需的复制、错误提示、防误重复签发等体验，不扩成 SaaS/CRM/完整 license 管理后台。
+1. **最后一轮用户反馈 bug 收口**：只处理用户当前明确复现的最后一个产品 bug，以及其直接 regression；不顺手扩范围；
+2. **v1 surface freeze**：正式 UI 移除/隐藏 Existing Server、Quick Share、`其他配置方式` 与 topology chooser；底层实现保留，不删除；
+3. **冻结同源 v1 RC**：Desktop + bundled CodexLink Engine/runtime 来自同一 exact source identity，记录 installer SHA / build metadata；v1 不要求部署同源公网 Remote Server；
+4. **Local 主链生命周期验收**：激活 → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop restart → Windows restart/登录启动 → 短暂 Tunnel/Runtime 恢复，在 Launcher 关闭时仍正常；
+5. **clean install / uninstall / reinstall Gate**：设备激活资格、Tunnel 凭据、授权项目与用户可恢复路径符合合同；至少一台真正 clean Windows 环境完成首次使用主链；
+6. **发布前 targeted 安全抽检**：对 typed authority、credential DACL、明显 destructive deny/no-child-spawn 做 disposable-root smoke；未证实极端项记录风险，不为了理论完美阻塞首发；
+7. **License Operator 轻量收尾**：只改善真实销售所需复制、提示、防误重复签发体验，不扩成 SaaS/CRM/完整后台。
 
-以下不再作为首个商业版本的硬 Gate：完整 Deployment Center、自动更新、macOS/Linux、Workers、多 Agent、浏览器/桌面控制、Engine 拆仓、完整 OS sandbox、机器 PKI、subscription anti-rollback、UI V2。百度网盘 / 夸克网盘 + 配套图文教程可以作为首批分发渠道。Windows code signing 强烈推荐；若第一批暂时 unsigned，必须明确标注并提供 SHA256，但不把签名基础设施本身变成无限期阻塞首发的理由。
+以下不再作为首个商业版本的硬 Gate：Existing Server / Remote enrollment 产品化、Quick Share、完整 Deployment Center、自动更新、macOS/Linux、Workers、多 Agent、浏览器/桌面控制、Engine 拆仓、完整 OS sandbox、机器 PKI、subscription anti-rollback、UI V2。百度网盘 / 夸克网盘 + 配套图文教程可以作为首批分发渠道。Windows code signing 强烈推荐；若第一批暂时 unsigned，必须明确标注并提供 SHA256，但不把签名基础设施本身变成无限期阻塞首发的理由。
 
 根 `webcodex` Windows 巨型 lib test binary 的既有 suite-order stack-overflow 继续作为测试基础设施风险记录：触发用例单独运行通过、相关源码不在五项整改 diff；除非它在 RC 真实产品路径中复现，否则不升级为首发阻塞项。
 
 ## 11. v1 首发严格顺序
 
-1. **独立复审五项整改**，只处理真实 P0/P1 finding；
-2. **实现两步首次引导**并完成前端/状态持久化回归；
-3. **冻结 v1 RC**，记录 Desktop / CodexLink Engine / Server exact source identity 与 installer SHA；
-4. **升级公网测试 Server 为同源 Engine**，跑完整 Remote 生命周期与 Launcher-off smoke；
-5. **通过后退休 WebCodexLauncher**，不再让旧 0.3.9 成为产品运行依赖；
-6. **clean install / uninstall / reinstall + 外部机器验收**；
-7. **只修 release-blocking P0/P1**：数据丢失/越权、安装/激活/连接/恢复失败、严重版本错配、频繁 crash 或明显假绿导致主链不可用；其余进入 Post-v1 backlog；
-8. **License Operator 小收尾，生成最终销售包并发布 v1。**
+1. **接收并修掉最后一个用户反馈 bug**，补直接 regression；
+2. **实施 v1 surface freeze**：从正式 UI 隐藏 Existing Server / Quick Share / `其他配置方式`，默认主链只剩 Local + Tunnel + ChatGPT；
+3. **冻结 v1 RC**，记录 Desktop / bundled CodexLink Engine exact source identity、installer SHA 与签名状态；
+4. **跑 Local-only 真机生命周期**：首次安装/激活/onboarding、ChatGPT、项目 add/remove、Desktop/Windows restart、autostart、Tunnel/Runtime 恢复，且关闭 WebCodexLauncher 后仍完全可用；
+5. **clean install / uninstall / reinstall + 至少一台外部 clean Windows 机器验收**；
+6. **只修 release-blocking P0/P1**：数据丢失/越权、安装/激活/连接/恢复失败、频繁 crash、项目撤权失效或明显假绿导致主链不可用；其余进入 Post-v1 backlog；
+7. **License Operator 小收尾，补齐图文教程/分发元数据，生成最终销售包并发布 v1。**
 
 ## 12. 操作红线
 

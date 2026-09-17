@@ -2,9 +2,9 @@
 
 > 用途：把历史 `1.0.0-rc.5` 已验证能力、当前 rebuild 实现和首版剩余工作放在一张矩阵里，避免凭记忆重写或重复恢复。
 >
-> 当前 Engine：历史上游恢复基线 WebCodex 0.4.1 (`26c44e6436f254183d74db6865d04e2ec1d85930`)；当前实际 CodexLink dogfood bundled runtime 为 `0.4.1 / ae858f5360ff / dirty=false`。
+> 当前 Engine：历史上游恢复基线 WebCodex 0.4.1 (`26c44e6436f254183d74db6865d04e2ec1d85930`)；当前 v1 dogfood 完整测试包 bundled runtime 为 `0.4.1 / 8d5a16aab50a / dirty=false`。
 >
-> 当前源码整改基线：安全恢复锚点 `5ff6d8fd`；其后 checkpoint 为 `d98eeb8b`（execution boundary）→ `fca59435`（Windows credential ACL）→ `ede713a0`（Remote profile / zero-root / topology readiness）。最终交付必须核对 `origin/codexlink-rebuild` SHA 与 final HEAD 一致；历史 Smoke / License Operator checkpoint 继续保留在分支历史中。
+> 当前源码线：安全恢复锚点 `5ff6d8fd`；五项整改 + D.1 为 `d98eeb8b → fca59435 → ede713a0 → 112d08cc → 31ef8186`，其中远端目前停在 `31ef8186`；本地 v1 产品/测试源码 checkpoint 继续到 `b818a4ff → 62703c44 → 8d5a16aa`。后续 docs-only checkpoint 可以前进而不改变测试包 source identity；最终 v1 冻结后再统一普通 push。
 >
 > 首版安全策略详见 [`CODEXLINK_SECURITY_BOUNDARY.md`](CODEXLINK_SECURITY_BOUNDARY.md)。
 >
@@ -40,12 +40,13 @@
 | Commercial entitlement portal | 激活码验证后查看下载 | 同一 `MYWS-...` 码先验证购买/下载，后用于 Desktop 设备激活；两阶段语义分清 | RESTORE/HARDEN | NEXT | valid/invalid code、下载 Gate、same-code fresh-device activation |
 | Admin License Operator | 历史上人工/本地 Codex 通过 SSH 调用授权服务器签发 | Windows 本地 GUI 通过管理员 SSH key 固定调用 `issue --json`；私钥留在服务器；销售码不落盘；签发绝不自动重试 | HARDEN | CHECKPOINTED | source/installed self-test + shortcut validation + real SSH probe + 用户真实一键签发体验均已通过 |
 | Product shell UI | RC5 已验收的首页/项目/连接/设置与动效心智 | RC5 心智 + Smoke 3 多项目/状态/动效/品牌收口 | RESTORE | WORKTREE READY/VERIFY | frontend 56/56；BrandFix 已出包；图标缓存后的 Explorer 最终显示仍等用户确认 |
-| First-use setup UX | RC5 的项目 + Tunnel 产品心智 | 激活 → 两步 onboarding（Tunnel/Key → ChatGPT App）→ 主页面 → 按需添加多个授权路径；已有配置可跳过且不伪造 readiness | HARDEN/RESTORE | NEXT P0 | Local/Remote 0 root 保持；onboarding 与真实 readiness 分离；设置页可重新打开教程 |
+| First-use setup UX | RC5 的项目 + Tunnel 产品心智 | 激活 → 两步 onboarding（Tunnel/Key → ChatGPT App）→ 主页面 → 按需添加多个授权路径；saved credentials 可直接继续，step 1 skip 只跳当前页；v1 不暴露其他 topology | HARDEN/RESTORE | CHECKPOINTED/USER VERIFY | `b818a4ff` + `8d5a16aa`；scroll/重开教程/readiness 分离已覆盖，截图教程继续补齐 |
 | User authorized roots | 用户选哪个 root 就授权哪个 root | `projects[]` 多 root；exact canonical authority；0 root 合法；不偷偷用 HOME/anchor 扩大；精确 remove | RESTORE/HARDEN | CHECKPOINTED/VERIFY | Local/Remote 0-root + add/remove lifecycle 有自动化；父 root 仍覆盖子目录时拒绝假撤权 |
 | Drive-root authorization | 支持显式选择 `C:\` / `D:\` | 可读/分析整盘；destructive target 永不允许等于 drive root | REDESIGN | VERIFY | bounded delete 的 root/wildcard 逻辑已覆盖；显式整盘授权留给新 RC 真机复验 |
 | Internal runtime anchor | 历史 RC 把运行 identity 与项目心智混在一起 | Local AppData anchor 只维持 Runtime identity，不出现在项目列表、不自动成为用户 authority；Remote 直接使用 Runner identity | REDESIGN/HARDEN | CHECKPOINTED/VERIFY | 0-root snapshot 不暴露 anchor；Remote 不再需要假 enrollment project |
-| Existing Server topology | 历史 Launcher 可把本机 Runner 连到远端 Server | `configure_remote_setup` + saved profile discovery by normalized Server URL + transactional topology + 0-root + distinct offline/credential/identity/revision states | RESTORE/HARDEN | CHECKPOINTED/REAL-MACHINE VERIFY | source tests已覆盖 reuse/rollback/readiness；整改后同源 build 仍需 Local→Remote→Local→same Remote / restart/outage/revoke smoke |
-| WebCodexLauncher retirement | 旧 Launcher 0.7.2 + WebCodex 0.3.9 当前仍能工作 | 只在新 Existing Server 链路稳定后退休 | REDESIGN | NEXT AFTER SAFETY | 删除前只读资产盘点；不得先删唯一可工作远端链路 |
+| Existing Server topology | 历史 Launcher 可把本机 Runner 连到远端 Server | 源码保留 `configure_remote_setup` + saved profile / transactional topology / 0-root / readiness / D.1 rollback；v1 customer surface 默认隐藏 | REFERENCE/POST-V1 | HIDDEN EXPERIMENTAL | 不阻塞 v1；未来真实需求出现后再做同源 Server + Remote lifecycle 产品化验收 |
+| Quick Share | 临时共享/Provider 路径已存在于 rebuild | 底层实现保留，但 v1 不显示入口、不写入首批教程 | REFERENCE/POST-V1 | HIDDEN EXPERIMENTAL | 不阻塞 v1；以后按真实需求决定是否产品化 |
+| WebCodexLauncher retirement | 旧 Launcher 0.7.2 + WebCodex 0.3.9 当前仍能工作 | 保留为开发/维修/回滚通道，不作为 v1 产品依赖 | REFERENCE | POST-V1 CLEANUP | v1 只需在 Launcher 关闭时证明 Local 主链正常；是否卸载不阻塞首发 |
 | Typed create/edit/rename/delete | 历史能力不统一 | no-overwrite create/rename；SHA guarded edit/delete | HARDEN | DONE | 复用现有 canonical guarded file-edit contract，不另造重复工具 |
 | Bounded recursive delete | 历史可通过 shell 广泛递归 | typed `delete_directory(path)`，只删可证明边界的明确子树 | REDESIGN | DONE | Runner focused delete 4/4；typed registry/contract Gate 已通过 |
 | Raw destructive admission | 历史 shell 更自由 | recursive delete / destructive Git / mirror-purge / disk destructive + opaque PowerShell encoded payload pre-dispatch deny；不宣称 interpreter sandbox | HARDEN | CHECKPOINTED/VERIFY | Guard focused 已覆盖 encoded direct gap；真机 no-child-spawn / interpreter / reparse 动态专项待跑 |
@@ -287,17 +288,17 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] 首页恢复“一切就绪 + 项目大卡片 + 连接链路 + 状态摘要”；
 - [x] 首次无 License 时继续由现有 RC5 简洁 Activation Gate 拦截；激活成功前不进入可工作 Product Shell；
 - [x] 项目页恢复卡片式项目管理；
-- [x] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片，并保留 Remote / Quick Share 高级状态页；
+- [x] 连接页恢复步骤链 + 当前状态 + Secure Tunnel 卡片；Remote / Quick Share 底层/历史页面实现保留，但 v1 surface freeze 后不向普通用户展示；
 - [x] 设置页收敛为语言 / 登录启动 / Tunnel ID / Restricted Runtime Key / 高级网络；
 - [x] 保存 Tunnel 凭据后，在本地 runtime 已就绪时自动停止旧 regular tunnel 并重新准备 Secure Link；
 - [x] 普通用户首用不暴露 Server URL / Runner enrollment / loopback port / tunnel-client path；激活后 internal runtime 自动 bootstrap，项目 authority 可随后按需添加；
 - [x] Smoke 2 历史 Gate：Vitest 51/51、Rust 串行 105/105 等已记录；
-- [x] internal runtime anchor 与 `projects[]` user authority 分层；Local/Remote 0 root 都合法，0 root 时 Runtime 可连接但 ChatGPT readiness 保持 pending；
+- [x] internal runtime anchor 与 `projects[]` user authority 分层；0 root 时 Runtime/transport 可连接、ChatGPT transport 可显示“可访问”，但 aggregate `ready_for_chatgpt=false`，整体仍等待 customer-authorized project；
 - [x] 多 root add/remove authority；Remote add/remove 不切 Local、不重新 pairing；
 - [x] Remote Server/Runner readiness 与 Local OpenAI Tunnel 投影分离；offline URL 不假绿；
 - [x] UIFix / BrandFix：RC5 心智渐变/动效、Tray 精简/locale、激活错误 i18n、6 locale 品牌守卫；
 - [x] 本轮 Stage D 自动化：frontend typecheck + focused `49/49`；Rust Desktop `121 passed / 0 failed / 5 ignored`；Runner config `31/31`；CLI lib `318/318`；fmt / diff check 通过；
-- [x] 当前 BrandFix installer SHA256：`B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71`；bundled runtime `0.4.1 / ae858f5360ff / dirty=false`；
+- [x] 历史 BrandFix installer SHA256：`B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71`；bundled runtime `0.4.1 / ae858f5360ff / dirty=false`；当前 v1 dogfood 已继续推进到 `8d5a16aa`。
 - [ ] Explorer 图标缓存后的最终用户确认；设备激活跨卸载真实复验；长时间断线自愈观察；
 - [x] 安全整改代码已拆为 `d98eeb8b` / `fca59435` / `ede713a0` 三个 checkpoint；Stage E 文档、回归、secret scan 与 push 已在 `48f9af16` 收口并固定为 final remediation HEAD。后续纯文档 v1 规划不改变该审计边界。
 
@@ -316,34 +317,34 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - [x] 2026-09-15 用户人工点击 GUI 完成一次实际销售码签发体验验收；
 - [ ] 服务端未来如增加 `list / inspect / revoke`，再另批扩展，不直接读写 `licenses.db`。
 
-### Safety / Remote migration — SOURCE REMEDIATION CHECKPOINTED / DYNAMIC VERIFY NEXT
+### Safety remediation / advanced topology — SOURCE COMPLETE; v1 TARGETED VERIFY
 
 - [x] arbitrary execution capability contract 与 encoded PowerShell direct gap；
 - [x] Windows Runner/user long-lived credential protected DACL；
-- [x] Remote saved profile discovery / Local+Remote coexistence / transactional topology / 0-root / real readiness source state machine；
-- [ ] 用 `tunnel-test` 在 disposable test root 完成 normal execution + destructive deny + no-child-spawn + junction/reparse 动态 Gate；
-- [ ] 重新 build Desktop + Engine，将同源 Server 部署到 Remote 测试端；
-- [ ] Existing Server 完成 Local→Remote→Local→same Remote、Desktop/Windows restart、transient outage、credential revoke、0-root、project add/remove、read/write/Guard smoke；
-- [ ] 上述链路稳定后再退休 WebCodexLauncher 0.7.2 / WebCodex 0.3.9。
+- [x] Remote saved profile / transactional topology / 0-root / real readiness + D.1 replacement/rollback 源码整改；
+- [ ] v1 RC 在 disposable test root 做 targeted normal execution + destructive deny + no-child-spawn + 必要 reparse fail-closed smoke；
+- [ ] Existing Server / Quick Share 的公网部署、Remote lifecycle 与 Launcher retirement 产品化验收全部转 Post-v1，不阻塞首版。
 
-### Batch H — v1 First-Use Onboarding — NEXT P0
+### Batch H — v1 First-Use Onboarding — CHECKPOINTED / USER VERIFY
 
 完整 UI/商业合同见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md) 与 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
-- [ ] 激活成功后的首次用户进入两步 onboarding，而不是直接首页；
-- [ ] 第 1 步：Tunnel ID + Restricted Runtime Key，提供创建入口；已有配置可跳过；
-- [ ] 第 2 步：ChatGPT App 创建/添加图文指引；已有配置可跳过；
-- [ ] onboarding 完成/跳过不改变真实 readiness；
-- [ ] 设置页可重新打开教程；
-- [ ] 百度网盘 / 夸克网盘配套资料与软件内引导使用同一客户主链。
+- [x] 激活成功后的首次用户进入两步 onboarding，而不是直接首页；
+- [x] 第 1 步：Tunnel ID + Restricted Runtime Key + 官方创建入口；saved credentials 可直接继续；
+- [x] 第 1 步 `我已经配置过，跳过` 只跳当前页进入第 2 步；
+- [x] 第 2 步：ChatGPT App 创建/添加文字教程；可滚动、可在设置页重新打开；
+- [x] onboarding 完成/跳过不改变真实 readiness；
+- [ ] 补齐最终真实截图教程，并让百度网盘 / 夸克网盘资料与软件内引导保持同一客户主链。
 
-### Batch I — v1 RC / public Runner convergence
+### Batch I — v1 Surface Freeze + Local-only RC
 
-- [ ] 独立复审 `5ff6d8fd → remediation final HEAD`，只处理真实 P0/P1；
-- [ ] unique new RC，Desktop + CodexLink Engine + Remote Server source/release identity 对齐；
+- [x] 五项整改与 D.1 独立复审完成；没有已知 release-blocking security P0/P1；
+- [ ] 收口用户接下来反馈的最后一个已知 bug，只补直接 regression；
+- [ ] 正式 UI 隐藏 Existing Server、Quick Share、模式选择页和 `其他配置方式`；底层实现不删除；
+- [ ] unique new RC，Desktop + bundled CodexLink Engine exact source/release identity 对齐；
 - [ ] installer SHA + release metadata；
-- [ ] Existing Server 跑首次连接、0-root、project add/remove、Local→Remote→Local→same Remote、Desktop/Windows restart、transient outage 与 ChatGPT read/write/normal execution；
-- [ ] 关闭 WebCodexLauncher 后新链仍完全可用，随后旧 Launcher 才退出产品依赖；
+- [ ] Local 主链跑 activation/onboarding/0-root/project add-remove/ChatGPT/read-write/normal execution/Desktop+Windows restart/Tunnel recovery；
+- [ ] 关闭 WebCodexLauncher 后 Local 主链仍完全可用；Launcher 是否卸载不阻塞 v1；
 - [ ] upgrade/uninstall/reinstall；
 - [ ] 至少一台从未安装 CodexLink 的朋友/外部测试机 clean-install；
 - [ ] 只修阻塞首发的 P0/P1，不覆盖历史 artifact。
@@ -371,7 +372,7 @@ Deployment Center 需要明确提示：此码验证购买后仍要保留，用�
 - 不删除历史证据目录；
 - `D:\Test` 的 Current-RC / Archive / Rejected / Rollback / CodexLink-Test 是首版 UI 与行为证据，只读保留；
 - 首版产品壳以已验收 RC5 为权威基准，不因当前 rebuild frontend 已存在就默认沿用 rebuild Dashboard；
-- 普通用户配置优先减少步骤和概念，Server/Runner/端口/客户端路径等高级实现默认自动隐藏；
+- 普通用户配置优先减少步骤和概念；v1 用户表面只保留 Local + OpenAI Tunnel + ChatGPT，Server/Runner/端口/客户端路径自动隐藏，Existing Server / Quick Share / 其他 topology 入口默认不展示；
 - 销售激活码是购买 entitlement 与 Desktop 首次激活凭证，不降级成单纯下载密码；
 - Deployment Center 验证购买与 Desktop 设备激活必须使用同一条客户主线，但不能混淆“查看下载”和“设备已激活”；
 - 不把旧 WebCodex Desktop frontend 当成 CodexLink 产品 UI 的长期上游；

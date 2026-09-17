@@ -1,6 +1,6 @@
 # CodexLink Delivery Roadmap
 
-> 状态：**2026-09-16 v1 Release Convergence 路线图；五项源码安全整改与 Stage E 已完成并推送到 `48f9af16`。从现在起冻结首发功能范围，只做整改后二次复审、两步首次引导、同源 RC/公网 Runner 生命周期、clean install/reinstall、真实 P0/P1 修复与 License Operator 轻量收尾，然后发布首个商业版本。**
+> 状态：**2026-09-17 v1 Release Convergence 路线图；五项整改 + D.1 已复审通过，两步 onboarding 已进入真机反馈。v1 正式产品表面冻结为 Local + OpenAI Tunnel + ChatGPT，Existing Server、Quick Share 与“其他配置方式”移出首版 UI / release gate，底层实现保留。当前只做最后一个已知 bug、v1 surface freeze、Local-only RC/clean lifecycle、真实 P0/P1 与 License Operator/分发资料收尾，然后发布。**
 >
 > 目标：把 CodexLink 从 WebCodex 0.4.1 Engine 基线恢复成可商业交付、可维护、可回滚、可长期跟随上游 Engine 的 Windows 产品。
 >
@@ -12,16 +12,17 @@
 >
 > 首版购买资格、下载与设备激活合同见 [`CODEXLINK_COMMERCIAL_FLOW.md`](CODEXLINK_COMMERCIAL_FLOW.md)。
 
-## 0. 2026-09-16 当前已核实状态
+## 0. 2026-09-17 当前已核实状态
 
 ### Engine / 开发链路
 
 - 上游恢复基线：WebCodex Engine `0.4.1`，历史 source `26c44e6436f254183d74db6865d04e2ec1d85930`。
-- 整改前 dogfood bundled CodexLink Engine：`0.4.1 / ae858f5360ff / dirty=false / built_at=1789473127`；本轮源码已变化，下一次 build 必须产生新的 exact source identity，不能继续把 `ae858f...` 当最终版本。
-- 工作目录：`D:\GitHub\CodexLink`；分支：`codexlink-rebuild`；安全恢复锚点：`5ff6d8fd`。
-- 本轮代码 checkpoint：`d98eeb8b`（execution capability boundary）、`fca59435`（Windows enrollment credential ACL）、`ede713a0`（Remote profiles / zero-root / transactional topology / readiness）；Stage E 文档/验证收口为 `48f9af16`，已推送并固定为五项整改 final remediation HEAD。后续纯文档规划 commit 不改变整改审计范围。
-- BrandFix installer SHA256 `B67AB5388095EAB2A256AA2E9EF94231A94E87FE8ED7EBCB939F0D9159C8FF71` 继续作为整改前包证据，不是整改后 release artifact。
-- 当前仍同时保留旧 WebCodexLauncher `0.7.2` / WebCodex `0.3.9` 开发链路与 CodexLink 0.4.1 dogfood 链路；远端迁移通过前不删除旧链路。
+- 整改前 dogfood bundled CodexLink Engine `ae858f...` 只保留历史证据；当前本地完整测试包已经使用 `0.4.1 / 8d5a16aab50a / dirty=false` 同源 runtime 构建。
+- 工作目录：`D:\GitHub\CodexLink`；分支：`codexlink-rebuild`；安全恢复锚点：`5ff6d8fd`；当前 v1 测试包对应产品源码 checkpoint=`8d5a16aa`，`origin/codexlink-rebuild=31ef8186`。后续 docs-only checkpoint 可以继续前进而不改变测试包 source identity；onboarding/打包/首用小修暂未 push。
+- 安全整改 + D.1 代码链为 `d98eeb8b` / `fca59435` / `ede713a0` / `112d08cc` / `31ef8186`；五项整改独立审计范围仍固定 `5ff6d8fd → 48f9af16`。
+- 当前首发收敛本地 checkpoint：`b818a4ff`（first-use onboarding）、`62703c44`（explicit zero-root runner policy）、`8d5a16aa`（onboarding flow tighten）。
+- 当前内部测试 installer：`CodexLink_0.4.1_8d5a16aab50a_onboardingfix_x64-setup.exe`，SHA256 `B831FE427C04697584DA4DC9E25DBEAFC3D18F216D5CD68A6F5FA62ED30F1A59`；它不是最终 v1 artifact。
+- WebCodexLauncher `0.7.2` / WebCodex `0.3.9` 继续保留为开发/维修回滚通道，但不再属于 v1 产品依赖或 release gate。
 - 旧 RC / test installation / VPS 继续作为受保护证据。
 
 ### 已完成 checkpoint
@@ -47,6 +48,10 @@
 - `fca59435` — Windows long-lived enrollment credential ACL hardening；
 - `ede713a0` — Remote saved profiles、0-root、transactional topology 与 topology-specific readiness。
 - `48f9af16` — document security remediation state；Stage E 文档/回归/secret scan/push 收口。
+- `112d08cc` / `31ef8186` — saved Remote Runner replacement + failure rollback D.1；独立定点复审通过。
+- `b818a4ff` — v1 two-step first-use onboarding。
+- `62703c44` — explicit zero-root Runner policy / runtime packaging compile closure。
+- `8d5a16aa` — onboarding 真机反馈收敛：scroll、saved credentials continue、step-local skip、0-project ChatGPT transport projection。
 
 Smoke 3 / Product Shell 与本轮安全整改源码现已形成后续 checkpoint；最终 Stage E 文档 / 回归 / push 状态见 [`CODEXLINK_CURRENT_STATUS.md`](CODEXLINK_CURRENT_STATUS.md)。
 
@@ -67,8 +72,9 @@ CodexLink-managed Runner 仍通过受控 `project activate --allow-raw-shell` �
 - 首版继续以已验收 RC5 产品壳为视觉心智，不采用通用 WebCodex Desktop Dashboard 作为产品界面；
 - Smoke 3 已完成首页/项目/连接/设置、多项目 authority、internal runtime anchor 分离、0 项目健康链路、响应式项目卡、动效、Tray 精简与多语言品牌守卫；
 - 普通用户不再需要先选择“主工作区”才能启动 Runtime；本机 Runtime 可以使用 internal anchor 自动 bootstrap，用户授权路径是独立集合；
-- 新用户若尚未配置 Tunnel ID / Restricted Runtime Key，可以正常进入产品壳并在设置中完成配置；已有凭据的用户应自动恢复连接；
-- 用户项目与 Runtime 连接是两个维度：0 项目不等于 Server/Runner 故障，但 `ready_for_chatgpt=false`，因为 ChatGPT 尚无 customer-authorized path；internal runtime anchor 不得冒充项目；
+- 激活后的首次用户现在进入两步 onboarding；已有 Tunnel 凭据时可直接继续到 ChatGPT App 步骤，第 1 步的“跳过”只跳当前页，设置页可随时重新打开教程；
+- 用户项目与 Runtime 连接是两个维度：0 项目不等于 Server/Runner/Tunnel 故障，ChatGPT transport 可以显示“可访问”，但 aggregate `ready_for_chatgpt=false`，因为还没有 customer-authorized path；internal runtime anchor 不得冒充项目；
+- v1 正式 UI 不再暴露 Existing Server、Quick Share、topology chooser 或“其他配置方式”；这些能力留在代码里作为 hidden experimental/Post-v1。
 - Explorer 图标缓存最终表现、设备激活跨卸载和长期断线自愈仍保留真实机复验；
 - 详细现状见 [`CODEXLINK_CURRENT_STATUS.md`](CODEXLINK_CURRENT_STATUS.md)，规范见 [`CODEXLINK_FIRST_RELEASE_UI.md`](CODEXLINK_FIRST_RELEASE_UI.md)。
 
@@ -239,9 +245,10 @@ Batch F 的过渡 Safe Mode Gate 已完成：CodexLink-managed Runner 只在 des
 | P0 | 恢复正常 model execution | **checkpointed** | arbitrary execution 明确是 Runner OS-account capability，不宣称 authorized-root sandbox；checked project activation 继续控制产品 opt-in |
 | P0 | Batch G：RC5 Product Shell + 极简配置 UX | **CHECKPOINTED / REAL-MACHINE VERIFY** | `ede713a0` 已把 0-root、Remote readiness、project lifecycle 和 topology projection 收口；整改后包仍待重建真机验收 |
 | P0 | Batch H.0：本地 License Operator | **USER VERIFIED / CHECKPOINTED** | `4b4043ca`；Windows GUI 已完成真实一键签发体验验收；管理员 SSH key 只留本机；私钥留在服务器；签发不自动重试 |
-| P0 | 五项整改独立复审 | **NEXT** | `5ff6d8fd → 48f9af16` 独立 range review；只处理真实 P0/P1，不继续追理论整改 |
-| P0 | 首次两步 onboarding | **NEXT AFTER REVIEW** | 激活后 Tunnel/Key → ChatGPT App 两页；已有配置可跳过；onboarding 不伪造 readiness |
-| P0 | v1 RC + Public Runner convergence | **NEXT** | Desktop + CodexLink Engine + Remote Server 同源；restart/outage/Local↔Remote/Launcher-off 主链通过 |
+| P0 | 五项整改 + D.1 独立复审 | **DONE** | 五项 `5ff6d8fd → 48f9af16` + D.1 定点复审通过；无已知 release-blocking security P0/P1 |
+| P0 | 首次两步 onboarding | **CHECKPOINTED / USER VERIFY** | `b818a4ff` + `8d5a16aa`；激活后 Tunnel/Key → ChatGPT App，两页可滚动/可重开，saved credentials 可直接继续，step 1 skip 只跳当前页 |
+| P0 | v1 surface freeze | **NEXT** | 正式 UI 移除/隐藏 Existing Server、Quick Share、topology chooser、`其他配置方式`；底层代码不删除 |
+| P0 | v1 Local-only RC | **NEXT** | Desktop + bundled CodexLink Engine 同源；Local Engine/Runner + OpenAI Tunnel + ChatGPT 主链通过，Remote Server 不再是首发 Gate |
 | P0 | Windows clean lifecycle | **NEXT** | install/activate/onboarding/use → restart → uninstall/reinstall；设备资格与连接恢复符合合同；至少一台 clean machine |
 | P1 | License Operator + 首发资料轻量收尾 | **LAST BEFORE RELEASE** | 只改善真实销售所需复制/提示/防误签发；百度/夸克包附 installer/version/SHA/教程 |
 | P1 | Code signing / notices | **RECOMMENDED / BOUNDED** | 签名强烈推荐；若首批 unsigned 则明确标注 + SHA256；最低 third-party/privacy/support 文案到位 |
@@ -491,9 +498,9 @@ v1 激活成功后的首次用户只走两页 onboarding：
 → 使用
 ```
 
-onboarding 只负责教育和配置，不代表底层已经 ready；两页都跳过时首页仍按真实状态显示待配置。设置页提供重新打开教程。项目授权和 Runtime 连接健康继续是两个独立维度：0 个用户项目时 Server/Runner Runtime 可以健康，但 ChatGPT readiness 保持 pending，直到至少一个用户授权路径存在。Local internal runtime anchor 与 Remote Runner enrollment 都不能作为 customer authority。
+onboarding 只负责教育和配置，不代表底层已经 ready；第 1 步“我已经配置过，跳过”只进入第 2 步，只有第 2 步完成/跳过才退出 onboarding。设置页提供重新打开教程。项目授权和 Runtime/transport 健康继续是两个独立维度：0 个用户项目时 Server/Runner/Secure Link 与 ChatGPT transport 可以健康/可访问，但 aggregate `ready_for_chatgpt=false`，直到至少一个用户授权路径存在。
 
-默认 Local 首用不出现 Server URL、Runner enrollment、loopback 端口、tunnel-client path、health URL；Existing Server 作为高级入口时，Server URL + one-shot pairing 只用于首次 enrollment，后续按 normalized Server URL 复用 saved profile，不随项目增删重新 pairing。
+v1 首用和正常 UI 都不出现 Server URL、Runner enrollment、loopback 端口、tunnel-client path、health URL，也不提供 Existing Server、Quick Share 或“其他配置方式”入口。对应底层实现保留为 hidden experimental/Post-v1，不参与首发教程或验收。
 
 ### 历史证据
 
@@ -559,8 +566,8 @@ onboarding 只负责教育和配置，不代表底层已经 ready；两页都跳
 6. 首次引导第 1 步填写/复用 Tunnel ID + Restricted Runtime Key，创建链接可用；
 7. 首次引导第 2 步按图文创建/添加 ChatGPT App；已有配置可跳过；
 8. 完成或跳过 onboarding 后进入主页面；ready/pending 必须来自真实状态；
-9. CodexLink 自动把 Server / Runner / Secure Link 准备到真实 readiness，不要求用户配置底层组件；
-10. 按需添加一个或多个真实本地授权路径；0 路径时 Runtime 链路仍可健康但 ChatGPT pending；
+9. CodexLink 自动把 Local Server / Runner / Secure Link 准备到真实 readiness，不要求用户配置底层组件；
+10. 按需添加一个或多个真实本地授权路径；0 路径时 Runtime/transport 链路仍可健康且 ChatGPT 节点可显示“可访问”，但整体继续提示等待授权路径；
 11. typed read / search；
 12. typed create + guarded edit + Git diff；
 13. single-file delete；
@@ -641,6 +648,14 @@ CodexLink EXE 中只保留简短稳定入口，例如“查看创建教程”。
 
 ---
 
+## 9.5 v1 Surface Freeze（2026-09-17）
+
+首发正式界面只保留 Local + OpenAI Tunnel + ChatGPT。`连接现有 Server`、`快速共享项目`、模式选择页和首页底部 `其他配置方式` 从 v1 customer surface 移除/隐藏；不删除底层实现、不做破坏性 migration。Remote/Quick Share 的后续产品化、同源 Server 部署和远端 lifecycle smoke 全部进入 Post-v1，根据真实需求再单独恢复入口。
+
+旧 WebCodexLauncher 可以继续留在开发机做维修/回滚，但关闭 Launcher 后 v1 Local 主链必须完全可用；是否卸载 Launcher 不阻塞首发。
+
+---
+
 ## 10. Stage 6 — RC 与正式商业发布
 
 ### RC 不可覆盖
@@ -710,15 +725,15 @@ CodexLink 当前商业策略：
 
 ## 12. 当前下一步顺序
 
-权威实时状态见 [`CODEXLINK_CURRENT_STATUS.md`](CODEXLINK_CURRENT_STATUS.md)。从 `48f9af16` 起严格按 v1 收敛顺序推进：
+权威实时状态见 [`CODEXLINK_CURRENT_STATUS.md`](CODEXLINK_CURRENT_STATUS.md)。五项整改、D.1 与 onboarding 主体已经完成；现在严格按最终 v1 收敛顺序推进：
 
-1. **独立复审五项整改。** 对 `5ff6d8fd → 48f9af16` 做独立源码 review；只有真实 P0/P1 才回到开发，不继续机械追审计清单。
-2. **实现两步首次 onboarding。** 激活后 Tunnel/Key → ChatGPT App；已有配置可跳过；onboarding 与 readiness 解耦；设置页可重开教程。
-3. **冻结整改后 v1 RC。** Build Desktop + CodexLink Engine，记录 exact version / source commit / dirty=false / installer SHA；公网测试 Server 升级为同源 Engine。
-4. **公网 Runner / Launcher retirement smoke。** 验证 0-root、project add/remove、Local↔Remote profile reuse、Desktop/Windows restart、transient outage、ChatGPT read/write/normal execution；关闭 Launcher 后仍正常工作。
+1. **收口用户最后一个已知 bug。** 只修明确复现问题与直接 regression，不再扩新功能。
+2. **实施 v1 surface freeze。** 正式 UI 隐藏 Existing Server、Quick Share、topology chooser 与 `其他配置方式`；底层能力保留。
+3. **冻结 Local-only v1 RC。** Build Desktop + bundled CodexLink Engine，记录 exact version / product source commit / Engine source / dirty=false / installer SHA / 签名状态。
+4. **Local 主链真机 smoke。** activation → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop/Windows restart/autostart → Tunnel/Runtime recovery；关闭 WebCodexLauncher 后仍正常工作。
 5. **clean lifecycle。** upgrade/uninstall/reinstall、设备激活跨普通 app-data 清理、至少一台外部 clean-machine 首用主链。
 6. **发布前 targeted safety smoke。** 只验证我们实际承诺的 typed authority、credential DACL、obvious destructive deny/no-child-spawn；未证实极端理论风险不扩大成长期重构。
-7. **只修 release-blocking P0/P1。** 其余 bug/优化/新能力全部进入 Post-v1 backlog。
+7. **只修 release-blocking P0/P1。** 其余 bug/优化/Remote/Quick Share 产品化全部进入 Post-v1 backlog。
 8. **License Operator 轻量收尾 + 首批商业发布。** 百度/夸克或等价人工渠道附 installer/version/SHA/图文教程；归档唯一 RC，发布 v1。
 
 任何阶段发现会扩大 destructive scope、权限、credential exposure、历史覆盖或不可逆 migration 时立即 stop-the-line；除此之外避免继续用“可以更完美”拖延第一版。

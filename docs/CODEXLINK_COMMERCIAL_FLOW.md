@@ -1,6 +1,6 @@
 # CodexLink First-Release Commercial Entitlement & Activation Flow
 
-> 状态：**2026-09-16 v1 首发收敛合同：设备激活 + 两步首次引导 + 可人工分发的安装/教程资料构成首批商业主链；完整 Deployment Center 不再作为第一版桌面发布的硬阻塞项。**
+> 状态：**2026-09-17 v1 首发商业主链进一步收敛为：设备激活 + 两步首次引导 + Local Engine/Runner + OpenAI Tunnel + ChatGPT + 本地授权路径。Existing Server、Quick Share 与“其他配置方式”不进入首版客户 UI/教程；完整 Deployment Center 仍不作为第一版桌面发布的硬阻塞项。**
 >
 > 核心决策：**同一枚 `MYWS-...` 销售激活码既是购买资格凭证，也是 CodexLink 首次设备激活凭证；它不是单纯的下载密码。**
 >
@@ -189,9 +189,7 @@ Deployment Center 完成后可以把上述人工流程自动化为“验证购�
 3. Restricted Runtime Key；
 4. 需要让 ChatGPT 访问时，再添加一个或多个本地授权路径。
 
-Server、Runner、端口、enrollment、tunnel-client path、health URL 等全部属于实现细节，默认自动处理和隐藏。
-
-高级 `连接现有 Server` 不改变商业 entitlement 语义：设备仍必须先通过同一 Signed License Activation Gate。Remote pairing 只是 Runtime enrollment，不是购买/设备激活凭证；首次成功 enrollment 可在 0 authorized roots 下保存并在后续 Local/Remote 切换或重启后复用，项目授权随后独立添加/撤销，不应再次消费销售激活码或 one-shot pairing code。
+Server、Runner、端口、enrollment、tunnel-client path、health URL 等全部属于实现细节，默认自动处理和隐藏。v1 客户界面也不提供 `连接现有 Server`、Quick Share 或 topology chooser；这些底层能力保留为 hidden experimental/Post-v1，不写入首批销售教程，也不构成商业验收 Gate。
 
 所以最终用户心智是：
 
@@ -250,8 +248,9 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 6. 激活成功后首次用户进入两步 onboarding；已有配置用户可跳过，跳过不伪造 readiness；
 7. upgrade / uninstall / reinstall 不删除 `%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格；即使普通 app data 被清理，同设备仍能恢复已激活状态；
 8. clean-machine 外部测试者可以不理解 Server/Runner/端口等底层概念完成“安装 → 激活 → 两步引导 → 主页面 → 授权项目 → ChatGPT 使用”；
-9. 人工分发资料、Desktop 和未来 Deployment Center 使用一致的产品词汇和同一条客户主链；
-10. 若 Deployment Center 在首发时已经可用，再额外验证购买资格 Gate 与 invalid-code 下载保护；否则这两项留给网站上线验收，不阻塞 Desktop v1。
+9. v1 正式界面不出现 Existing Server、Quick Share、模式选择页或“其他配置方式”；首发支持和教程只围绕 Local + OpenAI Tunnel 主链；
+10. 人工分发资料、Desktop 和未来 Deployment Center 使用一致的产品词汇和同一条客户主链；
+11. 若 Deployment Center 在首发时已经可用，再额外验证购买资格 Gate 与 invalid-code 下载保护；否则这两项留给网站上线验收，不阻塞 Desktop v1。
 
 ---
 
@@ -264,6 +263,7 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 - installer 内购买流程；
 - 多层下载 token 体系；
 - 每次启动在线 License 心跳；
+- 在 v1 客户表面产品化 Existing Server / Remote enrollment 或 Quick Share；
 - 把加密 / 签名实现细节暴露给普通用户。
 
 商业闭环要真实，但实现仍然保持小而清楚。
