@@ -128,7 +128,11 @@ enum AdaptiveRuntimeGatewayTargetRoute {
 fn adaptive_runtime_gateway_target_route(
     target: &str,
     stateless_2026: bool,
+    computer_tools_exposed: bool,
 ) -> AdaptiveRuntimeGatewayTargetRoute {
+    if !computer_tools_exposed && target.starts_with("computer_") {
+        return AdaptiveRuntimeGatewayTargetRoute::Unknown;
+    }
     if target == ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME {
         return AdaptiveRuntimeGatewayTargetRoute::Recursive;
     }
@@ -168,7 +172,7 @@ pub(crate) fn adaptive_runtime_gateway_target_admitted_for_test(
     stateless_2026: bool,
 ) -> bool {
     matches!(
-        adaptive_runtime_gateway_target_route(target, stateless_2026),
+        adaptive_runtime_gateway_target_route(target, stateless_2026, true),
         AdaptiveRuntimeGatewayTargetRoute::Gateway | AdaptiveRuntimeGatewayTargetRoute::Direct
     )
 }
@@ -608,6 +612,16 @@ pub(super) async fn handle_list(
                 stateless_2026,
                 auth,
             );
+            if !runtime.computer_tools_exposed() {
+                if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
+                    tools.retain(|tool| {
+                        !tool
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .is_some_and(|name| name.starts_with("computer_"))
+                    });
+                }
+            }
             if model_surface == ModelSurface::AdaptiveRuntime {
                 if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
                     tools.push(mcp_tool_spec_json(
@@ -1235,7 +1249,11 @@ pub(super) async fn handle_call(
                     return McpOutcome::BadRequest(rpc_error(id, -32602, message));
                 }
             };
-        match adaptive_runtime_gateway_target_route(&target, stateless_2026) {
+        match adaptive_runtime_gateway_target_route(
+            &target,
+            stateless_2026,
+            runtime.computer_tools_exposed(),
+        ) {
             AdaptiveRuntimeGatewayTargetRoute::Gateway
             | AdaptiveRuntimeGatewayTargetRoute::Direct => {
                 params.name = target;
@@ -1546,13 +1564,16 @@ pub(super) async fn handle_call(
     // MCP boundary. Adaptive gateway calls are already reduced to an admitted
     // target and continue through the same normal runtime checks, whether that
     // target's preferred exposure is gateway or direct.
-    let surface_denied = match model_surface {
-        ModelSurface::LocalCoding => !LOCAL_CODING_TOOL_NAMES.contains(&params.name.as_str()),
-        ModelSurface::AdaptiveRuntime => {
-            !via_adaptive_runtime_gateway && !is_adaptive_runtime_direct_tool(&params.name)
-        }
-        ModelSurface::FullOperatorRuntime => false,
-    };
+    let computer_surface_denied =
+        !runtime.computer_tools_exposed() && params.name.starts_with("computer_");
+    let surface_denied = computer_surface_denied
+        || match model_surface {
+            ModelSurface::LocalCoding => !LOCAL_CODING_TOOL_NAMES.contains(&params.name.as_str()),
+            ModelSurface::AdaptiveRuntime => {
+                !via_adaptive_runtime_gateway && !is_adaptive_runtime_direct_tool(&params.name)
+            }
+            ModelSurface::FullOperatorRuntime => false,
+        };
     if surface_denied {
         if let Some(lc) = lifecycle.as_deref() {
             lc.dispatch_failed("surface_denied");

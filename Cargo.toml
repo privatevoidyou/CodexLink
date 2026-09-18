@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/codexlink-product-boundary",
     "crates/webcodex-admin",
     "crates/webcodex-computer",
     "crates/webcodex-connector-runtime",
@@ -35,6 +36,7 @@ name = "webcodex-server"
 path = "src/bin/webcodex-server.rs"
 
 [dependencies]
+codexlink-product-boundary = { path = "crates/codexlink-product-boundary" }
 webcodex-admin = { path = "crates/webcodex-admin" }
 webcodex-connector-runtime = { path = "crates/webcodex-connector-runtime" }
 webcodex-runner-config = { path = "crates/webcodex-runner-config" }

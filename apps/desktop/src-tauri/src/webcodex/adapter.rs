@@ -261,6 +261,7 @@ impl WebCodexAdapter {
         let mut command = Command::new(&binaries.server);
         command.arg("--stop-on-stdin-eof");
         command.env("WEBCODEX_ENV_FILE", env_file);
+        configure_codexlink_v1_server_environment(&mut command);
         remove_tunnel_credentials(&mut command);
         Ok(command)
     }
@@ -1170,9 +1171,31 @@ fn invalid_runtime_path(path: &Path) -> DesktopError {
     )
 }
 
+fn configure_codexlink_v1_server_environment(command: &mut Command) {
+    // CodexLink V1 keeps desktop-control/computer tools as an Engine capability
+    // for future product versions, but they are not part of the Local + ChatGPT
+    // product surface shipped in V1.
+    command.env("WEBCODEX_MCP_COMPUTER_TOOLS", "false");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v1_local_server_process_disables_computer_tool_exposure() {
+        let mut command = Command::new("codexlink-core-server-test");
+        configure_codexlink_v1_server_environment(&mut command);
+        let value = command
+            .get_envs()
+            .find_map(|(key, value)| {
+                (key == std::ffi::OsStr::new("WEBCODEX_MCP_COMPUTER_TOOLS"))
+                    .then_some(value)
+                    .flatten()
+            })
+            .expect("V1 computer-tool exposure override");
+        assert_eq!(value, std::ffi::OsStr::new("false"));
+    }
 
     #[test]
     fn server_url_validation_rejects_credential_and_path_smuggling() {

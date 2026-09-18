@@ -36,6 +36,31 @@ fn discovery_output_schemas_cover_runtime_payload_keys() {
 }
 
 #[test]
+fn v1_policy_can_remove_computer_tools_from_list_and_manifest_discovery() {
+    let runtime = test_runtime().with_computer_tools_exposed(false);
+    let listed = runtime.list_tools_payload(ListToolsOptions {
+        category: None,
+        features: None,
+        summary_only: true,
+        limit: None,
+    });
+    let names = listed["names"].as_array().expect("list_tools names");
+    assert!(names.iter().all(|name| {
+        !name
+            .as_str()
+            .is_some_and(|name| name.starts_with("computer_"))
+    }));
+
+    let manifest = runtime.compact_tool_manifest_payload();
+    let tools = manifest["tools"].as_array().expect("tool_manifest tools");
+    assert!(tools.iter().all(|tool| {
+        !tool["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("computer_"))
+    }));
+}
+
+#[test]
 fn tool_manifest_and_list_tools_limit_truncation_reports_limit_reason() {
     use crate::tool_runtime::tool_definition::TOOL_CATEGORY_SESSION;
 

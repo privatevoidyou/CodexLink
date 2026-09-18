@@ -207,7 +207,7 @@
   "setup.reloadProjectHelp": "Desktop はプロジェクトの正確なアクセス権を再適用し、現在の Runner で有効化します。Runner の更新は旧版や互換性がない場合のみ必要です。",
   "project.eyebrow": "プロジェクト",
   "project.title": "このコンピューターのプロジェクト",
-  "project.description": "CodexLink は明示的に追加したドライブまたはフォルダーだけを許可します。複数のパスを同時に保持できます。",
+  "project.description": "CodexLink のファイル読み取り・編集・プロジェクト操作は、明示的に追加したパスに限定されます。開発用の shell/process コマンドは現在の Windows ユーザー権限で実行され、プロジェクトディレクトリのファイルシステム sandbox ではありません。",
   "project.configured": "設定済みプロジェクト",
   "project.status": "状態",
   "project.allowedRoot": "許可されたルート",

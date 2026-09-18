@@ -15,6 +15,17 @@ fn build_server_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match codexlink_product_boundary::admit_current_process(std::env::args_os().skip(1)) {
+        Ok(codexlink_product_boundary::Admission::Continue) => {}
+        Ok(codexlink_product_boundary::Admission::ExitSuccess(message)) => {
+            println!("{message}");
+            return Ok(());
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(78);
+        }
+    }
     match server_binary_action(std::env::args().skip(1)) {
         ServerBinaryAction::Run { stop_on_stdin_eof } => {
             webcodex::prepare_server_process_environment().map_err(std::io::Error::other)?;

@@ -74,6 +74,16 @@ describe("LocaleProvider", () => {
     }
   });
 
+  it("states the raw execution boundary in every project description", () => {
+    for (const locale of Object.keys(messages) as Locale[]) {
+      const text = messages[locale]["project.description"];
+      expect(text, locale).toContain("shell/process");
+      expect(text, locale).toMatch(/Windows/i);
+    }
+    expect(messages["en-US"]["project.description"]).toContain("filesystem sandbox");
+    expect(messages["zh-CN"]["project.description"]).toContain("文件系统沙箱");
+  });
+
   it.each(LANGUAGES)("persists and restores $value", async ({ value }) => {
     const first = render(<LocaleProvider><LocaleProbe /></LocaleProvider>);
     fireEvent.change(screen.getByRole("combobox"), { target: { value } });

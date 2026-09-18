@@ -106,6 +106,7 @@ Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell
 - internal runtime anchor 与 user authorized roots 分离；internal anchor 只维持 CodexLink Runtime identity，不自动成为用户项目 authority；
 - guarded edit / expected SHA；
 - License 与 Tunnel secret 的 DPAPI protection；
+- Windows V1 安装包中的三颗 CodexLink Core 使用独立 compile-time bundled product mode：普通 operational 入口只接受安装目录内 `CodexLink.exe -> CodexLink Core`（以及已进入该产品进程链后的 Core 子进程）启动；`--version` 与固定 product-mode probe 仅保留诊断能力。通用 WebCodex Engine build 不启用这条 gate，因此 Remote Server / 通用 Engine 架构保持不变。该边界用于关闭“安装包内 Core 直接当第二套产品入口运行”的路径，不宣称提供同一 Windows 用户对二进制篡改/伪造父进程的 cryptographic anti-tamper。
 - 长期 Runner enrollment bearer credential 使用统一 Windows protected secret-file primitive：user token 与 token-bearing `runner.toml` 禁用继承，只授予当前 Windows 用户与 SYSTEM FullAccess；ACL/reparse hardening 失败时 fail closed，overwrite/migration 后不得退化；
 - CodexLink-owned process tree / Job Object 生命周期；
 - installer / migration / staging 的明确 ownership；
@@ -283,7 +284,12 @@ walk tree once
 
 ### 6.1 产品目标与 capability 边界
 
-CodexLink 首版允许正常开发 execution，不因为“用了 shell / Python / Node / PowerShell”就频繁询问用户。选择 arbitrary execution 即表示允许 Agent 以当前 Runner OS account 执行项目命令；这条能力不由 authorized roots 提供完整 filesystem sandbox。能表达成 typed operation 的文件/Git mutation 继续优先使用 typed contract。
+CodexLink 首版允许正常开发 execution，不因为“用了 shell / Python / Node / PowerShell”就频繁询问用户。这里必须把两类 authority 明确分开：
+
+- **Typed file / Git / project operations**：继续受用户明确添加的 exact project roots、canonical/reparse 检查和对应 typed contract 约束；
+- **Raw shell / process execution**：表示允许 Agent 以当前 Runner OS account / 当前 Windows 用户权限启动开发命令。`cwd` 与 authorized roots 用于选择项目上下文和 typed authority，**不构成 child process 的 filesystem sandbox**。
+
+能表达成 typed operation 的文件/Git mutation 继续优先使用 typed contract。产品 UI 不得再把“只授权项目路径”写成对 raw process 的 OS 级文件系统隔离承诺。
 
 正常示例：
 
@@ -343,9 +349,9 @@ python -c "import shutil; shutil.rmtree(...)"
 
 或一个已有脚本内部调用 destructive filesystem API，可能绕过 shell admission。
 
-首版不通过复杂解释器审批、脚本静态分析或 OS sandbox 解决这个问题。
+首版不通过复杂解释器审批、脚本静态分析或 OS sandbox 解决这个问题，也不继续扩展 Python / Node 等解释器 denylist 来伪装任意代码 containment。
 
-这是产品威胁模型中的明确限制，不应被文案隐藏。
+这是产品威胁模型中的明确限制，不应被文案隐藏；Destructive Guard 只承担少量高置信、常见 destructive primitive 的最后一道缓解，不是 raw execution 的安全沙箱。
 
 ---
 

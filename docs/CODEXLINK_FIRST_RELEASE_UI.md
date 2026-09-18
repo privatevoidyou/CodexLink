@@ -199,6 +199,7 @@ v1 不显示 `其他配置方式` 按钮。
 - 允许移除项目授权；
 - 移除授权不删除磁盘文件；
 - 选择哪个目录就授权哪个 canonical exact root，不偷偷扩大到父目录。
+- 项目路径限制描述的是 typed 文件读取/编辑/Git/项目操作的 authority；需要执行开发命令时，`shell/process` 以当前 Windows 用户权限运行，不属于项目目录 filesystem sandbox，UI 必须明确这一例外而不能把项目路径文案包装成 OS 级隔离承诺。
 
 UI 不把 CodexLink 内部 runtime 管理目录、Engine 工作目录或系统维护目录显示成普通用户项目。
 

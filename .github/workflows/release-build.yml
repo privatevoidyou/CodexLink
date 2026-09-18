@@ -659,7 +659,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $binDir = Join-Path "target" (Join-Path $env:RUST_TARGET "release")
+          $env:CODEXLINK_BUNDLED_PRODUCT_MODE = "1"
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE "target\codexlink-release-core"
+          cargo build --locked --release --target $env:RUST_TARGET -p webcodex -p webcodex-cli -p webcodex-runner
+          if ($LASTEXITCODE -ne 0) { throw "CodexLink bundled Core release build failed with exit code $LASTEXITCODE" }
+          $binDir = Join-Path $env:CARGO_TARGET_DIR (Join-Path $env:RUST_TARGET "release")
           $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-release-bundle"
           $tunnelRoot = Join-Path $env:RUNNER_TEMP "openai-tunnel-client-0.0.12"
           if (Test-Path -LiteralPath $tunnelRoot) { throw "Tunnel staging path already exists: $tunnelRoot" }

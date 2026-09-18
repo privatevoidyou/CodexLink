@@ -110,6 +110,7 @@ pub struct ToolRuntime {
     pub(crate) coding_agent_runs: Arc<super::coding_agent::CodingAgentServerState>,
     pub runtime_info: Arc<RuntimeInfo>,
     runtime_exposure: crate::model_surface::RuntimeExposure,
+    computer_tools_exposed: bool,
     pub(crate) checkpoint_store: checkpoint::CheckpointStore,
     pub(crate) sessions: sessions::SessionStore,
     pub(crate) session_shells: SessionShellRegistry,
@@ -188,6 +189,7 @@ impl ToolRuntime {
             runtime_exposure: crate::model_surface::RuntimeExposure::Runtime(
                 crate::model_surface::ModelSurface::LocalCoding,
             ),
+            computer_tools_exposed: true,
             checkpoint_store: checkpoint::CheckpointStore::default(),
             sessions: sessions::SessionStore::default(),
             session_shells: SessionShellRegistry::default(),
@@ -240,6 +242,15 @@ impl ToolRuntime {
 
     pub(crate) fn runtime_exposure(&self) -> crate::model_surface::RuntimeExposure {
         self.runtime_exposure
+    }
+
+    pub(crate) fn with_computer_tools_exposed(mut self, exposed: bool) -> Self {
+        self.computer_tools_exposed = exposed;
+        self
+    }
+
+    pub(crate) fn computer_tools_exposed(&self) -> bool {
+        self.computer_tools_exposed
     }
 
     pub(crate) fn model_surface(&self) -> Option<crate::model_surface::ModelSurface> {

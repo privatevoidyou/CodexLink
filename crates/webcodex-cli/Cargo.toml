@@ -9,6 +9,7 @@ name = "webcodex"
 path = "src/main.rs"
 
 [dependencies]
+codexlink-product-boundary = { path = "../codexlink-product-boundary" }
 webcodex = { path = "../.." }
 webcodex-admin = { path = "../webcodex-admin" }
 webcodex-runner-config = { path = "../webcodex-runner-config" }

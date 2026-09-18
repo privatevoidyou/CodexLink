@@ -5,6 +5,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+codexlink-product-boundary = { path = "../codexlink-product-boundary" }
 agent-client-protocol-schema = { version = "1.7.0", default-features = false }
 webcodex-computer = { path = "../webcodex-computer" }
 webcodex-runner-config = { path = "../webcodex-runner-config" }

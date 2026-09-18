@@ -576,7 +576,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Desktop cargo check failed" }
           cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw "Desktop cargo test failed" }
-      - name: Build exact local WebCodex runtime
+      - name: Build exact CodexLink bundled Core runtime
         id: runtime
         shell: pwsh
         run: |
@@ -586,10 +586,13 @@ jobs:
           $version = (node -e "console.log(require('./npm/webcodex/package.json').version)").Trim()
           $builtAt = [Int64]((git show -s --format=%ct HEAD).Trim())
           $env:WEBCODEX_BUILT_AT = "$builtAt"
+          $env:CODEXLINK_BUNDLED_PRODUCT_MODE = "1"
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE "target\codexlink-dogfood-core"
           cargo build --locked --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner
-          if ($LASTEXITCODE -ne 0) { throw "WebCodex runtime build failed" }
+          if ($LASTEXITCODE -ne 0) { throw "CodexLink bundled Core build failed" }
+          $binDir = Join-Path $env:CARGO_TARGET_DIR "dogfood"
           foreach ($name in @("webcodex", "webcodex-server", "webcodex-runner")) {
-            $binary = Join-Path "target\dogfood" "$name.exe"
+            $binary = Join-Path $binDir "$name.exe"
             $output = @(& $binary --version)
             $exitCode = $LASTEXITCODE
             if ($exitCode -ne 0 -or $output.Count -eq 0 -or -not $output[0]) {
@@ -603,6 +606,7 @@ jobs:
           "short=$short" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           "built_at=$builtAt" >> $env:GITHUB_OUTPUT
+          "bin_dir=$binDir" >> $env:GITHUB_OUTPUT
       - name: Stage exact runtime for Desktop bundle
         id: desktop_bundle
         shell: pwsh
@@ -626,7 +630,7 @@ jobs:
           $tunnelSha = (Get-FileHash -LiteralPath $tunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($tunnelSha -ne $expectedTunnelSha) { throw "Unexpected tunnel-client binary SHA-256: $tunnelSha" }
           & .\scripts\prepare_desktop_bundle.ps1 `
-            -BinDir "target\dogfood" `
+            -BinDir "${{ steps.runtime.outputs.bin_dir }}" `
             -TunnelClient $tunnelClient `
             -Version "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `

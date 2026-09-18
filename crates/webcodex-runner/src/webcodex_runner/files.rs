@@ -78,7 +78,7 @@ pub(crate) fn handle_basic_file_request(
         RunnerFileOperation::Write(_) => {
             handle_file_write_request(policy, request, resolved, start)
         }
-        RunnerFileOperation::List(_) => handle_file_list_request(resolved, start),
+        RunnerFileOperation::List(_) => handle_file_list_request(request, resolved, start),
         RunnerFileOperation::SkillListPackages(_) => {
             handle_skill_list_packages_request(request, resolved, start)
         }
@@ -1169,8 +1169,36 @@ fn handle_file_write_request(
     }
 }
 
-fn handle_file_list_request(resolved: &Path, start: Instant) -> CommandResult {
-    match std::fs::read_dir(resolved) {
+fn checked_project_list_target(cwd: Option<&str>, resolved: &Path) -> Result<PathBuf, String> {
+    let project_root = cwd.ok_or_else(|| "file list request missing project root".to_string())?;
+    let canonical_root = std::fs::canonicalize(project_root)
+        .map_err(|error| format!("project root does not exist: {error}"))?;
+    let canonical_target = std::fs::canonicalize(resolved)
+        .map_err(|error| format!("file list path is unavailable: {error}"))?;
+    if !webcodex_runner_config::paths::path_is_within(&canonical_target, &canonical_root) {
+        return Err("file list path escapes project root".to_string());
+    }
+    Ok(canonical_target)
+}
+
+fn handle_file_list_request(
+    request: &RunnerFilePayload,
+    resolved: &Path,
+    start: Instant,
+) -> CommandResult {
+    let resolved = match checked_project_list_target(request.cwd.as_deref(), resolved) {
+        Ok(path) => path,
+        Err(error) => {
+            return CommandResult {
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                duration_ms: Some(start.elapsed().as_millis() as u64),
+                error: Some(error),
+            }
+        }
+    };
+    match std::fs::read_dir(&resolved) {
         Ok(entries) => {
             let mut names = Vec::new();
             for entry in entries.flatten() {
@@ -1199,5 +1227,66 @@ fn handle_file_list_request(resolved: &Path, start: Instant) -> CommandResult {
             duration_ms: Some(start.elapsed().as_millis() as u64),
             error: Some(format!("failed to list {}: {}", resolved.display(), e)),
         },
+    }
+}
+
+#[cfg(test)]
+mod project_list_fence_tests {
+    use super::checked_project_list_target;
+    use std::fs;
+
+    #[test]
+    fn ordinary_project_list_target_stays_inside_exact_project() {
+        let project = tempfile::tempdir().unwrap();
+        let nested = project.path().join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let resolved =
+            checked_project_list_target(Some(project.path().to_string_lossy().as_ref()), &nested)
+                .unwrap();
+        assert!(webcodex_runner_config::paths::path_is_within(
+            &resolved,
+            &project.path().canonicalize().unwrap()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_list_rejects_symlink_to_another_authorized_root() {
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let link = project.path().join("other-project");
+        std::os::unix::fs::symlink(other.path(), &link).unwrap();
+        let error =
+            checked_project_list_target(Some(project.path().to_string_lossy().as_ref()), &link)
+                .unwrap_err();
+        assert_eq!(error, "file list path escapes project root");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_list_rejects_junction_to_another_authorized_root() {
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let junction = project.path().join("other-project");
+        let created = std::process::Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "New-Item -ItemType Junction -Path $env:WC_JUNCTION_PATH -Target $env:WC_JUNCTION_TARGET | Out-Null",
+            ])
+            .env("WC_JUNCTION_PATH", &junction)
+            .env("WC_JUNCTION_TARGET", other.path())
+            .output()
+            .expect("create junction for list fence regression");
+        assert!(
+            created.status.success(),
+            "junction creation failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let error =
+            checked_project_list_target(Some(project.path().to_string_lossy().as_ref()), &junction)
+                .unwrap_err();
+        assert_eq!(error, "file list path escapes project root");
     }
 }

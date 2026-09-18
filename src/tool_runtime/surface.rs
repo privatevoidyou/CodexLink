@@ -15,13 +15,15 @@ use super::tool_definition::{
     available_tool_manifest_intent_names, is_model_visible_tool_name, resolve_tool_manifest_intent,
     runtime_tool_category, runtime_tool_metadata, ToolManifestIntent, TOOL_CATEGORY_ARTIFACT,
     TOOL_CATEGORY_EDIT, TOOL_CATEGORY_GIT, TOOL_CATEGORY_PATCH, TOOL_CATEGORY_RUNTIME,
-    TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION, TOOL_DISCOVERY_GROUPS, TOOL_RECOMMENDED_FLOWS,
+    TOOL_CATEGORY_SESSION, TOOL_CATEGORY_VALIDATION, TOOL_RECOMMENDED_FLOWS,
 };
 use super::tool_inputs::ListToolsOptions;
 use super::tool_result::ToolResult;
 use super::tool_spec::ToolSpec;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
+#[cfg(test)]
+use webcodex_tool_contracts::tool_definition::TOOL_DISCOVERY_GROUPS;
 
 const TOOL_MANIFEST_SELECTION_DESCRIPTION_MAX_CHARS: usize = 180;
 const TOOL_MANIFEST_CANONICAL_KEYS: &[&str] = &[
@@ -49,6 +51,7 @@ const TOOL_MANIFEST_CANONICAL_KEYS: &[&str] = &[
     "recommended_flows",
 ];
 
+#[cfg(test)]
 pub(crate) fn registered_tool_categories() -> Value {
     let mut categories = serde_json::Map::new();
     for group in TOOL_DISCOVERY_GROUPS {
@@ -75,8 +78,12 @@ pub(crate) fn recommended_flows() -> Vec<&'static str> {
 fn tool_manifest_specs(
     capabilities: ToolProtocolCapabilities,
     model_surface: crate::model_surface::ModelSurface,
+    computer_tools_exposed: bool,
 ) -> Vec<ToolSpec> {
     let mut specs = registered_tool_specs();
+    if !computer_tools_exposed {
+        specs.retain(|spec| !spec.name.starts_with("computer_"));
+    }
     if model_surface.supports_operator_extensions() {
         specs.extend(
             stateless_operator_extension_tool_specs()
@@ -127,7 +134,10 @@ impl ToolRuntime {
     pub(crate) const LIST_TOOLS_MAX_LIMIT: usize = 256;
 
     pub(crate) fn list_tools_payload(&self, options: ListToolsOptions) -> Value {
-        let specs = registered_tool_specs();
+        let mut specs = registered_tool_specs();
+        if !self.computer_tools_exposed() {
+            specs.retain(|spec| !spec.name.starts_with("computer_"));
+        }
         let total_count = specs.len();
         let filtered_indexes = list_tools_filtered_indexes(&specs, &options);
         let filtered_count = filtered_indexes.len();
@@ -184,7 +194,7 @@ impl ToolRuntime {
             "categories": if bounded_request {
                 build_manifest_categories(&specs)
             } else {
-                registered_tool_categories()
+                build_manifest_categories(&specs)
             },
             "recommended_flows": recommended_flows(),
             "recommended_next": "For daily GPT Action discovery, call callRuntimeTool with tool=tool_manifest. Use full listRuntimeTools only when debugging schemas.",
@@ -264,7 +274,11 @@ impl ToolRuntime {
         if tool_name.is_empty() {
             return Err(unknown_tool_manifest_tool_result(tool_name));
         }
-        let specs = tool_manifest_specs(protocol_capabilities, model_surface);
+        let specs = tool_manifest_specs(
+            protocol_capabilities,
+            model_surface,
+            self.computer_tools_exposed(),
+        );
         let tool_count = specs.len();
         let Some(spec) = specs.iter().find(|spec| spec.name == tool_name) else {
             return Err(unknown_tool_manifest_tool_result(tool_name));
@@ -386,7 +400,11 @@ impl ToolRuntime {
             )
         })?;
 
-        let specs = tool_manifest_specs(protocol_capabilities, model_surface);
+        let specs = tool_manifest_specs(
+            protocol_capabilities,
+            model_surface,
+            self.computer_tools_exposed(),
+        );
         let tool_count = specs.len();
         let categories_requested = normalize_tool_manifest_categories(categories);
         let category = categories_requested

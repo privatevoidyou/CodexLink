@@ -91,6 +91,56 @@ function Get-VersionLine([string]$binary, [string]$name) {
     }
 }
 
+function Get-ProductModeProbe([string]$binary, [string]$name) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $binary
+    $start.Arguments = "--codexlink-product-mode-probe"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw "$name product-mode probe could not start" }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $null = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0 -or $stdout.Trim() -ne "codexlink-bundled-product-v1") {
+            throw "$name is not a CodexLink bundled product-mode binary"
+        }
+        return $stdout.Trim()
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-StandaloneCoreBlocked([string]$binary) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $binary
+    $start.Arguments = "server status --url http://127.0.0.1:1 --json --no-system-proxy"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw "standalone CodexLink Core admission smoke could not start" }
+        $null = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -eq 0) {
+            throw "bundled CodexLink Core unexpectedly allowed a standalone operational command"
+        }
+        if (-not $stderr.Contains("bundled CodexLink Core requires an activated CodexLink Desktop")) {
+            throw "bundled CodexLink Core failed for an unexpected reason: $stderr"
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 function Wait-Until([scriptblock]$Condition, [int]$Seconds, [string]$Failure) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     do {
@@ -166,7 +216,10 @@ try {
         if ($line -ne $expected) {
             throw "unexpected installed $($entry.File) identity: '$line' (expected '$expected')"
         }
+        $null = Get-ProductModeProbe $binary ([System.IO.Path]::GetFileNameWithoutExtension($entry.File))
     }
+
+    Assert-StandaloneCoreBlocked (Join-Path $runtimeDir "codexlink-core.exe")
 
     $legacyBrandPaths = @(
         Get-ChildItem -LiteralPath $installedDir -Recurse -Force -ErrorAction Stop |

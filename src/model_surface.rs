@@ -28,6 +28,7 @@ pub(crate) const MCP_MODEL_SURFACE_ENV: &str = "WEBCODEX_MCP_MODEL_SURFACE";
 pub(crate) const MCP_MODEL_SURFACE_LOCAL_CODING_V1: &str = "local-coding-v1";
 pub(crate) const MCP_MODEL_SURFACE_ADAPTIVE_RUNTIME_V1: &str = "adaptive-runtime-v1";
 pub(crate) const MCP_MODEL_SURFACE_FULL_OPERATOR_V1: &str = "full-operator-v1";
+pub(crate) const MCP_COMPUTER_TOOLS_ENV: &str = "WEBCODEX_MCP_COMPUTER_TOOLS";
 
 pub(crate) const ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME: &str = "call_runtime_tool";
 pub(crate) const TOOL_SURFACE_AVAILABILITY_DIRECT: &str = "direct";
@@ -147,6 +148,23 @@ impl ModelSurface {
                 }
             }
             Self::FullOperatorRuntime => (TOOL_SURFACE_AVAILABILITY_DIRECT, None),
+        }
+    }
+}
+
+pub(crate) fn resolve_mcp_computer_tools_exposed() -> Result<bool, String> {
+    match std::env::var(MCP_COMPUTER_TOOLS_ENV) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok(true),
+            "false" | "0" | "no" | "off" => Ok(false),
+            _ => Err(format!(
+                "unsupported {MCP_COMPUTER_TOOLS_ENV} value {:?}; expected true or false",
+                value.trim()
+            )),
+        },
+        Err(std::env::VarError::NotPresent) => Ok(true),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(format!("{MCP_COMPUTER_TOOLS_ENV} is not valid UTF-8"))
         }
     }
 }
@@ -477,6 +495,18 @@ mod tests {
         )
         .unwrap_err()
         .contains("cannot coexist with Connector runtime state"));
+    }
+
+    #[test]
+    fn computer_tool_exposure_defaults_on_and_accepts_explicit_disable() {
+        let mut env = crate::test_support::TestEnvGuard::new();
+        env.remove(MCP_COMPUTER_TOOLS_ENV);
+        assert_eq!(resolve_mcp_computer_tools_exposed(), Ok(true));
+        env.set(MCP_COMPUTER_TOOLS_ENV, "false");
+        assert_eq!(resolve_mcp_computer_tools_exposed(), Ok(false));
+        env.set(MCP_COMPUTER_TOOLS_ENV, "bogus");
+        assert!(resolve_mcp_computer_tools_exposed().is_err());
+        env.remove(MCP_COMPUTER_TOOLS_ENV);
     }
 
     #[test]

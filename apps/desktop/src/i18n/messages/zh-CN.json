@@ -207,7 +207,7 @@
   "setup.reloadProjectHelp": "Desktop 会重新应用该项目的精确目录权限并在当前 Runner 上激活；只有旧版或不兼容 Runner 才需要刷新。",
   "project.eyebrow": "项目",
   "project.title": "此电脑上的项目",
-  "project.description": "CodexLink 只授权你明确添加的盘符或文件夹；可以同时保留多个路径，不会自动扩大到未授权位置。",
+  "project.description": "CodexLink 的文件读取、编辑和项目操作只作用于你明确添加的路径。执行开发命令时，shell/process 以当前 Windows 用户权限运行，不属于项目目录文件系统沙箱。",
   "project.configured": "已配置项目",
   "project.status": "状态",
   "project.allowedRoot": "允许的根目录",

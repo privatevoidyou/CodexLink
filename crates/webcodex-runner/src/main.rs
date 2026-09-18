@@ -5742,6 +5742,17 @@ fn handle_one_poll(
 }
 
 fn main() {
+    match codexlink_product_boundary::admit_current_process(std::env::args_os().skip(1)) {
+        Ok(codexlink_product_boundary::Admission::Continue) => {}
+        Ok(codexlink_product_boundary::Admission::ExitSuccess(message)) => {
+            println!("{message}");
+            return;
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(78);
+        }
+    }
     if let Some(code) =
         webcodex_runner::detached_job::maybe_run_internal_mode(std::env::args().skip(1))
     {

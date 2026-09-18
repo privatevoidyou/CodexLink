@@ -185,6 +185,50 @@ async fn apply_patch_schema_reaches_full_local_and_adaptive_surfaces() {
 }
 
 #[tokio::test]
+async fn disabled_computer_policy_hides_full_operator_tools_and_blocks_adaptive_gateway() {
+    let full = test_runtime_with_surface(ModelSurface::FullOperatorRuntime)
+        .with_computer_tools_exposed(false);
+    let outcome = handle_mcp_request(
+        &full,
+        rpc("tools/list", Some(Value::from(603)), json!({})),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(value) = outcome else {
+        panic!("full operator tools/list must succeed");
+    };
+    let tools = value["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().all(|tool| {
+        !tool["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("computer_"))
+    }));
+
+    let adaptive =
+        test_runtime_with_surface(ModelSurface::AdaptiveRuntime).with_computer_tools_exposed(false);
+    let denied = handle_mcp_request(
+        &adaptive,
+        rpc(
+            "tools/call",
+            Some(json!(604)),
+            mcp_2026_params(json!({
+                "name": crate::mcp::tools::ADAPTIVE_RUNTIME_GATEWAY_TOOL_NAME,
+                "arguments": {"tool": "computer_list_targets", "arguments": {}}
+            })),
+        ),
+        None,
+    )
+    .await;
+    let McpOutcome::Ok(value) = denied else {
+        panic!("disabled computer gateway target should return structured unknown-tool");
+    };
+    let output = &value["result"]["structuredContent"]["output"];
+    assert_eq!(output["error_kind"], "unknown_tool");
+    assert_eq!(output["execution_state"], "not_started");
+    assert_eq!(output["state_changed"], false);
+}
+
+#[tokio::test]
 async fn local_coding_default_initialize_and_discovery_report_local_coding() {
     // Preserve the unset-env integration path, but confine process env state
     // to synchronous runtime construction.

@@ -272,6 +272,8 @@ only for local/trusted-network demos."
     // projection reads this immutable enum from ToolRuntime.
     let runtime_exposure = model_surface::resolve_runtime_exposure(connector_context.as_ref())
         .map_err(std::io::Error::other)?;
+    let computer_tools_exposed =
+        model_surface::resolve_mcp_computer_tools_exposed().map_err(std::io::Error::other)?;
     let runtime_info = Arc::new(tool_runtime::RuntimeInfo::from_config_with_quic_config(
         &config, &quic_cfg,
     ));
@@ -279,6 +281,7 @@ only for local/trusted-network demos."
     let mut tool_runtime_builder =
         tool_runtime::ToolRuntime::new(runner_registry.clone(), runtime_info.clone())
             .with_runtime_exposure(runtime_exposure)
+            .with_computer_tools_exposed(computer_tools_exposed)
             .with_window_activity_database(db.clone())
             .with_memory_database(db.clone())
             .with_communication_database(db.clone())

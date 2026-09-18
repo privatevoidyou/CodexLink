@@ -20,7 +20,17 @@ pub(crate) fn migrate_legacy_state_if_needed(target: &Path) -> io::Result<()> {
         require_real_directory(target, "CodexLink state directory")?;
     }
     let marker = target.join(MIGRATION_MARKER);
+    let durable_marker = durable_migration_marker(target);
+    if let Some(path) = durable_marker.as_deref() {
+        if existing_regular_file(path)? {
+            return Ok(());
+        }
+    }
     if existing_regular_file(&marker)? {
+        if let Some(path) = durable_marker.as_deref() {
+            write_bytes_if_missing(path, b"codexlink-state-migration-v1\n", None)?;
+        }
+        remove_regular_file_if_present(&target.join(MIGRATION_IN_PROGRESS))?;
         return Ok(());
     }
     let in_progress = target.join(MIGRATION_IN_PROGRESS);
@@ -33,6 +43,9 @@ pub(crate) fn migrate_legacy_state_if_needed(target: &Path) -> io::Result<()> {
     if !resuming && target_has_authoritative_state(target)? {
         ensure_real_directory(target)?;
         write_bytes_if_missing(&marker, b"codexlink-state-migration-v1\n", None)?;
+        if let Some(path) = durable_marker.as_deref() {
+            write_bytes_if_missing(path, b"codexlink-state-migration-v1\n", None)?;
+        }
         return Ok(());
     }
 
@@ -57,6 +70,9 @@ pub(crate) fn migrate_legacy_state_if_needed(target: &Path) -> io::Result<()> {
     migrate_license_payload(&legacy, target)?;
 
     write_bytes_if_missing(&marker, b"codexlink-state-migration-v1\n", None)?;
+    if let Some(path) = durable_marker.as_deref() {
+        write_bytes_if_missing(path, b"codexlink-state-migration-v1\n", None)?;
+    }
     remove_regular_file_if_present(&in_progress)?;
     Ok(())
 }
@@ -84,6 +100,24 @@ fn legacy_data_dir(target: &Path) -> Option<PathBuf> {
         return None;
     }
     Some(target.parent()?.join(LEGACY_DATA_DIR_NAME))
+}
+
+#[cfg(windows)]
+fn durable_migration_marker(target: &Path) -> Option<PathBuf> {
+    if target.file_name()?.to_str()? != PRODUCT_DATA_DIR_NAME {
+        return None;
+    }
+    Some(
+        target
+            .parent()?
+            .join(crate::license::WINDOWS_DEVICE_ACTIVATION_DIR_NAME)
+            .join(MIGRATION_MARKER),
+    )
+}
+
+#[cfg(not(windows))]
+fn durable_migration_marker(_target: &Path) -> Option<PathBuf> {
+    None
 }
 
 fn migrate_desktop_state(legacy: &Path, target: &Path) -> io::Result<()> {
@@ -980,6 +1014,47 @@ mod tests {
         migrate_legacy_state_if_needed(&target).expect("repeat migration");
         assert!(!migrated_secret.exists());
         assert!(legacy.join("secrets/tunnel-config.json").is_file());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn durable_marker_prevents_whole_target_deletion_from_resurrecting_legacy_state() {
+        let (_temp, legacy, target) = roots();
+        populate_legacy(&legacy);
+        migrate_legacy_state_if_needed(&target).expect("first migration");
+        let durable = durable_migration_marker(&target).expect("durable marker path");
+        assert!(durable.is_file());
+
+        fs::remove_dir_all(&target).expect("delete complete migrated app-data fixture");
+        assert!(legacy.join("desktop-state.json").is_file());
+
+        migrate_legacy_state_if_needed(&target).expect("repeat migration after app-data reset");
+        assert!(!target.exists(), "legacy state must not be resurrected");
+        assert!(durable.is_file());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_target_marker_is_promoted_to_durable_completion_marker() {
+        let (_temp, legacy, target) = roots();
+        populate_legacy(&legacy);
+        fs::create_dir_all(&target).unwrap();
+        write(
+            &target.join(MIGRATION_MARKER),
+            b"codexlink-state-migration-v1\n",
+        );
+        let durable = durable_migration_marker(&target).expect("durable marker path");
+        assert!(!durable.exists());
+
+        migrate_legacy_state_if_needed(&target).expect("promote completion marker");
+        assert!(durable.is_file());
+
+        fs::remove_dir_all(&target).expect("delete complete target fixture");
+        migrate_legacy_state_if_needed(&target).expect("repeat migration after app-data reset");
+        assert!(
+            !target.exists(),
+            "promoted marker must suppress legacy resurrection"
+        );
     }
 
     #[test]

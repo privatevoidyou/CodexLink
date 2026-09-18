@@ -306,7 +306,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("needs.changes.outputs.needs_windows_package == 'true'", windows_package)
         self.assertIn("needs.changes.outputs.needs_windows_desktop == 'true'", windows_desktop)
         self.assertIn("cargo build --locked --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner", windows_desktop)
-        self.assertIn('Join-Path "target\\dogfood"', windows_desktop)
+        self.assertIn('$env:CODEXLINK_BUNDLED_PRODUCT_MODE = "1"', windows_desktop)
+        self.assertIn("target\\codexlink-dogfood-core", windows_desktop)
+        self.assertIn('-BinDir "${{ steps.runtime.outputs.bin_dir }}"', windows_desktop)
         windows_arm64 = job_block("test-windows-arm64", "test-windows")
         self.assertIn("runs-on: windows-11-arm", windows_arm64)
         self.assertIn("aarch64-pc-windows-msvc", windows_arm64)
@@ -331,6 +333,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("runner_real_process -- --ignored", workflow)
         self.assertNotIn("desktop_real_process_windows_ -- --ignored", workflow)
         self.assertIn("cargo build --locked --release -p webcodex -p webcodex-cli -p webcodex-runner", release_build)
+        self.assertIn('$env:CODEXLINK_BUNDLED_PRODUCT_MODE = "1"', release_build)
+        self.assertIn("target\\codexlink-release-core", release_build)
+        self.assertIn("cargo build --locked --release --target $env:RUST_TARGET -p webcodex -p webcodex-cli -p webcodex-runner", release_build)
+        self.assertIn("codexlink-bundled-product-v1", Path("scripts/prepare_desktop_bundle.ps1").read_text(encoding="utf-8"))
 
     def test_ci_native_lane_conditions_are_classifier_driven(self) -> None:
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")

@@ -1,7 +1,7 @@
 # Stage exact CodexLink Core bytes for a Windows x64 Tauri Desktop bundle.
 #
-# This helper consumes already-built release binaries, verifies one exact
-# source/version/build identity, copies them into an ignored generated tree,
+# This helper consumes already-built CodexLink product-mode binaries, verifies
+# one exact source/version/build identity plus the bundled-product marker, copies them into an ignored generated tree,
 # proves the copies are byte-for-byte identical, and writes a Tauri config
 # overlay that maps only those staged files into the customer-visible `codexlink-core` tree.
 [CmdletBinding()]
@@ -88,6 +88,13 @@ try {
             throw "unexpected $sourceName.exe identity: '$line' (expected '$expected')"
         }
 
+        $probeOutput = @(& $source --codexlink-product-mode-probe)
+        $probeExitCode = $LASTEXITCODE
+        $probeLine = @($probeOutput | Where-Object { $_ -ne "" })
+        if ($probeExitCode -ne 0 -or $probeLine.Count -ne 1 -or $probeLine[0].TrimEnd() -ne "codexlink-bundled-product-v1") {
+            throw "$sourceName.exe is not a CodexLink bundled product-mode binary"
+        }
+
         $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
         $destination = Join-Path $runtimeDir "$destinationName.exe"
         Copy-Item -LiteralPath $source -Destination $destination
@@ -142,6 +149,7 @@ try {
         version = $Version
         source_sha = $SourceSha.ToLowerInvariant()
         built_at = $BuiltAt
+        product_mode = "codexlink-bundled-product-v1"
         resource_dir = "resources/codexlink-core"
         tunnel_client_required_for_codexlink = $true
         tunnel_client_sha256 = $tunnelClientSha256

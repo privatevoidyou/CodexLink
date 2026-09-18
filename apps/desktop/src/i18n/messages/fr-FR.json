@@ -207,7 +207,7 @@
   "setup.reloadProjectHelp": "Desktop réapplique l’accès exact au projet et l’active sur le Runner actuel ; seuls les Runners anciens ou incompatibles doivent être actualisés.",
   "project.eyebrow": "Projets",
   "project.title": "Projets sur cet ordinateur",
-  "project.description": "CodexLink autorise uniquement les lecteurs ou dossiers que vous ajoutez explicitement. Plusieurs chemins peuvent rester autorisés en même temps.",
+  "project.description": "CodexLink limite les opérations de lecture/édition de fichiers et de projet aux chemins ajoutés explicitement. Les commandes de développement shell/process s’exécutent avec les droits de l’utilisateur Windows actuel et ne constituent pas une sandbox du système de fichiers du projet.",
   "project.configured": "Projet configuré",
   "project.status": "État",
   "project.allowedRoot": "Racine autorisée",
