@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-17，五项安全整改 + D.1 lifecycle 收口已通过独立复审；两步首次 onboarding 与 v1 Local-only surface freeze 已实现并通过前端回归。首页显著主按钮现在按真实状态承担恢复/启动/添加项目/查看项目动作；Existing Server、Quick Share、模式选择页与“其他配置方式”已从正式 App 路径移出，底层实现保留为 hidden experimental / Post-v1。朋友真机采集的 18 张图文教程已内置到 onboarding，以缩略图 + 点击放大预览提供，支持点击遮罩 / 关闭按钮 / Esc 关闭。Windows v1 客户安装树的 bundled runtime 已统一为 `CodexLink Core` 外层品牌。下一步进入最终安全/破解面审计、clean-machine RC 全流程与正式发布验收。**
+> 状态快照：**2026-09-22，v1 Local-only 功能、安全边界、clean-machine 主链与三轮源码审计均已收敛；最终二进制审计曾真实复现“bundled Core 顶层单分支 patch 可绕过 activation 并进入 `server init`”的商业授权弱点，现已完成 targeted commercial hardening。优化 dogfood 二进制已证明 startup admission 与 CLI / Server / Runner 第二阶段 admission 分离，合法激活可正常穿过两层 gate、空激活三份 Core 均 fail closed，旧 product-mode 成功 probe / 可读逆向锚点已移除。下一步只剩从最终冻结 HEAD 重建 hardened RC/installer，并对受影响生命周期做窄回归后封版。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -11,11 +11,12 @@
 - 安全恢复锚点：`5ff6d8fda07e5172f272e07b8b4b9bdd74ad0bb7` — `CodexLink: checkpoint pre-scale-test hardening`；不得改写历史。
 - 五项整改与 D.1 lifecycle 收口已经形成 `d98eeb8b` → `fca59435` → `ede713a0` → `112d08cc` → `31ef8186`；其中 `31ef8186` 已推送到 `origin/codexlink-rebuild`，并作为当前远端安全基线。
 - 五项整改的独立审计范围仍固定为 `5ff6d8fd → 48f9af16`；D.1 saved-Remote Runner replacement 与 failure rollback 另行定点复审并通过，不重新打开整改范围。
-- 当前首发产品/测试源码在远端安全基线之上继续形成 `b818a4ff` → `62703c44` → `8d5a16aa` → `7788c6fe` → `042e0c2b` → `d1c23c8a` → `e3c970ff`。其中 `e3c970ffd666ce6b4b8971690d1bbb935c55a0f0` 是当前 Windows v1 代码 checkpoint：已包含 zero-root Local authority、最终 onboarding/错误分类、18 张图文教程，以及客户安装树的 `CodexLink Core` 品牌映射。这些首发收敛提交暂未 push，等待最终审计与 RC 冻结。
-- 当前最后一个**已生成的完整测试安装包**仍是 `d1c23c8a` 对应的 `CodexLink_0.4.1_d1c23c8affec_handsontest_x64-setup.exe`，SHA256 `5F4C7B2EEA274B9810E873F706F7F398FBB5485BA9764A525CDB075BFE6170EA`。它早于 `e3c970ff` 的 CodexLink Core 品牌收口，因此只保留为上一轮 hands-on evidence；最终审计后必须从新的精确源码 checkpoint 重建 RC。
-- 历史 `ae858f...` runtime 与 BrandFix installer 继续只作为整改前证据，不再代表当前测试线。
+- 当前首发产品源码已经继续推进到 commercial hardening checkpoint `b48b3cf1bcc4d41e519ad8845b94391c8c556a50`。其中 `8f8b71d9` 把 bundled Core 从单一 boolean admission 改为 verified activation fingerprint + process/binary-bound runtime seal + CLI/Server/Runner 第二阶段 admission；`b48b3cf1` 进一步删除旧 product-mode success probe 与新加入的可读 stage/fingerprint domain 文本，避免主动提供逆向锚点。这两次 hardening 都只在本地 `codexlink-rebuild`，未 push。
+- hardening 前最后一个完整 Final RC installer 来自 `7ff41acd7a9eb08089609dd42539f3fcc4961914`：`CodexLink_0.4.1_7ff41acd7a9e_finalrc_x64-setup.exe`，SHA256 `43296E305FF2E28D049596A529BB8C8DA0A674DC78BFBCFB6897683BE6447BB1`。该包已完成此前 clean-machine 11/11 与运行时安全抽检，但它**早于 commercial hardening**，现在只保留为功能/生命周期证据，不再作为最终销售候选。
+- `b48b3cf1` 已生成 optimized dogfood Core 作为 hardening binary evidence：Core SHA256 `C8A2C5EE070E7BCDCC340C67A4EE71154F5C8651C8A06E74C5D5A1D903D0272F`；Server `7FFC0C692498971D909D82B9ABCC375359CF796A80846F9274F10289B3ED392D`；Runner `89F96D0080874E400378E86DC0102FBE8B0D918D342FC9653134FB7B7A3099FF`；三者 `dirty=false`、`built_at=1790046019`。对应 staging 为 `target\codexlink-hardening-bundle-b48b3cf1bcc4`，metadata `product_mode=verified-fail-closed-v2`。
+- 历史 `d1c23c8a` hands-on installer、`ae858f...` runtime 与 BrandFix installer 继续只作为历史证据，不再代表当前测试线。
 
-历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；上一轮完整 hands-on installer 的 bundled Engine 来自 `d1c23c8a`，当前源码已继续推进到 `e3c970ff`，历史 `ae858f...` 只保留为整改前证据。上游恢复基线、历史整改证据、已生成测试 installer 与当前源码 checkpoint 必须分别记录，不能混写成同一个 source identity。
+历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；当前 hardened product checkpoint 是 `b48b3cf1`，而 `7ff41acd` Final RC、`d1c23c8a` hands-on 与更早 `ae858f...` 必须分别作为不同阶段证据记录，不能混写成同一个 source identity。
 
 ## 2. 当前产品架构
 
@@ -127,7 +128,23 @@ Windows v1 客户安装目录不再暴露 `webcodex-runtime` 或 `webcodex*.exe`
 
 最终 Windows RC 的品牌 Gate 以**干净安装**为准：新 installer 不应生成任何 customer-visible `webcodex` 文件/目录名。为避免在安装器里新增不必要的递归删除面，不通过 `RMDir /r` 自动清理内部测试时期的旧 `webcodex-runtime`；测试旧包升级时应先正常卸载旧测试包，再验证 clean install。
 
-### 4.3 License Operator
+### 4.3 Bundled runtime commercial hardening
+
+2026-09-22 的最终 binary audit 在旧 `7ff41acd` RC 上真实证明：攻击者无需伪造 Ed25519 或解开 DPAPI，只 patch `codexlink-core.exe` 顶层 activation-result 条件，再配合可伪造的产品父进程，即可在空 activation 环境下让 `server status` 返回正常 JSON，并进一步成功执行 `server init` 生成 bootstrap token。因此旧设计的密码学本身虽然正确，但“所有校验最终汇总成单一 boolean branch”不足以满足首发商业抗低成本 patch 目标。
+
+当前 hardening 不引入 TPM、联网 lease、VMProtect 或新的 DRM 服务，而是只消除该单点：
+
+- `verify_installed_activation()` 在验签成功后返回 32-byte activation fingerprint，绑定 CurrentUser DPAPI device secret 与 exact signed `license.json` bytes；
+- operational startup 成功后建立 process-local runtime seal，绑定 activation fingerprint、当前 PID 与 canonical executable path；
+- CLI、Server、Runner 在真正进入各自 runtime 前分别执行第二阶段 admission，再验 activation、parent/layout，并核对 startup seal；
+- `--version` 保持独立诊断路径；generic/non-bundled Engine 行为保持不变；
+- 旧 `--codexlink-product-mode-probe` / `codexlink-bundled-product-v1` 成功 marker 已删除；bundle/smoke 现在通过“故意未知 operational arg 必须 exit 78 + product-denied”证明 fail-closed product mode。
+
+optimized `b48b3cf1` 二进制复审显示三份 binary 都保留了彼此分离的 verifier / runtime-seal / stage gate。License verifier 在每个 binary 中均有两个不同直接调用者（startup + second stage），runtime-seal 也分别由 startup seal 与 stage gate 调用；CLI / Server / Runner 各有独立 stage wrapper。合法 activation + 正确产品布局时三份 binary 均能穿过双 gate，空 `LOCALAPPDATA` 时三份均 exit 78 fail closed；旧 success marker、可读 fingerprint/stage domain 与 `CODEXLINK_BUNDLED_PRODUCT_MODE` 字符串均不在 optimized binary 中。
+
+这项整改的目标是把现实攻击成本从“一处明显 branch patch”提高到必须理解并同时处理多阶段 gate / seal / 多 binary；它**不宣称 Windows 本地 native binary 对专业逆向者不可破解**。如果未来商业规模证明仍需要更强 DRM，再基于真实滥用证据评估 online lease / revocation 或更重保护，不作为 v1 无限扩项。
+
+### 4.4 License Operator
 
 Batch H.0 已提交并推远端：`4b4043ca`。
 
@@ -193,7 +210,7 @@ WebCodexLauncher 0.7.2
 
 ```text
 CodexLink Desktop
-→ bundled WebCodex 0.4.1（当前测试线 source 8d5a16aa）
+→ bundled CodexLink Core / Engine 0.4.1（当前 hardened code checkpoint b48b3cf1）
 → CodexLink-managed Local Server/Runner
 → OpenAI Secure Tunnel
 → ChatGPT
@@ -215,12 +232,16 @@ CodexLink Desktop
 - Remote profile URL normalization / ambiguous profile / transient-vs-revoked classification、0-root、rollback、Remote readiness focused tests：通过；
 - `cargo fmt --all -- --check` 与 `git diff --check`：通过；
 - 从 `5ff6d8fd` 到当前 worktree 的 bounded secret scan 对 pairing/user/agent token、private-key header、OpenAI secret-key / literal assignment 均为 `0` 命中。
+- commercial hardening source gate：`codexlink-product-boundary` `8/8`；`cargo check --locked -p webcodex -p webcodex-cli -p webcodex-runner` 通过；release-readiness `17/17`；两个 Windows bundle/smoke PowerShell 文件 parser 通过；
+- `b48b3cf1` optimized product-mode 动态 gate：合法 activation + 正确 CodexLink install layout 时 Core/Server/Runner 均穿过两层 admission 后进入自身参数解析（exit 2、非 product-denied）；空 activation 时三份均 exit 78 + product-denied；三份独立 `--version` 均 exit 0；
+- `b48b3cf1` optimized binary call-map：三份 License verifier 均有 startup + second-stage 两个不同直接调用者；runtime-seal 也有 stage gate + startup seal 两个不同调用者；旧 product-mode probe / marker 与可读 stage/fingerprint 文本均 `0` 命中；
+- V1 `computer_*` runtime attack：`tools/list` 中 `computer_* = 0`；已知隐藏名后强制 `call_runtime_tool(computer_list_targets)` 仍返回 `unknown_tool / not_started`，不是只做 UI/list 隐藏。
 
 **Workspace full-suite caveat：** `cargo test --workspace --lib` 在 Windows 的根 `webcodex` 巨型 test binary 中出现 suite-order `STATUS_STACK_OVERFLOW`。首次触发在 `runtime_console_http::...window_activity_lookup...`；该测试单独 `1/1` 通过且对应源码自 `5ff6d8fd` 起无 diff。串行 `--test-threads=1` 仍复现；跳过该条后又在更晚的既有 `tool_runtime::tests::jobs::list_jobs...` 发生同类 stack overflow，该条单独也 `1/1` 通过且对应源码无 diff。因此不能宣称“workspace combined suite 全绿”，也不在本轮五项整改范围外修改这些测试。其余本轮相关 focused/产品 Gate 如上均为绿色。
 
 这些自动化证据仍不替代最终 v1 Local RC 的 clean install / restart / uninstall-reinstall / ChatGPT 真机 smoke；Remote Server 不再属于 v1 验收矩阵。
 
-## 10. v1 Release Convergence：仍未完成的首发硬 Gate
+## 10. v1 Release Convergence：hardening 后剩余首发硬 Gate
 
 项目已经停止横向扩功能。五项整改、D.1 与两步 onboarding 主体均已完成；v1 现在只保留会直接影响普通付费用户“安装后能否顺利用到第二天”的工作：
 
@@ -228,7 +249,7 @@ CodexLink Desktop
 
 当前剩余硬 Gate：
 
-1. **冻结同源 v1 RC**：Desktop + bundled CodexLink Engine/runtime 来自同一 exact source identity，记录 installer SHA / build metadata；v1 不要求部署同源公网 Remote Server；
+1. **重建并冻结 hardened 同源 v1 RC**：Desktop + bundled CodexLink Core/runtime 必须来自 commercial-hardening 之后的最终 exact source identity，记录 installer SHA / build metadata；`7ff41acd` installer 只保留为 hardening 前 evidence；v1 不要求部署同源公网 Remote Server；
 2. **Local 主链生命周期验收**：激活 → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop restart → Windows restart/登录启动 → 短暂 Tunnel/Runtime 恢复，在 Launcher 关闭时仍正常；
 3. **clean install / uninstall / reinstall Gate**：设备激活资格、Tunnel 凭据、授权项目与用户可恢复路径符合合同；至少一台真正 clean Windows 环境完成首次使用主链；
 4. **发布前 targeted 安全抽检**：对 typed authority、credential DACL、明显 destructive deny/no-child-spawn 做 disposable-root smoke；未证实极端项记录风险，不为了理论完美阻塞首发；
