@@ -1,7 +1,7 @@
 # Stage exact CodexLink Core bytes for a Windows x64 Tauri Desktop bundle.
 #
 # This helper consumes already-built CodexLink product-mode binaries, verifies
-# one exact source/version/build identity plus the bundled-product marker, copies them into an ignored generated tree,
+# one exact source/version/build identity plus fail-closed bundled admission, copies them into an ignored generated tree,
 # proves the copies are byte-for-byte identical, and writes a Tauri config
 # overlay that maps only those staged files into the customer-visible `codexlink-core` tree.
 [CmdletBinding()]
@@ -59,6 +59,29 @@ $binaryMap = @(
 $resourceMap = [ordered]@{}
 $fileMetadata = [ordered]@{}
 
+function Assert-BundledProductMode([string]$binary, [string]$name) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $binary
+    $start.Arguments = "--codexlink-bundle-verification"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw "$name.exe bundled admission verification could not start" }
+        $null = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 78 -or -not $stderr.Contains("bundled CodexLink Core requires an activated CodexLink Desktop")) {
+            throw "$name.exe is not a fail-closed CodexLink bundled product-mode binary"
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 try {
     foreach ($binary in $binaryMap) {
         $sourceName = $binary.Source
@@ -88,12 +111,7 @@ try {
             throw "unexpected $sourceName.exe identity: '$line' (expected '$expected')"
         }
 
-        $probeOutput = @(& $source --codexlink-product-mode-probe)
-        $probeExitCode = $LASTEXITCODE
-        $probeLine = @($probeOutput | Where-Object { $_ -ne "" })
-        if ($probeExitCode -ne 0 -or $probeLine.Count -ne 1 -or $probeLine[0].TrimEnd() -ne "codexlink-bundled-product-v1") {
-            throw "$sourceName.exe is not a CodexLink bundled product-mode binary"
-        }
+        Assert-BundledProductMode $source $sourceName
 
         $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
         $destination = Join-Path $runtimeDir "$destinationName.exe"
@@ -149,7 +167,7 @@ try {
         version = $Version
         source_sha = $SourceSha.ToLowerInvariant()
         built_at = $BuiltAt
-        product_mode = "codexlink-bundled-product-v1"
+        product_mode = "verified-fail-closed-v2"
         resource_dir = "resources/codexlink-core"
         tunnel_client_required_for_codexlink = $true
         tunnel_client_sha256 = $tunnelClientSha256

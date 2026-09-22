@@ -91,10 +91,10 @@ function Get-VersionLine([string]$binary, [string]$name) {
     }
 }
 
-function Get-ProductModeProbe([string]$binary, [string]$name) {
+function Assert-BundledProductMode([string]$binary, [string]$name) {
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $binary
-    $start.Arguments = "--codexlink-product-mode-probe"
+    $start.Arguments = "--codexlink-bundle-verification"
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
@@ -102,14 +102,13 @@ function Get-ProductModeProbe([string]$binary, [string]$name) {
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
-        if (-not $process.Start()) { throw "$name product-mode probe could not start" }
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $null = $process.StandardError.ReadToEnd()
+        if (-not $process.Start()) { throw "$name bundled admission verification could not start" }
+        $null = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
         $process.WaitForExit()
-        if ($process.ExitCode -ne 0 -or $stdout.Trim() -ne "codexlink-bundled-product-v1") {
-            throw "$name is not a CodexLink bundled product-mode binary"
+        if ($process.ExitCode -ne 78 -or -not $stderr.Contains("bundled CodexLink Core requires an activated CodexLink Desktop")) {
+            throw "$name is not a fail-closed CodexLink bundled product-mode binary"
         }
-        return $stdout.Trim()
     } finally {
         $process.Dispose()
     }
@@ -216,7 +215,7 @@ try {
         if ($line -ne $expected) {
             throw "unexpected installed $($entry.File) identity: '$line' (expected '$expected')"
         }
-        $null = Get-ProductModeProbe $binary ([System.IO.Path]::GetFileNameWithoutExtension($entry.File))
+        Assert-BundledProductMode $binary ([System.IO.Path]::GetFileNameWithoutExtension($entry.File))
     }
 
     Assert-StandaloneCoreBlocked (Join-Path $runtimeDir "codexlink-core.exe")

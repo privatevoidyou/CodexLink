@@ -336,7 +336,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('$env:CODEXLINK_BUNDLED_PRODUCT_MODE = "1"', release_build)
         self.assertIn("target\\codexlink-release-core", release_build)
         self.assertIn("cargo build --locked --release --target $env:RUST_TARGET -p webcodex -p webcodex-cli -p webcodex-runner", release_build)
-        self.assertIn("codexlink-bundled-product-v1", Path("scripts/prepare_desktop_bundle.ps1").read_text(encoding="utf-8"))
+        desktop_bundle = Path("scripts/prepare_desktop_bundle.ps1").read_text(encoding="utf-8")
+        self.assertIn("Assert-BundledProductMode", desktop_bundle)
+        self.assertIn("verified-fail-closed-v2", desktop_bundle)
+        self.assertNotIn("codexlink-bundled-product-v1", desktop_bundle)
 
     def test_ci_native_lane_conditions_are_classifier_driven(self) -> None:
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")

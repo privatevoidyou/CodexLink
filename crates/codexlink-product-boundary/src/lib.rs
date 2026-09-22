@@ -7,11 +7,17 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-pub const PRODUCT_MODE_PROBE_ARG: &str = "--codexlink-product-mode-probe";
-pub const PRODUCT_MODE_PROBE_OUTPUT: &str = "codexlink-bundled-product-v1";
 pub const PRODUCT_MODE_DENIED: &str =
     "bundled CodexLink Core requires an activated CodexLink Desktop";
+
+const ACTIVATION_FINGERPRINT_DOMAIN: &[u8] = b"CodexLink activation fingerprint v1\0";
+const RUNTIME_SEAL_DOMAIN: &[u8] = b"CodexLink runtime admission seal v1\0";
+const CLI_STAGE_DOMAIN: &[u8] = b"CodexLink CLI operational stage v1\0";
+const SERVER_STAGE_DOMAIN: &[u8] = b"CodexLink Server operational stage v1\0";
+const RUNNER_STAGE_DOMAIN: &[u8] = b"CodexLink Runner operational stage v1\0";
+static STARTUP_RUNTIME_SEAL: OnceLock<[u8; 32]> = OnceLock::new();
 
 const LICENSE_VERSION: u32 = 1;
 const LICENSE_PRODUCT: &str = "webcodex-deployment";
@@ -49,8 +55,8 @@ struct LicenseSigningPayload<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Admission {
-    Continue,
-    ExitSuccess(&'static str),
+    Operational,
+    Diagnostic,
 }
 
 pub fn bundled_product_mode() -> bool {
@@ -62,35 +68,97 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let args = args.into_iter().collect::<Vec<_>>();
-    if !bundled_product_mode() {
-        return Ok(Admission::Continue);
-    }
-    if is_exact_argument(&args, PRODUCT_MODE_PROBE_ARG) {
-        return Ok(Admission::ExitSuccess(PRODUCT_MODE_PROBE_OUTPUT));
-    }
     if is_exact_argument(&args, "--version") || is_exact_argument(&args, "-V") {
-        return Ok(Admission::Continue);
+        return Ok(Admission::Diagnostic);
     }
-    if verify_installed_activation().is_ok() && current_process_has_product_parent() {
-        Ok(Admission::Continue)
+    if !bundled_product_mode() {
+        return Ok(Admission::Operational);
+    }
+
+    let fingerprint = verify_installed_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    if !current_process_has_product_parent() {
+        return Err(PRODUCT_MODE_DENIED.to_string());
+    }
+    install_startup_runtime_seal(&fingerprint).map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    Ok(Admission::Operational)
+}
+
+#[inline(never)]
+pub fn require_cli_runtime() -> Result<(), String> {
+    require_operational_stage(CLI_STAGE_DOMAIN)
+}
+
+#[inline(never)]
+pub fn require_server_runtime() -> Result<(), String> {
+    require_operational_stage(SERVER_STAGE_DOMAIN)
+}
+
+#[inline(never)]
+pub fn require_runner_runtime() -> Result<(), String> {
+    require_operational_stage(RUNNER_STAGE_DOMAIN)
+}
+
+fn require_operational_stage(stage_domain: &[u8]) -> Result<(), String> {
+    if !bundled_product_mode() {
+        return Ok(());
+    }
+    let fingerprint = verify_installed_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    if !current_process_has_product_parent() {
+        return Err(PRODUCT_MODE_DENIED.to_string());
+    }
+    let expected = runtime_seal(&fingerprint).map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    if stage_seal_matches(STARTUP_RUNTIME_SEAL.get(), &expected, stage_domain) {
+        Ok(())
     } else {
         Err(PRODUCT_MODE_DENIED.to_string())
     }
 }
 
+fn install_startup_runtime_seal(fingerprint: &[u8; 32]) -> Result<(), ()> {
+    let seal = runtime_seal(fingerprint)?;
+    match STARTUP_RUNTIME_SEAL.set(seal) {
+        Ok(()) => Ok(()),
+        Err(seal) => STARTUP_RUNTIME_SEAL
+            .get()
+            .filter(|existing| fixed_32_eq(existing, &seal))
+            .map(|_| ())
+            .ok_or(()),
+    }
+}
+
+fn stage_seal_matches(
+    startup_seal: Option<&[u8; 32]>,
+    expected_runtime_seal: &[u8; 32],
+    stage_domain: &[u8],
+) -> bool {
+    let Some(startup_seal) = startup_seal else {
+        return false;
+    };
+    let actual = derive_stage_proof(startup_seal, stage_domain);
+    let expected = derive_stage_proof(expected_runtime_seal, stage_domain);
+    fixed_32_eq(&actual, &expected)
+}
+
+fn fixed_32_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
+}
+
 #[cfg(windows)]
-fn verify_installed_activation() -> Result<(), ()> {
+fn verify_installed_activation() -> Result<[u8; 32], ()> {
     let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or(())?;
     let license_dir = PathBuf::from(local_app_data).join(WINDOWS_DEVICE_ACTIVATION_DIR_NAME);
     verify_activation_dir(&license_dir)
 }
 
 #[cfg(not(windows))]
-fn verify_installed_activation() -> Result<(), ()> {
+fn verify_installed_activation() -> Result<[u8; 32], ()> {
     Err(())
 }
 
-fn verify_activation_dir(license_dir: &Path) -> Result<(), ()> {
+fn verify_activation_dir(license_dir: &Path) -> Result<[u8; 32], ()> {
     let metadata = fs::symlink_metadata(license_dir).map_err(|_| ())?;
     if !metadata.is_dir() {
         return Err(());
@@ -100,11 +168,19 @@ fn verify_activation_dir(license_dir: &Path) -> Result<(), ()> {
         &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
         DEVICE_IDENTITY_MAX_BYTES,
     )?;
-    let expected_device_id = device_id_from_identity_blob(&identity_blob)?;
-    let license_bytes =
-        read_bounded_regular_file(&license_dir.join(LICENSE_FILE_NAME), LICENSE_FILE_MAX_BYTES)?;
-    let verifying_key = production_verifying_key()?;
-    verify_signed_license_bytes(&license_bytes, &expected_device_id, &verifying_key)
+    let mut secret = device_secret_from_identity_blob(&identity_blob)?;
+    let result = (|| {
+        let expected_device_id = derive_device_id(&secret);
+        let license_bytes = read_bounded_regular_file(
+            &license_dir.join(LICENSE_FILE_NAME),
+            LICENSE_FILE_MAX_BYTES,
+        )?;
+        let verifying_key = production_verifying_key()?;
+        verify_signed_license_bytes(&license_bytes, &expected_device_id, &verifying_key)?;
+        Ok(derive_activation_fingerprint(&secret, &license_bytes))
+    })();
+    secret.fill(0);
+    result
 }
 
 fn read_bounded_regular_file(path: &Path, limit: u64) -> Result<Vec<u8>, ()> {
@@ -123,14 +199,19 @@ fn read_bounded_regular_file(path: &Path, limit: u64) -> Result<Vec<u8>, ()> {
     Ok(bytes)
 }
 
-fn device_id_from_identity_blob(bytes: &[u8]) -> Result<String, ()> {
+fn device_secret_from_identity_blob(bytes: &[u8]) -> Result<[u8; DEVICE_SECRET_BYTES], ()> {
     if bytes.len() <= DEVICE_IDENTITY_MAGIC.len()
         || &bytes[..DEVICE_IDENTITY_MAGIC.len()] != DEVICE_IDENTITY_MAGIC
     {
         return Err(());
     }
     let secret = unprotect_current_user(&bytes[DEVICE_IDENTITY_MAGIC.len()..])?;
-    let mut secret: [u8; DEVICE_SECRET_BYTES] = secret.try_into().map_err(|_| ())?;
+    secret.try_into().map_err(|_| ())
+}
+
+#[cfg(test)]
+fn device_id_from_identity_blob(bytes: &[u8]) -> Result<String, ()> {
+    let mut secret = device_secret_from_identity_blob(bytes)?;
     let device_id = derive_device_id(&secret);
     secret.fill(0);
     Ok(device_id)
@@ -145,6 +226,43 @@ fn derive_device_id(secret: &[u8; DEVICE_SECRET_BYTES]) -> String {
         let _ = write!(&mut value, "{byte:02x}");
     }
     value
+}
+
+fn derive_activation_fingerprint(
+    secret: &[u8; DEVICE_SECRET_BYTES],
+    license_bytes: &[u8],
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(ACTIVATION_FINGERPRINT_DOMAIN);
+    hasher.update(secret);
+    hasher.update(Sha256::digest(license_bytes));
+    hasher.finalize().into()
+}
+
+fn runtime_seal(fingerprint: &[u8; 32]) -> Result<[u8; 32], ()> {
+    let current_exe = std::env::current_exe().map_err(|_| ())?;
+    let current_exe = fs::canonicalize(&current_exe).unwrap_or(current_exe);
+    Ok(derive_runtime_seal_for(
+        fingerprint,
+        std::process::id(),
+        current_exe.to_string_lossy().as_bytes(),
+    ))
+}
+
+fn derive_runtime_seal_for(fingerprint: &[u8; 32], pid: u32, executable_path: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(RUNTIME_SEAL_DOMAIN);
+    hasher.update(fingerprint);
+    hasher.update(pid.to_le_bytes());
+    hasher.update(executable_path);
+    hasher.finalize().into()
+}
+
+fn derive_stage_proof(runtime_seal: &[u8; 32], stage_domain: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(stage_domain);
+    hasher.update(runtime_seal);
+    hasher.finalize().into()
 }
 
 fn verify_signed_license_bytes(
@@ -407,17 +525,14 @@ mod tests {
         parent_ok: bool,
     ) -> Result<Admission, String> {
         let args = args.iter().map(OsString::from).collect::<Vec<_>>();
-        if !product_mode {
-            return Ok(Admission::Continue);
-        }
-        if is_exact_argument(&args, PRODUCT_MODE_PROBE_ARG) {
-            return Ok(Admission::ExitSuccess(PRODUCT_MODE_PROBE_OUTPUT));
-        }
         if is_exact_argument(&args, "--version") || is_exact_argument(&args, "-V") {
-            return Ok(Admission::Continue);
+            return Ok(Admission::Diagnostic);
+        }
+        if !product_mode {
+            return Ok(Admission::Operational);
         }
         if activation_ok && parent_ok {
-            Ok(Admission::Continue)
+            Ok(Admission::Operational)
         } else {
             Err(PRODUCT_MODE_DENIED.to_string())
         }
@@ -427,19 +542,15 @@ mod tests {
     fn generic_engine_mode_preserves_standalone_behavior() {
         assert_eq!(
             decide(false, &["server", "run"], false, false),
-            Ok(Admission::Continue)
+            Ok(Admission::Operational)
         );
     }
 
     #[test]
-    fn bundled_mode_keeps_version_and_probe_diagnostic_only() {
+    fn bundled_mode_keeps_exact_version_diagnostic_only() {
         assert_eq!(
             decide(true, &["--version"], false, false),
-            Ok(Admission::Continue)
-        );
-        assert_eq!(
-            decide(true, &[PRODUCT_MODE_PROBE_ARG], false, false),
-            Ok(Admission::ExitSuccess(PRODUCT_MODE_PROBE_OUTPUT))
+            Ok(Admission::Diagnostic)
         );
         assert_eq!(
             decide(true, &["--version", "extra"], false, false),
@@ -451,7 +562,7 @@ mod tests {
     fn bundled_mode_requires_activation_and_product_parent_for_operational_entrypoints() {
         assert_eq!(
             decide(true, &["server", "run"], true, true),
-            Ok(Admission::Continue)
+            Ok(Admission::Operational)
         );
         assert_eq!(
             decide(true, &["server", "run"], false, true),
@@ -461,6 +572,43 @@ mod tests {
             decide(true, &["server", "run"], true, false),
             Err(PRODUCT_MODE_DENIED.to_string())
         );
+    }
+
+    #[test]
+    fn runtime_seal_binds_activation_process_and_binary() {
+        let fingerprint = [7u8; 32];
+        let baseline =
+            derive_runtime_seal_for(&fingerprint, 42, b"C:/CodexLink/codexlink-core.exe");
+        assert_ne!(
+            baseline,
+            derive_runtime_seal_for(&[8u8; 32], 42, b"C:/CodexLink/codexlink-core.exe")
+        );
+        assert_ne!(
+            baseline,
+            derive_runtime_seal_for(&fingerprint, 43, b"C:/CodexLink/codexlink-core.exe")
+        );
+        assert_ne!(
+            baseline,
+            derive_runtime_seal_for(&fingerprint, 42, b"C:/CodexLink/codexlink-core-runner.exe")
+        );
+    }
+
+    #[test]
+    fn operational_stage_requires_matching_startup_seal() {
+        let fingerprint = [11u8; 32];
+        let expected = derive_runtime_seal_for(&fingerprint, 99, b"runtime.exe");
+        assert!(stage_seal_matches(
+            Some(&expected),
+            &expected,
+            CLI_STAGE_DOMAIN
+        ));
+        assert!(!stage_seal_matches(None, &expected, CLI_STAGE_DOMAIN));
+        let other = derive_runtime_seal_for(&[12u8; 32], 99, b"runtime.exe");
+        assert!(!stage_seal_matches(
+            Some(&other),
+            &expected,
+            CLI_STAGE_DOMAIN
+        ));
     }
 
     #[test]
