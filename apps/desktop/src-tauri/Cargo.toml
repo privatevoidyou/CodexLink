@@ -1,6 +1,6 @@
 [package]
-name = "webcodex-desktop"
-version = "0.4.1"
+name = "codexlink-desktop"
+version = "1.0.0"
 description = "CodexLink desktop application"
 edition = "2021"
 publish = false
@@ -9,7 +9,7 @@ publish = false
 [workspace]
 
 [lib]
-name = "webcodex_desktop_lib"
+name = "codexlink_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

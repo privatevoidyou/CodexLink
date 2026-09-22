@@ -131,6 +131,7 @@ def _workflow_contract(root: Path) -> str:
             ("-Installer $env:DESKTOP_INSTALLER_PATH", build),
             ("dist/webcodex-desktop-*.dmg", build),
             ("dist/webcodex-desktop-*-win32-x64-setup.exe", build),
+            ("DESKTOP_PRODUCT_VERSION=$productVersion", build),
             ("signing_mode=adhoc", build),
             ('export APPLE_SIGNING_IDENTITY="-"', build),
         ),

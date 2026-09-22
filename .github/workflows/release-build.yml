@@ -664,7 +664,7 @@ jobs:
           cargo build --locked --release --target $env:RUST_TARGET -p webcodex -p webcodex-cli -p webcodex-runner
           if ($LASTEXITCODE -ne 0) { throw "CodexLink bundled Core release build failed with exit code $LASTEXITCODE" }
           $binDir = Join-Path $env:CARGO_TARGET_DIR (Join-Path $env:RUST_TARGET "release")
-          $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-release-bundle"
+          $stage = Join-Path $env:RUNNER_TEMP "codexlink-desktop-release-bundle"
           $tunnelRoot = Join-Path $env:RUNNER_TEMP "openai-tunnel-client-0.0.12"
           if (Test-Path -LiteralPath $tunnelRoot) { throw "Tunnel staging path already exists: $tunnelRoot" }
           New-Item -ItemType Directory -Path $tunnelRoot | Out-Null
@@ -681,15 +681,19 @@ jobs:
           $expectedTunnelSha = "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8"
           $tunnelSha = (Get-FileHash -LiteralPath $tunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($tunnelSha -ne $expectedTunnelSha) { throw "Unexpected tunnel-client binary SHA-256: $tunnelSha" }
+          $productVersion = (Get-Content -LiteralPath "apps\desktop\package.json" -Raw | ConvertFrom-Json).version
           & .\scripts\prepare_desktop_bundle.ps1 `
             -BinDir $binDir `
             -TunnelClient $tunnelClient `
-            -Version $env:VERSION `
+            -ProductVersion $productVersion `
+            -EngineVersion $env:VERSION `
             -SourceSha $env:SOURCE_SHA `
             -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT) `
             -OutputDir $stage
 
           $shortSource = $env:SOURCE_SHA.Substring(0, 12)
+          # This workflow publishes the upstream WebCodex Engine release set.
+          # CodexLink product releases use their own product version/tag and must not derive it from VERSION.
           if ($env:BUILD_KIND -eq "release") {
             $installerName = "webcodex-desktop-v$env:VERSION-win32-x64-setup.exe"
           } else {
@@ -699,6 +703,7 @@ jobs:
           $installerPath = Join-Path $desktopDist $installerName
           "DESKTOP_TAURI_CONFIG=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_ENV
           "DESKTOP_TAURI_TARGET=$(Join-Path $env:GITHUB_WORKSPACE 'target\desktop-release-tauri')" >> $env:GITHUB_ENV
+          "DESKTOP_PRODUCT_VERSION=$productVersion" >> $env:GITHUB_ENV
           "DESKTOP_INSTALLER_NAME=$installerName" >> $env:GITHUB_ENV
           "DESKTOP_INSTALLER_PATH=$installerPath" >> $env:GITHUB_ENV
 
@@ -731,7 +736,8 @@ jobs:
           & .\scripts\desktop_install_windows_smoke.ps1 `
             -Installer $env:DESKTOP_INSTALLER_PATH `
             -InstallDir (Join-Path $env:RUNNER_TEMP "CodexLink-Smoke-Install") `
-            -Version $env:VERSION `
+            -ProductVersion $env:DESKTOP_PRODUCT_VERSION `
+            -EngineVersion $env:VERSION `
             -SourceSha $env:SOURCE_SHA `
             -BuiltAt ([Int64]$env:WEBCODEX_BUILT_AT)
 

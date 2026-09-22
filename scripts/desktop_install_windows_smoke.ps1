@@ -4,12 +4,19 @@
 param(
     [Parameter(Mandatory = $true)][string]$Installer,
     [Parameter(Mandatory = $true)][string]$InstallDir,
-    [Parameter(Mandatory = $true)][string]$Version,
+    [Parameter(Mandatory = $true)][string]$ProductVersion,
+    [Parameter(Mandatory = $true)][string]$EngineVersion,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt
 )
 
 $ErrorActionPreference = "Stop"
+if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+    throw "invalid CodexLink product version '$ProductVersion'"
+}
+if ($EngineVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+    throw "invalid WebCodex Engine version '$EngineVersion'"
+}
 $Installer = [System.IO.Path]::GetFullPath($Installer)
 $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
@@ -173,6 +180,9 @@ try {
     $installed = $true
 
     $entry = Get-CodexLinkUninstallEntry
+    if ([string]$entry.DisplayVersion -ne $ProductVersion) {
+        throw "unexpected CodexLink product version in uninstall metadata: '$($entry.DisplayVersion)' (expected '$ProductVersion')"
+    }
     $uninstaller = Resolve-UninstallExecutable ([string]$entry.UninstallString)
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
         throw "registered CodexLink uninstaller does not exist: $uninstaller"
@@ -211,7 +221,7 @@ try {
             throw "installed CodexLink Core binary is missing: $binary"
         }
         $line = Get-VersionLine $binary ([System.IO.Path]::GetFileNameWithoutExtension($entry.File))
-        $expected = "$($entry.Identity) $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
+        $expected = "$($entry.Identity) $EngineVersion (commit $shortSource, dirty=false, built_at=$BuiltAt)"
         if ($line -ne $expected) {
             throw "unexpected installed $($entry.File) identity: '$line' (expected '$expected')"
         }

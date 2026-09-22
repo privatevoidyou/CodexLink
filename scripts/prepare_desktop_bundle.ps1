@@ -8,7 +8,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$BinDir,
     [Parameter(Mandatory = $true)][string]$TunnelClient,
-    [Parameter(Mandatory = $true)][string]$Version,
+    [Parameter(Mandatory = $true)][string]$ProductVersion,
+    [Parameter(Mandatory = $true)][string]$EngineVersion,
     [Parameter(Mandatory = $true)][string]$SourceSha,
     [Parameter(Mandatory = $true)][Int64]$BuiltAt,
     [Parameter(Mandatory = $true)][string]$OutputDir
@@ -16,8 +17,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
-    throw "invalid Desktop bundle version '$Version'"
+if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+    throw "invalid CodexLink product version '$ProductVersion'"
+}
+if ($EngineVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+    throw "invalid WebCodex Engine version '$EngineVersion'"
 }
 if ($SourceSha -notmatch '^[0-9A-Fa-f]{40}$') {
     throw "SourceSha must be one exact 40-hex Git commit"
@@ -106,7 +110,7 @@ try {
             throw "$sourceName.exe --version failed while staging Desktop resources (exit code $exitCode)"
         }
         $line = $line[0].TrimEnd()
-        $expected = "$sourceName $Version (commit $shortSource, dirty=false, built_at=$BuiltAt)"
+        $expected = "$sourceName $EngineVersion (commit $shortSource, dirty=false, built_at=$BuiltAt)"
         if ($line -ne $expected) {
             throw "unexpected $sourceName.exe identity: '$line' (expected '$expected')"
         }
@@ -146,7 +150,7 @@ try {
     }
 
     $overlay = [ordered]@{
-        version = $Version
+        version = $ProductVersion
         bundle = [ordered]@{
             active = $true
             targets = @("nsis")
@@ -163,8 +167,10 @@ try {
     [System.IO.File]::WriteAllText($overlayPath, ($overlay | ConvertTo-Json -Depth 8) + "`n", $utf8)
 
     $metadata = [ordered]@{
-        schema_version = 1
-        version = $Version
+        schema_version = 2
+        version = $ProductVersion
+        product_version = $ProductVersion
+        engine_version = $EngineVersion
         source_sha = $SourceSha.ToLowerInvariant()
         built_at = $BuiltAt
         product_mode = "verified-fail-closed-v2"
@@ -176,7 +182,7 @@ try {
     $metadataPath = Join-Path $OutputDir "desktop-bundle.json"
     [System.IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 8) + "`n", $utf8)
 
-    Write-Output "CodexLink Core staged from exact source $($SourceSha.ToLowerInvariant())"
+    Write-Output "CodexLink $ProductVersion staged with WebCodex Engine $EngineVersion from exact source $($SourceSha.ToLowerInvariant())"
     Write-Output "Tauri config overlay: $overlayPath"
     Write-Output "Runtime resources: $runtimeDir"
 } catch {

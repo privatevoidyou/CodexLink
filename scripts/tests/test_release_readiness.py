@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import tomllib
+
 import tempfile
 import unittest
 import urllib.error
@@ -339,7 +342,38 @@ class WorkflowContractTests(unittest.TestCase):
         desktop_bundle = Path("scripts/prepare_desktop_bundle.ps1").read_text(encoding="utf-8")
         self.assertIn("Assert-BundledProductMode", desktop_bundle)
         self.assertIn("verified-fail-closed-v2", desktop_bundle)
+        self.assertIn("$ProductVersion", desktop_bundle)
+        self.assertIn("$EngineVersion", desktop_bundle)
+        self.assertIn("product_version = $ProductVersion", desktop_bundle)
+        self.assertIn("engine_version = $EngineVersion", desktop_bundle)
         self.assertNotIn("codexlink-bundled-product-v1", desktop_bundle)
+
+    def test_codexlink_product_and_engine_versions_have_independent_sources(self) -> None:
+        desktop_package = json.loads(Path("apps/desktop/package.json").read_text(encoding="utf-8"))
+        desktop_lock = json.loads(Path("apps/desktop/package-lock.json").read_text(encoding="utf-8"))
+        desktop_tauri = json.loads(
+            Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+        )
+        desktop_cargo = tomllib.loads(
+            Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+        )
+        engine_package = json.loads(Path("npm/webcodex/package.json").read_text(encoding="utf-8"))
+        engine_cargo = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))
+
+        product_version = desktop_package["version"]
+        self.assertEqual(desktop_package["name"], "@codexlink/desktop")
+        self.assertEqual(desktop_lock["name"], "@codexlink/desktop")
+        self.assertEqual(desktop_lock["version"], product_version)
+        self.assertEqual(desktop_lock["packages"][""]["version"], product_version)
+        self.assertEqual(desktop_tauri["productName"], "CodexLink")
+        self.assertEqual(desktop_tauri["version"], product_version)
+        self.assertEqual(desktop_cargo["package"]["name"], "codexlink-desktop")
+        self.assertEqual(desktop_cargo["package"]["version"], product_version)
+
+        engine_version = engine_package["version"]
+        self.assertEqual(engine_cargo["workspace"]["package"]["version"], engine_version)
+        self.assertEqual(product_version, "1.0.0")
+        self.assertEqual(engine_version, "0.4.1")
 
     def test_ci_native_lane_conditions_are_classifier_driven(self) -> None:
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")

@@ -1,6 +1,6 @@
 # CodexLink Current Status
 
-> 状态快照：**2026-09-22，v1 Local-only 功能、安全边界、clean-machine 主链与三轮源码审计均已收敛；最终二进制审计曾真实复现“bundled Core 顶层单分支 patch 可绕过 activation 并进入 `server init`”的商业授权弱点，现已完成 targeted commercial hardening。优化 dogfood 二进制已证明 startup admission 与 CLI / Server / Runner 第二阶段 admission 分离，合法激活可正常穿过两层 gate、空激活三份 Core 均 fail closed，旧 product-mode 成功 probe / 可读逆向锚点已移除。下一步只剩从最终冻结 HEAD 重建 hardened RC/installer，并对受影响生命周期做窄回归后封版。**
+> 状态快照：**2026-09-22，CodexLink Desktop V1 的 Local-only 功能、安全边界、commercial hardening、clean-machine 主链和 targeted 真机回归均已收敛。产品版本正式冻结为 `CodexLink 1.0.0`；bundled WebCodex 只作为内部 Engine，继续保持 `0.4.1`。两者的版本来源、打包参数和 release metadata 已拆分，禁止再用 Engine 版本推导 CodexLink 产品版本。当前剩余发布工作是从最终版本拆分后的 exact HEAD 重建 `CodexLink 1.0.0` 正式安装包并完成 Authenticode 签名；网站/支付/自动发码属于下一阶段。**
 >
 > 用途：记录当前 `codexlink-rebuild` 工作树的真实状态、已验证能力、尚未完成 Gate 和下一步顺序。本文优先描述“现在是什么”，长期产品合同仍分别以 Security Boundary、First-Release UI、Commercial Flow 等专题文档为准。
 
@@ -11,19 +11,27 @@
 - 安全恢复锚点：`5ff6d8fda07e5172f272e07b8b4b9bdd74ad0bb7` — `CodexLink: checkpoint pre-scale-test hardening`；不得改写历史。
 - 五项整改与 D.1 lifecycle 收口已经形成 `d98eeb8b` → `fca59435` → `ede713a0` → `112d08cc` → `31ef8186`；其中 `31ef8186` 已推送到 `origin/codexlink-rebuild`，并作为当前远端安全基线。
 - 五项整改的独立审计范围仍固定为 `5ff6d8fd → 48f9af16`；D.1 saved-Remote Runner replacement 与 failure rollback 另行定点复审并通过，不重新打开整改范围。
-- 当前首发产品源码已经继续推进到 commercial hardening checkpoint `b48b3cf1bcc4d41e519ad8845b94391c8c556a50`。其中 `8f8b71d9` 把 bundled Core 从单一 boolean admission 改为 verified activation fingerprint + process/binary-bound runtime seal + CLI/Server/Runner 第二阶段 admission；`b48b3cf1` 进一步删除旧 product-mode success probe 与新加入的可读 stage/fingerprint domain 文本，避免主动提供逆向锚点。这两次 hardening 都只在本地 `codexlink-rebuild`，未 push。
-- hardening 前最后一个完整 Final RC installer 来自 `7ff41acd7a9eb08089609dd42539f3fcc4961914`：`CodexLink_0.4.1_7ff41acd7a9e_finalrc_x64-setup.exe`，SHA256 `43296E305FF2E28D049596A529BB8C8DA0A674DC78BFBCFB6897683BE6447BB1`。该包已完成此前 clean-machine 11/11 与运行时安全抽检，但它**早于 commercial hardening**，现在只保留为功能/生命周期证据，不再作为最终销售候选。
+- commercial hardening 已从 `8f8b71d9` / `b48b3cf1` 继续收敛到 `b4a09a96426bd47fdf71515f205df88a9e979b59`：startup / second-stage activation verification 已拆成两条独立高层 verifier 路径，optimized Core / Server / Runner 均保留两套 verifier，旧 product-mode success probe / 可读逆向锚点已移除。该 hardening 基线和后续产品版本拆分均只在本地 `codexlink-rebuild`，尚未 push。
+- 历史测试包曾错误沿用 Engine `0.4.1` 作为 CodexLink 产品版本，例如 `CodexLink_0.4.1_7ff41acd7a9e_finalrc_x64-setup.exe`。这些包只保留为功能/生命周期/安全审计证据，不再代表 CodexLink 产品版本，也绝不作为最终销售候选。正式产品线从 `CodexLink 1.0.0` 开始。
 - `b48b3cf1` 已生成 optimized dogfood Core 作为 hardening binary evidence：Core SHA256 `C8A2C5EE070E7BCDCC340C67A4EE71154F5C8651C8A06E74C5D5A1D903D0272F`；Server `7FFC0C692498971D909D82B9ABCC375359CF796A80846F9274F10289B3ED392D`；Runner `89F96D0080874E400378E86DC0102FBE8B0D918D342FC9653134FB7B7A3099FF`；三者 `dirty=false`、`built_at=1790046019`。对应 staging 为 `target\codexlink-hardening-bundle-b48b3cf1bcc4`，metadata `product_mode=verified-fail-closed-v2`。
 - 历史 `d1c23c8a` hands-on installer、`ae858f...` runtime 与 BrandFix installer 继续只作为历史证据，不再代表当前测试线。
 
-历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 0.4.1 上游证据；当前 hardened product checkpoint 是 `b48b3cf1`，而 `7ff41acd` Final RC、`d1c23c8a` hands-on 与更早 `ae858f...` 必须分别作为不同阶段证据记录，不能混写成同一个 source identity。
+历史恢复基线 `26c44e6436f254183d74db6865d04e2ec1d85930` 仍作为最初 WebCodex Engine 0.4.1 上游证据；当前 commercial-hardening 基线是 `b4a09a96426bd47fdf71515f205df88a9e979b59`，而 `7ff41acd` Final RC、`d1c23c8a` hands-on 与更早 `ae858f...` 必须分别作为不同阶段证据记录，不能混写成同一个 source identity。
+
+### 1.1 Product / Engine 版本合同
+
+- **CodexLink 产品版本：`1.0.0`。** 这是用户看到的 Desktop、安装包、卸载信息、正式 release branch/tag、网站下载与销售版本。
+- **Bundled WebCodex Engine 版本：`0.4.1`。** 这是内部 Core / Server / Runner 的兼容与 `--version` 身份，不是 CodexLink 产品版本。
+- Desktop package/crate 身份使用 `@codexlink/desktop` / `codexlink-desktop`；客户可见 release artifact 不得再使用 `webcodex-desktop` 作为 CodexLink 产品名。
+- `desktop-bundle.json` 必须同时记录 `product_version` 与 `engine_version`；打包脚本必须分别接收 `ProductVersion` / `EngineVersion`，禁止再用一个 `Version` 同时代表两层。
+- 上游 WebCodex Engine 的历史 release/compatibility tooling 可以继续保留 `WebCodex` 命名，但它不定义 CodexLink 产品版本，也不作为 CodexLink 正式销售发布通道。
 
 ## 2. 当前产品架构
 
 CodexLink 首版当前固定为三层：
 
 ```text
-CodexLink Product Shell
+CodexLink Desktop 1.0.0 / Product Shell
   ├─ activation / commercial entitlement
   ├─ projects / connection / settings UX
   ├─ installer / tray / lifecycle
@@ -36,7 +44,7 @@ CodexLink Compatibility + Safety Layer
   ├─ Tunnel routing / secret storage
   └─ Destructive Guard / bounded delete
             ↓
-CodexLink Core (bundled Engine 0.4.1)
+CodexLink Core (bundled WebCodex Engine 0.4.1)
   ├─ Core CLI
   ├─ Core Server
   └─ Core Runner
@@ -209,8 +217,8 @@ WebCodexLauncher 0.7.2
 ### 新链路（CodexLink v1 dogfood）
 
 ```text
-CodexLink Desktop
-→ bundled CodexLink Core / Engine 0.4.1（当前 hardened code checkpoint b48b3cf1）
+CodexLink Desktop 1.0.0
+→ bundled CodexLink Core / WebCodex Engine 0.4.1（commercial-hardening baseline b4a09a96）
 → CodexLink-managed Local Server/Runner
 → OpenAI Secure Tunnel
 → ChatGPT
@@ -239,21 +247,16 @@ CodexLink Desktop
 
 **Workspace full-suite caveat：** `cargo test --workspace --lib` 在 Windows 的根 `webcodex` 巨型 test binary 中出现 suite-order `STATUS_STACK_OVERFLOW`。首次触发在 `runtime_console_http::...window_activity_lookup...`；该测试单独 `1/1` 通过且对应源码自 `5ff6d8fd` 起无 diff。串行 `--test-threads=1` 仍复现；跳过该条后又在更晚的既有 `tool_runtime::tests::jobs::list_jobs...` 发生同类 stack overflow，该条单独也 `1/1` 通过且对应源码无 diff。因此不能宣称“workspace combined suite 全绿”，也不在本轮五项整改范围外修改这些测试。其余本轮相关 focused/产品 Gate 如上均为绿色。
 
-这些自动化证据仍不替代最终 v1 Local RC 的 clean install / restart / uninstall-reinstall / ChatGPT 真机 smoke；Remote Server 不再属于 v1 验收矩阵。
+自动化证据之外，hardened `b4a09a96` Final RC 已在独立 clean Windows 电脑完成 targeted 真机复测：安装/激活、Local Core/Runner、Secure Tunnel、ChatGPT 与项目主链基本全部通过；代理网络曾导致 Tunnel 重新连接一次，重连后恢复，当前归类为网络恢复性现象而非 V1 blocker。Remote Server 不属于 V1 验收矩阵。
 
-## 10. v1 Release Convergence：hardening 后剩余首发硬 Gate
+## 10. v1 Release Convergence：Desktop 技术封版状态
 
-项目已经停止横向扩功能。五项整改、D.1 与两步 onboarding 主体均已完成；v1 现在只保留会直接影响普通付费用户“安装后能否顺利用到第二天”的工作：
+Desktop V1 的功能、安全、commercial hardening 与 clean-machine 主链已经完成技术封版，不再横向扩功能。当前发布收口只剩产品版本与分发层事项：
 
-已完成的首发收敛前置项：五项整改 + D.1、两步 onboarding、首页主动作状态化、以及 Local-only v1 surface freeze。
-
-当前剩余硬 Gate：
-
-1. **重建并冻结 hardened 同源 v1 RC**：Desktop + bundled CodexLink Core/runtime 必须来自 commercial-hardening 之后的最终 exact source identity，记录 installer SHA / build metadata；`7ff41acd` installer 只保留为 hardening 前 evidence；v1 不要求部署同源公网 Remote Server；
-2. **Local 主链生命周期验收**：激活 → onboarding → Local Engine/Runner → Secure Link → ChatGPT → project add/remove → Desktop restart → Windows restart/登录启动 → 短暂 Tunnel/Runtime 恢复，在 Launcher 关闭时仍正常；
-3. **clean install / uninstall / reinstall Gate**：设备激活资格、Tunnel 凭据、授权项目与用户可恢复路径符合合同；至少一台真正 clean Windows 环境完成首次使用主链；
-4. **发布前 targeted 安全抽检**：对 typed authority、credential DACL、明显 destructive deny/no-child-spawn 做 disposable-root smoke；未证实极端项记录风险，不为了理论完美阻塞首发；
-5. **License Operator / 图文资料轻量收尾**：只改善真实销售所需体验，并补齐朋友真机过程中采集的截图教程，不扩成 SaaS/CRM/完整后台。
+1. **按正式版本合同重建 exact-source `CodexLink 1.0.0`**：Desktop/Tauri/Installer 使用 Product Version `1.0.0`；bundled Core/Server/Runner 使用 Engine Version `0.4.1`，metadata 同时记录两者；
+2. **生成唯一正式销售包**：文件名、release branch/tag、网站下载版本统一使用 `1.0.0`；历史误标为 CodexLink `0.4.1` 的包全部降级为 archive/evidence；
+3. **公开商业分发前补 Authenticode**：未签名正式构建可以作为内部 code-complete evidence，但网站公开销售包应优先使用签名后的 Installer；
+4. **进入商业交付阶段**：官网、支付、订单后端、支付回调验签、自动发 MYWS、下载交付与退款/entitlement 策略。
 
 以下不再作为首个商业版本的硬 Gate：Existing Server / Remote enrollment 产品化、Quick Share、完整 Deployment Center、自动更新、macOS/Linux、Workers、多 Agent、浏览器/桌面控制、Engine 拆仓、完整 OS sandbox、机器 PKI、subscription anti-rollback、UI V2。百度网盘 / 夸克网盘 + 配套图文教程可以作为首批分发渠道。Windows code signing 强烈推荐；若第一批暂时 unsigned，必须明确标注并提供 SHA256，但不把签名基础设施本身变成无限期阻塞首发的理由。
 
@@ -261,11 +264,10 @@ CodexLink Desktop
 
 ## 11. v1 首发严格顺序
 
-1. **冻结 v1 RC**，记录 Desktop / bundled CodexLink Engine exact source identity、installer SHA 与签名状态；
-2. **跑 Local-only 真机生命周期**：首次安装/激活/onboarding、ChatGPT、项目 add/remove、Desktop/Windows restart、autostart、Tunnel/Runtime 恢复，且关闭 WebCodexLauncher 后仍完全可用；
-3. **clean install / uninstall / reinstall + 至少一台外部 clean Windows 机器验收**；朋友真机同时采集最终教程截图；
-4. **只修 release-blocking P0/P1**：数据丢失/越权、安装/激活/连接/恢复失败、频繁 crash、项目撤权失效或明显假绿导致主链不可用；其余进入 Post-v1 backlog；
-5. **License Operator 小收尾，补齐图文教程/分发元数据，生成最终销售包并发布 v1。**
+1. **冻结 `CodexLink 1.0.0` exact-source 正式包**，记录 Product Version `1.0.0`、Engine Version `0.4.1`、source identity、installer SHA 与签名状态；
+2. **对 1.0.0 包做版本/安装窄回归**：安装器与卸载信息必须显示 1.0.0，Core `--version` 仍应显示 Engine 0.4.1；商业 admission 与主链不重新打开功能范围；
+3. **代码签名与销售分发**：签名正式 Installer 后作为网站唯一下载包；
+4. **官网 / 支付 / 自动发码上线**；Desktop 只接受真实 P0/P1 回归修复，其余进入 Post-v1 backlog。
 
 ## 12. 操作红线
 

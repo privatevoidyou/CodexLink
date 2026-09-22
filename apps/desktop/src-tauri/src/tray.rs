@@ -11,7 +11,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-const TRAY_ID: &str = "webcodex-desktop";
+const TRAY_ID: &str = "codexlink-desktop";
 const OPEN_ID: &str = "tray.open";
 const ACTIVITY_ID: &str = "tray.activity";
 const SETTINGS_ID: &str = "tray.settings";

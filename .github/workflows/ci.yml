@@ -612,7 +612,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-ci-bundle"
+          $stage = Join-Path $env:RUNNER_TEMP "codexlink-desktop-ci-bundle"
           $tunnelRoot = Join-Path $env:RUNNER_TEMP "openai-tunnel-client-0.0.12"
           if (Test-Path -LiteralPath $tunnelRoot) { throw "Tunnel staging path already exists: $tunnelRoot" }
           New-Item -ItemType Directory -Path $tunnelRoot | Out-Null
@@ -629,14 +629,17 @@ jobs:
           $expectedTunnelSha = "6649169733686805ca16cccd91774594d0c017fd729c37ad4ce1cd18323d9ae8"
           $tunnelSha = (Get-FileHash -LiteralPath $tunnelClient -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($tunnelSha -ne $expectedTunnelSha) { throw "Unexpected tunnel-client binary SHA-256: $tunnelSha" }
+          $productVersion = (Get-Content -LiteralPath "apps\desktop\package.json" -Raw | ConvertFrom-Json).version
           & .\scripts\prepare_desktop_bundle.ps1 `
             -BinDir "${{ steps.runtime.outputs.bin_dir }}" `
             -TunnelClient $tunnelClient `
-            -Version "${{ steps.runtime.outputs.version }}" `
+            -ProductVersion $productVersion `
+            -EngineVersion "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
             -OutputDir $stage
           "config=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_OUTPUT
+          "product_version=$productVersion" >> $env:GITHUB_OUTPUT
       - name: Build unsigned NSIS installer
         working-directory: apps/desktop
         shell: pwsh
@@ -649,7 +652,7 @@ jobs:
           $built = @(Get-ChildItem -LiteralPath $bundleDir -Filter "*-setup.exe" -File)
           if ($built.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($built.Count)" }
           New-Item -ItemType Directory -Force -Path "target\desktop-ci-dist" | Out-Null
-          $installer = Join-Path "target\desktop-ci-dist" "webcodex-desktop-ci-${{ steps.runtime.outputs.short }}-v${{ steps.runtime.outputs.version }}-win32-x64-setup.exe"
+          $installer = Join-Path "target\desktop-ci-dist" "CodexLink_${{ steps.desktop_bundle.outputs.product_version }}_ci_${{ steps.runtime.outputs.short }}_windows_x64-setup.exe"
           Copy-Item -LiteralPath $built[0].FullName -Destination $installer
           "DESKTOP_CI_INSTALLER=$([System.IO.Path]::GetFullPath($installer))" >> $env:GITHUB_ENV
       - name: Smoke newly-built Desktop installer
@@ -659,7 +662,8 @@ jobs:
           & .\scripts\desktop_install_windows_smoke.ps1 `
             -Installer $env:DESKTOP_CI_INSTALLER `
             -InstallDir (Join-Path $env:RUNNER_TEMP "CodexLink-Smoke-Install") `
-            -Version "${{ steps.runtime.outputs.version }}" `
+            -ProductVersion "${{ steps.desktop_bundle.outputs.product_version }}" `
+            -EngineVersion "${{ steps.runtime.outputs.version }}" `
             -SourceSha "${{ steps.runtime.outputs.source }}" `
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}")
 

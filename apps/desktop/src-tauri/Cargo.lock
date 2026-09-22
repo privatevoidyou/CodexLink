@@ -4936,8 +4936,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "webcodex-desktop"
-version = "0.4.1"
+name = "codexlink-desktop"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "libc",
