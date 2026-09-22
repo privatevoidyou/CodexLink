@@ -134,13 +134,13 @@ Windows v1 客户安装目录不再暴露 `webcodex-runtime` 或 `webcodex*.exe`
 
 当前 hardening 不引入 TPM、联网 lease、VMProtect 或新的 DRM 服务，而是只消除该单点：
 
-- `verify_installed_activation()` 在验签成功后返回 32-byte activation fingerprint，绑定 CurrentUser DPAPI device secret 与 exact signed `license.json` bytes；
+- startup 与 second-stage 使用两条独立的高层 activation verification 路径；两条路径都会独立完成 DPAPI device identity、device binding 与 Ed25519 signed `license.json` 验证，并在成功后导出同一个 32-byte activation fingerprint；
 - operational startup 成功后建立 process-local runtime seal，绑定 activation fingerprint、当前 PID 与 canonical executable path；
 - CLI、Server、Runner 在真正进入各自 runtime 前分别执行第二阶段 admission，再验 activation、parent/layout，并核对 startup seal；
 - `--version` 保持独立诊断路径；generic/non-bundled Engine 行为保持不变；
 - 旧 `--codexlink-product-mode-probe` / `codexlink-bundled-product-v1` 成功 marker 已删除；bundle/smoke 现在通过“故意未知 operational arg 必须 exit 78 + product-denied”证明 fail-closed product mode。
 
-optimized `b48b3cf1` 二进制复审显示三份 binary 都保留了彼此分离的 verifier / runtime-seal / stage gate。License verifier 在每个 binary 中均有两个不同直接调用者（startup + second stage），runtime-seal 也分别由 startup seal 与 stage gate 调用；CLI / Server / Runner 各有独立 stage wrapper。合法 activation + 正确产品布局时三份 binary 均能穿过双 gate，空 `LOCALAPPDATA` 时三份均 exit 78 fail closed；旧 success marker、可读 fingerprint/stage domain 与 `CODEXLINK_BUNDLED_PRODUCT_MODE` 字符串均不在 optimized binary 中。
+optimized binary 复审进一步确认：三份 binary 的 startup 与 second-stage 不再共享同一个高层 License verifier；每份 binary 均保留两条不同的 activation material verifier 链，并分别进入 startup gate 与 stage gate。runtime-seal / stage proof 继续独立存在；CLI / Server / Runner 各有自己的 stage wrapper。合法 activation + 正确产品布局时三份 binary 均能穿过双 gate，空 `LOCALAPPDATA` 时三份均 exit 78 fail closed；旧 success marker、可读 fingerprint/stage domain 与 `CODEXLINK_BUNDLED_PRODUCT_MODE` 字符串均不在 optimized binary 中。
 
 这项整改的目标是把现实攻击成本从“一处明显 branch patch”提高到必须理解并同时处理多阶段 gate / seal / 多 binary；它**不宣称 Windows 本地 native binary 对专业逆向者不可破解**。如果未来商业规模证明仍需要更强 DRM，再基于真实滥用证据评估 online lease / revocation 或更重保护，不作为 v1 无限扩项。
 
@@ -232,9 +232,9 @@ CodexLink Desktop
 - Remote profile URL normalization / ambiguous profile / transient-vs-revoked classification、0-root、rollback、Remote readiness focused tests：通过；
 - `cargo fmt --all -- --check` 与 `git diff --check`：通过；
 - 从 `5ff6d8fd` 到当前 worktree 的 bounded secret scan 对 pairing/user/agent token、private-key header、OpenAI secret-key / literal assignment 均为 `0` 命中。
-- commercial hardening source gate：`codexlink-product-boundary` `8/8`；`cargo check --locked -p webcodex -p webcodex-cli -p webcodex-runner` 通过；release-readiness `17/17`；两个 Windows bundle/smoke PowerShell 文件 parser 通过；
-- `b48b3cf1` optimized product-mode 动态 gate：合法 activation + 正确 CodexLink install layout 时 Core/Server/Runner 均穿过两层 admission 后进入自身参数解析（exit 2、非 product-denied）；空 activation 时三份均 exit 78 + product-denied；三份独立 `--version` 均 exit 0；
-- `b48b3cf1` optimized binary call-map：三份 License verifier 均有 startup + second-stage 两个不同直接调用者；runtime-seal 也有 stage gate + startup seal 两个不同调用者；旧 product-mode probe / marker 与可读 stage/fingerprint 文本均 `0` 命中；
+- commercial hardening source gate：`codexlink-product-boundary` `9/9`，其中新增 startup / second-stage 独立验签路径一致性与 tamper rejection 回归；`cargo check --locked -p webcodex -p webcodex-cli -p webcodex-runner` 通过；release-readiness 既有 `17/17` 证据保留；两个 Windows bundle/smoke PowerShell 文件 parser 既有证据保留；
+- split-verifier optimized product-mode 动态 gate：合法 activation + 正确 CodexLink install layout 时 Core/Server/Runner 均穿过双 admission 后进入自身参数解析（exit 2、非 product-denied）；空 activation 时三份均 exit 78 + product-denied；三份独立 `--version` 均 exit 0；
+- split-verifier optimized binary call-map：Core/Server/Runner 每份均出现两套不同的 activation verifier/material path，而不是一个 verifier 被 startup + second-stage 共享；旧 product-mode probe / marker、可读 stage/fingerprint 文本与 `CODEXLINK_BUNDLED_PRODUCT_MODE` 字符串均 `0` 命中；
 - V1 `computer_*` runtime attack：`tools/list` 中 `computer_* = 0`；已知隐藏名后强制 `call_runtime_tool(computer_list_targets)` 仍返回 `unknown_tool / not_started`，不是只做 UI/list 隐藏。
 
 **Workspace full-suite caveat：** `cargo test --workspace --lib` 在 Windows 的根 `webcodex` 巨型 test binary 中出现 suite-order `STATUS_STACK_OVERFLOW`。首次触发在 `runtime_console_http::...window_activity_lookup...`；该测试单独 `1/1` 通过且对应源码自 `5ff6d8fd` 起无 diff。串行 `--test-threads=1` 仍复现；跳过该条后又在更晚的既有 `tool_runtime::tests::jobs::list_jobs...` 发生同类 stack overflow，该条单独也 `1/1` 通过且对应源码无 diff。因此不能宣称“workspace combined suite 全绿”，也不在本轮五项整改范围外修改这些测试。其余本轮相关 focused/产品 Gate 如上均为绿色。

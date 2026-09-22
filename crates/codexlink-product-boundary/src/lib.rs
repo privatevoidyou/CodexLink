@@ -85,7 +85,7 @@ where
         return Ok(Admission::Operational);
     }
 
-    let fingerprint = verify_installed_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    let fingerprint = verify_startup_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
     if !current_process_has_product_parent() {
         return Err(PRODUCT_MODE_DENIED.to_string());
     }
@@ -112,7 +112,7 @@ fn require_operational_stage(stage_domain: &[u8]) -> Result<(), String> {
     if !bundled_product_mode() {
         return Ok(());
     }
-    let fingerprint = verify_installed_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
+    let fingerprint = verify_stage_activation().map_err(|_| PRODUCT_MODE_DENIED.to_string())?;
     if !current_process_has_product_parent() {
         return Err(PRODUCT_MODE_DENIED.to_string());
     }
@@ -157,37 +157,97 @@ fn fixed_32_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
 }
 
 #[cfg(windows)]
-fn verify_installed_activation() -> Result<[u8; 32], ()> {
+#[inline(never)]
+fn verify_startup_activation() -> Result<[u8; 32], ()> {
     let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or(())?;
     let license_dir = PathBuf::from(local_app_data).join(WINDOWS_DEVICE_ACTIVATION_DIR_NAME);
-    verify_activation_dir(&license_dir)
+    verify_activation_dir_startup(&license_dir)
 }
 
 #[cfg(not(windows))]
-fn verify_installed_activation() -> Result<[u8; 32], ()> {
+#[inline(never)]
+fn verify_startup_activation() -> Result<[u8; 32], ()> {
     Err(())
 }
 
-fn verify_activation_dir(license_dir: &Path) -> Result<[u8; 32], ()> {
+#[cfg(windows)]
+#[inline(never)]
+fn verify_stage_activation() -> Result<[u8; 32], ()> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA").ok_or(())?;
+    let license_dir = PathBuf::from(local_app_data).join(WINDOWS_DEVICE_ACTIVATION_DIR_NAME);
+    verify_activation_dir_stage(&license_dir)
+}
+
+#[cfg(not(windows))]
+#[inline(never)]
+fn verify_stage_activation() -> Result<[u8; 32], ()> {
+    Err(())
+}
+
+#[inline(never)]
+fn verify_activation_dir_startup(license_dir: &Path) -> Result<[u8; 32], ()> {
     let metadata = fs::symlink_metadata(license_dir).map_err(|_| ())?;
     if !metadata.is_dir() {
         return Err(());
     }
-
     let identity_blob = read_bounded_regular_file(
         &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
         DEVICE_IDENTITY_MAX_BYTES,
     )?;
-    let mut secret = device_secret_from_identity_blob(&identity_blob)?;
+    let license_bytes =
+        read_bounded_regular_file(&license_dir.join(LICENSE_FILE_NAME), LICENSE_FILE_MAX_BYTES)?;
+    let verifying_key = production_verifying_key()?;
+    verify_activation_material_startup(&identity_blob, &license_bytes, &verifying_key)
+}
+
+#[inline(never)]
+fn verify_activation_material_startup(
+    identity_blob: &[u8],
+    license_bytes: &[u8],
+    verifying_key: &[u8; 32],
+) -> Result<[u8; 32], ()> {
+    let mut secret = device_secret_from_identity_blob(identity_blob)?;
     let result = (|| {
         let expected_device_id = derive_device_id(&secret);
-        let license_bytes = read_bounded_regular_file(
-            &license_dir.join(LICENSE_FILE_NAME),
-            LICENSE_FILE_MAX_BYTES,
-        )?;
-        let verifying_key = production_verifying_key()?;
-        verify_signed_license_bytes(&license_bytes, &expected_device_id, &verifying_key)?;
-        Ok(derive_activation_fingerprint(&secret, &license_bytes))
+        verify_signed_license_bytes(license_bytes, &expected_device_id, verifying_key)?;
+        Ok(derive_activation_fingerprint(&secret, license_bytes))
+    })();
+    secret.fill(0);
+    result
+}
+
+#[inline(never)]
+fn verify_activation_dir_stage(license_dir: &Path) -> Result<[u8; 32], ()> {
+    let metadata = fs::symlink_metadata(license_dir).map_err(|_| ())?;
+    if !metadata.is_dir() {
+        return Err(());
+    }
+    let license_bytes =
+        read_bounded_regular_file(&license_dir.join(LICENSE_FILE_NAME), LICENSE_FILE_MAX_BYTES)?;
+    let identity_blob = read_bounded_regular_file(
+        &license_dir.join(DEVICE_IDENTITY_FILE_NAME),
+        DEVICE_IDENTITY_MAX_BYTES,
+    )?;
+    let verifying_key = production_verifying_key()?;
+    verify_activation_material_stage(&license_bytes, &identity_blob, &verifying_key)
+}
+
+#[inline(never)]
+fn verify_activation_material_stage(
+    license_bytes: &[u8],
+    identity_blob: &[u8],
+    verifying_key: &[u8; 32],
+) -> Result<[u8; 32], ()> {
+    let license_digest: [u8; 32] = Sha256::digest(license_bytes).into();
+    let signed = serde_json::from_slice::<SignedLicense>(license_bytes).map_err(|_| ())?;
+    let mut secret = device_secret_from_identity_blob(identity_blob)?;
+    let result = (|| {
+        let expected_device_id = derive_device_id(&secret);
+        verify_signed_license_stage(&signed, &expected_device_id, verifying_key)?;
+        Ok(derive_activation_fingerprint_from_digest(
+            &secret,
+            &license_digest,
+        ))
     })();
     secret.fill(0);
     result
@@ -242,10 +302,18 @@ fn derive_activation_fingerprint(
     secret: &[u8; DEVICE_SECRET_BYTES],
     license_bytes: &[u8],
 ) -> [u8; 32] {
+    let license_digest: [u8; 32] = Sha256::digest(license_bytes).into();
+    derive_activation_fingerprint_from_digest(secret, &license_digest)
+}
+
+fn derive_activation_fingerprint_from_digest(
+    secret: &[u8; DEVICE_SECRET_BYTES],
+    license_digest: &[u8; 32],
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(ACTIVATION_FINGERPRINT_DOMAIN);
     hasher.update(secret);
-    hasher.update(Sha256::digest(license_bytes));
+    hasher.update(license_digest);
     hasher.finalize().into()
 }
 
@@ -305,6 +373,43 @@ fn verify_signed_license(
         .map_err(|_| ())?;
     UnparsedPublicKey::new(&ED25519, verifying_key)
         .verify(&license_signing_message(signed)?, &signature)
+        .map_err(|_| ())
+}
+
+#[inline(never)]
+fn verify_signed_license_stage(
+    signed: &SignedLicense,
+    expected_device_id: &str,
+    verifying_key: &[u8; 32],
+) -> Result<(), ()> {
+    if signed.product != LICENSE_PRODUCT || signed.license_version != LICENSE_VERSION {
+        return Err(());
+    }
+    if signed.device_id != expected_device_id {
+        return Err(());
+    }
+    if !bounded_identifier(&signed.activation_code_id, 128)
+        || !bounded_identifier(&signed.license_id, 128)
+    {
+        return Err(());
+    }
+    if signed.issued_at.is_empty() || signed.issued_at.len() > 128 || !signed.issued_at.is_ascii() {
+        return Err(());
+    }
+    let message = serde_json::to_vec(&LicenseSigningPayload {
+        activation_code_id: &signed.activation_code_id,
+        device_id: &signed.device_id,
+        issued_at: &signed.issued_at,
+        license_id: &signed.license_id,
+        license_version: signed.license_version,
+        product: &signed.product,
+    })
+    .map_err(|_| ())?;
+    let signature = URL_SAFE_NO_PAD
+        .decode(signed.signature.as_bytes())
+        .map_err(|_| ())?;
+    UnparsedPublicKey::new(&ED25519, verifying_key)
+        .verify(&message, &signature)
         .map_err(|_| ())
 }
 
@@ -619,6 +724,52 @@ mod tests {
             &expected,
             CLI_STAGE_DOMAIN
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn startup_and_stage_activation_paths_agree_but_verify_independently() {
+        use ring::rand::SystemRandom;
+        use ring::signature::{Ed25519KeyPair, KeyPair};
+
+        let rng = SystemRandom::new();
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let secret = [23u8; DEVICE_SECRET_BYTES];
+        let device_id = derive_device_id(&secret);
+        let mut identity_blob = DEVICE_IDENTITY_MAGIC.to_vec();
+        identity_blob.extend_from_slice(&protect_current_user_for_test(&secret));
+        let mut signed = SignedLicense {
+            license_version: LICENSE_VERSION,
+            license_id: "license-independent-paths".to_string(),
+            product: LICENSE_PRODUCT.to_string(),
+            activation_code_id: "activation-independent-paths".to_string(),
+            device_id,
+            issued_at: "2026-09-22T00:00:00Z".to_string(),
+            signature: String::new(),
+        };
+        let signature = key_pair.sign(&license_signing_message(&signed).unwrap());
+        signed.signature = URL_SAFE_NO_PAD.encode(signature.as_ref());
+        let license_bytes = serde_json::to_vec(&signed).unwrap();
+        let public_key: [u8; 32] = key_pair.public_key().as_ref().try_into().unwrap();
+
+        let startup =
+            verify_activation_material_startup(&identity_blob, &license_bytes, &public_key)
+                .unwrap();
+        let stage =
+            verify_activation_material_stage(&license_bytes, &identity_blob, &public_key).unwrap();
+        assert_eq!(startup, stage);
+
+        signed.license_id = "tampered-independent-paths".to_string();
+        let tampered = serde_json::to_vec(&signed).unwrap();
+        assert_eq!(
+            verify_activation_material_startup(&identity_blob, &tampered, &public_key),
+            Err(())
+        );
+        assert_eq!(
+            verify_activation_material_stage(&tampered, &identity_blob, &public_key),
+            Err(())
+        );
     }
 
     #[test]
