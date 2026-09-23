@@ -1,14 +1,14 @@
 # CodexLink First-Release Security Boundary
 
-> 状态：**2026-09-16 源码安全审计整改后规范；typed operations 与 arbitrary execution capability 已明确分层，Windows enrollment credential hardening 已落地，下一项动态 Gate 是整改后 CodexLink Engine 的 tunnel-test destructive / reparse 专项。**
+> 状态：**首版安全边界规范。具体源码与发布验收状态见 [`CODEXLINK_V1_ACCEPTANCE.md`](CODEXLINK_V1_ACCEPTANCE.md)；历史测试结果不能替代最终安装包的真机验收。**
 >
 > 适用范围：CodexLink Desktop、CodexLink 管理的 WebCodex Server / Runner、模型可见的 typed file tools 与本地 execution admission。
 >
 > 核心决策：**首版不做 OS sandbox；允许正常开发 execution；重点防止 Agent 常见的大范围误删、误覆盖和明显 destructive shell。**
 
-本文是 CodexLink 首版安全策略的详细单一来源。主线交付路线图只保留摘要并引用本文，避免安全规则在多份文档中漂移。
+本文是 CodexLink 首版安全策略的详细单一来源。当前验收文档只保留摘要并引用本文，避免安全规则在多份文档中漂移。
 
-当前 dogfood runtime identity：`WebCodex 0.4.1 / ae858f5360ff / dirty=false`。历史上游恢复基线 `26c44e...` 仍是来源证据，但真实安全验收必须针对当前 bundled fork build，而不是只复用旧测试结果。
+历史 dogfood runtime identity `WebCodex 0.4.1 / ae858f5360ff / dirty=false` 仅供追溯。真实安全验收必须针对当前 bundled fork build 与最终安装包。
 
 ---
 
@@ -106,7 +106,7 @@ Guard 的目标不是分析所有程序语义，也不是自己实现 PowerShell
 - internal runtime anchor 与 user authorized roots 分离；internal anchor 只维持 CodexLink Runtime identity，不自动成为用户项目 authority；
 - guarded edit / expected SHA；
 - License 与 Tunnel secret 的 DPAPI protection；
-- Windows V1 安装包中的三颗 CodexLink Core 使用独立 compile-time bundled product mode：普通 operational 入口只接受安装目录内 `CodexLink.exe -> CodexLink Core`（以及已进入该产品进程链后的 Core 子进程）启动；`--version` 与固定 product-mode probe 仅保留诊断能力。通用 WebCodex Engine build 不启用这条 gate，因此 Remote Server / 通用 Engine 架构保持不变。该边界用于关闭“安装包内 Core 直接当第二套产品入口运行”的路径，不宣称提供同一 Windows 用户对二进制篡改/伪造父进程的 cryptographic anti-tamper。
+- Windows V1 安装包中的三颗 CodexLink Core 使用独立 compile-time bundled product mode：普通 operational 入口只接受安装目录内 `CodexLink.exe -> CodexLink Core`（以及已进入该产品进程链后的 Core 子进程）启动；`--version` 保留诊断能力。通用 WebCodex Engine build 不启用这条 gate，因此 Remote Server / 通用 Engine 架构保持不变。该边界用于关闭“安装包内 Core 直接当第二套产品入口运行”的路径，不宣称提供同一 Windows 用户对二进制篡改/伪造父进程的 cryptographic anti-tamper。
 - 长期 Runner enrollment bearer credential 使用统一 Windows protected secret-file primitive：user token 与 token-bearing `runner.toml` 禁用继承，只授予当前 Windows 用户与 SYSTEM FullAccess；ACL/reparse hardening 失败时 fail closed，overwrite/migration 后不得退化；
 - CodexLink-owned process tree / Job Object 生命周期；
 - installer / migration / staging 的明确 ownership；
@@ -474,13 +474,13 @@ Batch F 在恢复 CodexLink-managed model-authored normal shell / process / scri
 
 ---
 
-## 11.5 当前 tunnel-test 安全验收计划
+## 11.5 最终安装包的 tunnel-test 安全验收
 
 Batch F focused tests 证明 Guard/typed contract 的实现，但正式进入规模测试前还要通过当前产品链路做一次真机端到端负面测试：
 
 ```text
 ChatGPT / tunnel-test
-→ CodexLink bundled 0.4.1 ae858f...
+→ 最终 CodexLink bundled Core（记录准确 commit、版本与 installer SHA256）
 → Runner execution admission
 → disposable authorized test root
 ```
@@ -496,7 +496,7 @@ ChatGPT / tunnel-test
 - typed `delete_directory` 只在专门 disposable tree 中验证成功路径；
 - 不对真实 CodexLink 源码树、`D:\Test` 历史证据或用户真实文件做 destructive 负面测试。
 
-只有这一 Gate 通过后，才建议把公网 Server 切到当前 fork build，并进一步退休旧 WebCodexLauncher 链路。
+这项验证属于最终安装包发布 Gate。公网 Server 切换与旧 WebCodexLauncher 退役属于独立部署决定，不由本规范自动授权。
 
 ---
 

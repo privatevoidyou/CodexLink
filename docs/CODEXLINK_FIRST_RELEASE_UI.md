@@ -4,7 +4,7 @@
 >
 > 核心决策：**首版沿用已验收 RC5 成品的产品壳、信息层级、状态表达和交互风格，不再为首发另起一套 Dashboard 视觉方向。**
 >
-> 实施状态：**多项目 authority、internal runtime anchor、0-root、Remote state-machine hardening 已在历史 checkpoint 固化；当前 v1 产品源码已推进到 `8d5a16aa`，两步 onboarding 真机反馈已收口一轮。Remote/Quick Share 只作为保留实现，不再属于首版 UI Gate。实时状态见 `CODEXLINK_CURRENT_STATUS.md`。**
+> 实施状态：**Local + OpenAI Tunnel + ChatGPT 为首版正式 UI 路径；当前源码与最终安装包发布 Gate 见 [`CODEXLINK_V1_ACCEPTANCE.md`](CODEXLINK_V1_ACCEPTANCE.md)。Remote/Quick Share 只作为保留实现，不属于首版 UI Gate。**
 >
 > 目标：用户只理解“项目”和“ChatGPT 连接”，Server、Runner、端口、进程、Tunnel client 等实现细节由 CodexLink 自动处理。
 

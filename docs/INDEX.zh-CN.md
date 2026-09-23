@@ -64,11 +64,9 @@ protocol field、兼容名称和实现 invariant；普通用户不需要为了�
 
 ### CodexLink 产品 fork 内部规划
 
-下面这些是 CodexLink Windows 产品 fork 的内部交付文档，不是普通 WebCodex 用户使用说明。处理当前项目时先读 Current Status，再读历史恢复文档。
+下面这些是 CodexLink Windows 产品 fork 的内部交付文档，不是普通 WebCodex 用户使用说明。
 
-- [CodexLink 当前状态](CODEXLINK_CURRENT_STATUS.md) —— **当前权威快照**：HEAD/worktree、Smoke 3/BrandFix、未完成 Gate、旧/新连接链路与下一步顺序
-- [CodexLink 交付路线图](CODEXLINK_DELIVERY_ROADMAP.md) —— checkpoint、首发顺序与剩余工作
-- [CodexLink 恢复矩阵](CODEXLINK_RECOVERY_MATRIX.md) —— RC5 到 rebuild 的能力映射与实施进度
+- [CodexLink 首版验收与发布状态](CODEXLINK_V1_ACCEPTANCE.md) —— 当前仓库清单、上游对比、客户主链、风险与发布 Gate
 - [CodexLink 首版安全边界](CODEXLINK_SECURITY_BOUNDARY.md) —— Destructive Guard、typed 文件操作、Bounded Recursive Delete 与非 Sandbox 威胁模型的权威规范
 - [CodexLink 首版产品壳与配置 UX](CODEXLINK_FIRST_RELEASE_UI.md) —— 已验收 RC5 UI 基线与当前“激活 → Runtime bootstrap → Tunnel 凭据 → 按需授权路径 → ChatGPT App”的极简主流程
 - [CodexLink 商业购买资格与激活流程](CODEXLINK_COMMERCIAL_FLOW.md) —— MYWS 销售激活码、购买下载 Gate、同码设备激活与商业全链验收的权威规范

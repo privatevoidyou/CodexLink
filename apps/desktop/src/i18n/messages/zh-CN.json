@@ -38,7 +38,7 @@
   "activation.activating": "正在激活 CodexLink…",
   "activation.error": "无法完成激活，请重试。",
   "activation.errorInvalid": "此激活码无效，请检查购买后收到的 MYWS 激活码。",
-  "activation.errorBoundElsewhere": "此激活码已绑定到另一台设备。如需更换设备，请联系支持。",
+  "activation.errorBoundElsewhere": "此激活码已绑定到另一台设备。新设备需要重新购买授权。",
   "activation.errorRateLimited": "激活尝试过于频繁，请稍后再试。",
   "activation.errorUnavailable": "CodexLink 激活服务暂时不可用，请稍后再试。",
   "activation.errorNetwork": "无法连接 CodexLink 激活服务，请检查网络后重试。",

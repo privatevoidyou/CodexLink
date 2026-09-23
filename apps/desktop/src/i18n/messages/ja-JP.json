@@ -38,7 +38,7 @@
   "activation.activating": "CodexLink を有効化しています…",
   "activation.error": "認証を完了できませんでした。もう一度お試しください。",
   "activation.errorInvalid": "このアクティベーションコードは無効です。購入時に届いた MYWS コードを確認してください。",
-  "activation.errorBoundElsewhere": "このアクティベーションコードは別のデバイスにすでに紐付けられています。デバイスを変更する場合はサポートに連絡してください。",
+  "activation.errorBoundElsewhere": "このアクティベーションコードは別のデバイスに紐付いています。新しいデバイスには新しいライセンスが必要です。",
   "activation.errorRateLimited": "アクティベーションの試行回数が多すぎます。しばらく待ってから再試行してください。",
   "activation.errorUnavailable": "CodexLink のアクティベーションサービスは一時的に利用できません。後でもう一度お試しください。",
   "activation.errorNetwork": "CodexLink からアクティベーションサービスに接続できません。ネットワーク接続を確認して再試行してください。",

@@ -38,7 +38,7 @@
   "activation.activating": "CodexLink 활성화 중…",
   "activation.error": "활성화를 완료할 수 없습니다. 다시 시도하세요.",
   "activation.errorInvalid": "이 활성화 코드는 유효하지 않습니다. 구매 후 받은 MYWS 코드를 확인하세요.",
-  "activation.errorBoundElsewhere": "이 활성화 코드는 이미 다른 장치에 연결되어 있습니다. 장치를 변경해야 한다면 지원팀에 문의하세요.",
+  "activation.errorBoundElsewhere": "이 활성화 코드는 이미 다른 장치에 연결되어 있습니다. 새 장치에는 새 라이선스가 필요합니다.",
   "activation.errorRateLimited": "활성화 시도가 너무 많습니다. 잠시 후 다시 시도하세요.",
   "activation.errorUnavailable": "CodexLink 활성화 서비스를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
   "activation.errorNetwork": "CodexLink가 활성화 서비스에 연결할 수 없습니다. 네트워크 연결을 확인한 뒤 다시 시도하세요.",

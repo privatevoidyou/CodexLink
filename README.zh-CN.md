@@ -1,6 +1,8 @@
-# WebCodex
+# CodexLink / WebCodex Engine
 
 [English](README.md) | [简体中文](README.zh-CN.md)
+
+**CodexLink** 是基于此 WebCodex fork 构建的 Windows Desktop 产品。付费桌面体验、设备授权、安装包和 ChatGPT 连接引导属于 CodexLink；下方 Server、Runner、MCP、CLI 及通用自托管说明介绍的是开放的 WebCodex Engine 能力，不是 CodexLink 的购买或首次配置指南。产品边界与当前发布 Gate 请先看 [CodexLink 首版验收与发布状态](docs/CODEXLINK_V1_ACCEPTANCE.md)。
 
 **WebCodex 让 ChatGPT、Claude 和其他 AI Agent 直接使用你自己机器上的代码仓库和开发工具。**
 

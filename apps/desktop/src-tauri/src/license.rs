@@ -569,7 +569,7 @@ fn activation_failure(code: &str) -> DesktopError {
         "activation_code_bound_elsewhere" => DesktopError::new(
             "activation_code_bound_elsewhere",
             "This activation code is already bound to another device",
-            "Use the device that was first activated, or contact support.",
+            "Use the device that was first activated, or purchase a new license for another device.",
         ),
         "license_rate_limited" => DesktopError::new(
             "license_rate_limited",

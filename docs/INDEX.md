@@ -64,11 +64,9 @@ ordinary users should not need to learn.
 
 ### CodexLink product-fork planning
 
-These are internal delivery documents for the CodexLink Windows product fork rather than ordinary WebCodex user documentation. Start with Current Status before older recovery notes.
+These are internal product documents for the CodexLink Windows fork rather than ordinary WebCodex user documentation.
 
-- [CodexLink current status](CODEXLINK_CURRENT_STATUS.md) — **authoritative live snapshot** of current HEAD/worktree, Smoke 3/BrandFix state, open gates, legacy/new connection paths, and the next execution order
-- [CodexLink delivery roadmap](CODEXLINK_DELIVERY_ROADMAP.md) — checkpoints, release sequence, and remaining first-release work
-- [CodexLink recovery matrix](CODEXLINK_RECOVERY_MATRIX.md) — RC5-to-rebuild capability mapping and implementation status
+- [CodexLink v1 acceptance and release status](CODEXLINK_V1_ACCEPTANCE.md) — current repository inventory, upstream comparison, customer journey, risks, and release gates
 - [CodexLink first-release security boundary](CODEXLINK_SECURITY_BOUNDARY.md) — authoritative Destructive Guard, typed filesystem, bounded recursive-delete, and non-sandbox threat model
 - [CodexLink first-release product shell & setup UX](CODEXLINK_FIRST_RELEASE_UI.md) — accepted RC5 visual baseline and the current activation → runtime bootstrap → Tunnel credentials → optional authorized roots → ChatGPT App flow
 - [CodexLink commercial entitlement & activation flow](CODEXLINK_COMMERCIAL_FLOW.md) — authoritative MYWS purchase entitlement, download gate, same-code Desktop activation, and commercial acceptance flow

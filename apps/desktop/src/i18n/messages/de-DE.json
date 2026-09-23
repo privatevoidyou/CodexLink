@@ -38,7 +38,7 @@
   "activation.activating": "CodexLink wird aktiviert…",
   "activation.error": "Die Aktivierung konnte nicht abgeschlossen werden. Versuchen Sie es erneut.",
   "activation.errorInvalid": "Dieser Aktivierungscode ist ungültig. Prüfen Sie den MYWS-Code aus Ihrer Kaufnachricht.",
-  "activation.errorBoundElsewhere": "Dieser Aktivierungscode ist bereits an ein anderes Gerät gebunden. Wenden Sie sich an den Support, wenn Sie die Aktivierung übertragen müssen.",
+  "activation.errorBoundElsewhere": "Dieser Aktivierungscode ist bereits an ein anderes Gerät gebunden. Für ein neues Gerät ist eine neue Lizenz erforderlich.",
   "activation.errorRateLimited": "Zu viele Aktivierungsversuche. Warten Sie einen Moment und versuchen Sie es erneut.",
   "activation.errorUnavailable": "Der CodexLink-Aktivierungsdienst ist vorübergehend nicht verfügbar. Versuchen Sie es später erneut.",
   "activation.errorNetwork": "CodexLink kann den Aktivierungsdienst nicht erreichen. Prüfen Sie die Netzwerkverbindung und versuchen Sie es erneut.",
