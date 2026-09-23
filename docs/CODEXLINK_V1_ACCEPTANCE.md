@@ -40,7 +40,7 @@ WebCodex 是 Apache-2.0 上游 Core 能力来源。CodexLink 的付费对象是�
 
 源码中的 bundled product mode、Desktop 启动/阶段签名、DPAPI、进程身份与安装路径检查能提高直接拷贝安装目录或绕过 UI 的成本；License Authority 私钥未放入客户端。它们不能让由购买者控制的 Windows 原生二进制不可补丁化，也不能阻止他使用 Apache-2.0 上游自行部署相似 Core。不能用「无法破解」或「只有 CodexLink 才能运行本地工具」作为卖点。
 
-本轮没有获得与当前源码完全对应的优化构建、签名安装包及独立干净机器，因此**没有完成二进制逆向审计或最终发布验收**。源码边界检查只支持「挡住普通复制与直启」，不支持确定破解所需时间。商业防线应优先放在安装可靠性、配置体验、文档、更新、支持和可验证的交付质量。
+后续已对 `d22d00d7` 做本机优化版 bundled Core 与 unsigned NSIS 候选构建，详见第 8 节。尚无可信代码签名、独立干净机器安装结果或二进制逆向专项审计，因此**没有完成最终发布验收**。源码边界检查和直启负面验证只支持「挡住普通复制与直启」，不支持确定破解所需时间。商业防线应优先放在安装可靠性、配置体验、文档、更新、支持和可验证的交付质量。
 
 ## 5. 商业网站的现状
 
@@ -66,3 +66,19 @@ Desktop 源码层封版与「可售安装包通过上述 P0 门槛」是两个�
 ## 7. 本轮文档收敛
 
 旧 `CODEXLINK_CURRENT_STATUS.md`、`CODEXLINK_DELIVERY_ROADMAP.md`、`CODEXLINK_RECOVERY_MATRIX.md` 是针对旧 HEAD、RC 恢复及当时部署顺序的历史快照，不再作为当前状态入口。其提交历史保留可追溯性。安全边界、首版 UI 和商业激活规范继续保留；本文件集中记录当前事实和待验收项目。历史 launcher 与教程目录尚有回退和比对价值，本轮不删除。
+
+## 8. 2026-09-23 本机候选构建证据
+
+针对干净源码提交 `d22d00d7605c3fb8492623731cdf3640dc599ce9`：
+
+| 项目 | 结果 |
+| --- | --- |
+| bundled Core | `dogfood` 优化构建通过；CLI、Server、Runner 的 `--version` 都显示 Engine `0.4.1`、准确 commit、`dirty=false`；三颗直接运行验证均按预期拒绝 |
+| Desktop 前端 | TypeScript 检查、生产前端构建、71 项 UI 测试及表单 CSS 检查通过 |
+| 资源打包 | 固定版本 OpenAI tunnel-client 的下载包与解压文件哈希通过；`prepare_desktop_bundle.ps1` 验证 Core 来源、拒绝直启、资源字节一致性，并加入与仓库 `LICENSE` 哈希相同的 Apache-2.0 文本 |
+| Windows NSIS | 本机生成 `target/codexlink-desktop-acceptance/release/bundle/nsis/CodexLink_1.0.0_x64-setup.exe`；32,999,883 字节；SHA256 `c91124c18484fd51f375b5b3249f17415c6e02e4e610da596a72e52071e43976`；产品版本 `1.0.0`；**NotSigned** |
+| 商业基础 | License Authority 26 项测试通过、3 项可选 Paramiko 测试跳过；Commerce 7 项测试通过；支付宝 checkout 仍明确失败关闭 |
+
+NSIS 首次编译曾遇到临时的 Windows `os error 5`，生成的构建脚本随后可直接执行；采用 CI 相同的 `--locked` 重试后完整构建成功。未修改权限或安全设置，原因尚未确定。当前 Windows 用户已有 CodexLink 数据和设备身份，仓库安装 smoke 会拒绝覆盖；Windows Sandbox 未安装。本机未发现代码签名证书或 `signtool`。这些事实不会因候选构建成功而自动满足干净机器、签名和真实 ChatGPT 全链 Gate。
+
+本轮进度：Desktop 源码与本机候选构建已完成；**可售安装包验收仍待签名、独立环境安装/卸载及激活、真实 ChatGPT 调用和一次性目录安全负面测试**。Commerce 只完成 C0/C1 基础；支付宝 C2、自动发码执行链和新售卖网站尚未完成。网站研发可以开始，公开收款和交付必须等待对应 Gate 通过。
