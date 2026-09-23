@@ -248,6 +248,17 @@ try {
         throw "unexpected installed OpenAI tunnel-client SHA-256: $tunnelSha"
     }
 
+    $licenseText = Join-Path $runtimeDir "LICENSE-APACHE-2.0.txt"
+    $licenseSource = Join-Path (Split-Path -Parent $PSScriptRoot) "LICENSE"
+    if (-not (Test-Path -LiteralPath $licenseText -PathType Leaf)) {
+        throw "installed WebCodex Apache-2.0 license text is missing"
+    }
+    $licenseSha = (Get-FileHash -LiteralPath $licenseText -Algorithm SHA256).Hash.ToLowerInvariant()
+    $licenseSourceSha = (Get-FileHash -LiteralPath $licenseSource -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($licenseSha -ne $licenseSourceSha) {
+        throw "installed WebCodex Apache-2.0 license text differs from source"
+    }
+
     Write-Output "Desktop install smoke passed: $installedDir"
     Write-Output "Bundled CodexLink Core: $runtimeDir"
 } finally {

@@ -149,6 +149,29 @@ try {
         sha256 = $stagedTunnelHash
     }
 
+    $licenseSource = Join-Path (Split-Path -Parent $PSScriptRoot) "LICENSE"
+    if (-not (Test-Path -LiteralPath $licenseSource -PathType Leaf)) {
+        throw "missing WebCodex Apache-2.0 license text: $licenseSource"
+    }
+    $licenseSourceItem = Get-Item -LiteralPath $licenseSource
+    if (($licenseSourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "WebCodex license text must be a regular non-reparse file: $licenseSource"
+    }
+    $licenseSourceHash = (Get-FileHash -LiteralPath $licenseSource -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stagedLicense = Join-Path $runtimeDir "LICENSE-APACHE-2.0.txt"
+    Copy-Item -LiteralPath $licenseSource -Destination $stagedLicense
+    $stagedLicenseItem = Get-Item -LiteralPath $stagedLicense
+    $stagedLicenseHash = (Get-FileHash -LiteralPath $stagedLicense -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($stagedLicenseItem.Length -ne $licenseSourceItem.Length -or $stagedLicenseHash -ne $licenseSourceHash) {
+        throw "staged WebCodex license text byte verification failed"
+    }
+    $resourceMap[[System.IO.Path]::GetFullPath($stagedLicense)] = "codexlink-core/LICENSE-APACHE-2.0.txt"
+    $fileMetadata["license"] = [ordered]@{
+        filename = "LICENSE-APACHE-2.0.txt"
+        size = [Int64]$stagedLicenseItem.Length
+        sha256 = $stagedLicenseHash
+    }
+
     $overlay = [ordered]@{
         version = $ProductVersion
         bundle = [ordered]@{
