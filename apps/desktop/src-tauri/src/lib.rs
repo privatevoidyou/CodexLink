@@ -56,10 +56,22 @@ pub fn run() {
             {
                 desktop_shell::show_main_window(app.handle())?;
             }
+
+            // Once per launch, ask whether a refund revoked this license. It
+            // never delays startup, and any failure keeps the license working.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<AppState>();
+                if state.check_license_status().await {
+                    tray::refresh_from_snapshot(&handle, &state.get_state());
+                    let _ = desktop_shell::show_main_window(&handle);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_state,
+            commands::check_license_status,
             commands::activate_license,
             commands::open_powershell_install_guide,
             commands::open_product_link,

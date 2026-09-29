@@ -182,6 +182,13 @@ export default function App() {
         if (cancelled) return;
         commitState(initial);
         if (initial.license.status !== "activated") return;
+        // A refund can revoke the license; nothing resumes before this launch's check.
+        const license = await desktopApi.checkLicenseStatus();
+        if (cancelled) return;
+        if (license.status !== "activated") {
+          commitState({ ...initial, license });
+          return;
+        }
         if (initial.current_operation) return;
         const shouldPrepareLocalRuntime = !initial.topology;
         const resumeExisting = Boolean(
@@ -560,6 +567,9 @@ function ActivationGate({ state, onActivated }: { state: DesktopState; onActivat
   const [submitting, setSubmitting] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
   const recovery = state.license.status === "invalid";
+  const revoked = state.license.reason_code === "license_revoked";
+  const title = revoked ? "activation.revokedTitle" : recovery ? "activation.recoveryTitle" : "activation.title";
+  const body = revoked ? "activation.revokedBody" : recovery ? "activation.recoveryBody" : "activation.firstUse";
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -587,8 +597,8 @@ function ActivationGate({ state, onActivated }: { state: DesktopState; onActivat
           <div><strong>CodexLink</strong><span>{t("app.subtitle")}</span></div>
         </div>
         <span className="section-kicker">{t("activation.eyebrow")}</span>
-        <h1 id="activation-title">{recovery ? t("activation.recoveryTitle") : t("activation.title")}</h1>
-        <p className="lede">{recovery ? t("activation.recoveryBody") : t("activation.firstUse")}</p>
+        <h1 id="activation-title">{t(title)}</h1>
+        <p className="lede">{t(body)}</p>
         <form className="activation-form" onSubmit={(event) => void submit(event)}>
           <div className="field-group">
             <label htmlFor="codexlink-activation-code">{t("activation.codeLabel")}</label>

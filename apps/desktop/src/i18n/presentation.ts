@@ -103,6 +103,7 @@ type ErrorPresentation = { title: string; action: string };
 const activationErrorKeys: Partial<Record<string, MessageKey>> = {
   activation_code_invalid: "activation.errorInvalid",
   activation_code_bound_elsewhere: "activation.errorBoundElsewhere",
+  activation_code_stopped: "activation.errorStopped",
   license_rate_limited: "activation.errorRateLimited",
   license_service_unavailable: "activation.errorUnavailable",
   license_service_unreachable: "activation.errorNetwork",

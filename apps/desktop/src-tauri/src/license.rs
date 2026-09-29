@@ -2,6 +2,7 @@ use crate::error::{DesktopError, DesktopResult};
 use crate::models::{LicenseSnapshot, LicenseStatus};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use ring::rand::SecureRandom as _;
 use ring::signature::{UnparsedPublicKey, ED25519};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,6 +26,14 @@ const LICENSE_FILE_MAX_BYTES: u64 = 16 * 1024;
 const DEVICE_IDENTITY_MAX_BYTES: u64 = 16 * 1024;
 const ACTIVATION_RESPONSE_MAX_BYTES: usize = 64 * 1024;
 const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(15);
+const LICENSE_STATUS_URL: &str = "https://deploy.syzdq.xyz/api/license/status";
+// The status reply is signed with the license key, so it carries its own
+// purpose and key set and can never be mistaken for a license.
+const LICENSE_STATUS_PURPOSE: &str = "license_status";
+const LICENSE_STATUS_VERSION: u32 = 1;
+const LICENSE_STATUS_TIMEOUT: Duration = Duration::from_secs(8);
+const LICENSE_STATUS_NONCE_BYTES: usize = 32;
+const LICENSE_REVOKED_REASON: &str = "license_revoked";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +74,55 @@ struct ActivationFailure {
     error: String,
 }
 
+#[derive(Serialize)]
+struct LicenseStatusRequest<'a> {
+    license_id: &'a str,
+    device_id: &'a str,
+    nonce: &'a str,
+}
+
+#[derive(Deserialize)]
+struct LicenseStatusSuccess {
+    status: SignedLicenseStatus,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignedLicenseStatus {
+    purpose: String,
+    status_version: u32,
+    license_id: String,
+    device_id: String,
+    nonce: String,
+    state: String,
+    checked_at: String,
+    signature: String,
+}
+
+#[derive(Serialize)]
+struct LicenseStatusSigningPayload<'a> {
+    checked_at: &'a str,
+    device_id: &'a str,
+    license_id: &'a str,
+    nonce: &'a str,
+    purpose: &'a str,
+    state: &'a str,
+    status_version: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoteLicenseState {
+    Active,
+    Revoked,
+}
+
+/// The verified license on this device, as the status check identifies it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LicenseBinding {
+    license_id: String,
+    device_id: String,
+}
+
 #[derive(Clone)]
 struct DeviceIdentity {
     device_id: String,
@@ -73,23 +131,49 @@ struct DeviceIdentity {
 pub(crate) struct LicenseManager {
     license_dir: PathBuf,
     snapshot: LicenseSnapshot,
+    binding: Option<LicenseBinding>,
 }
 
 impl LicenseManager {
     pub fn load(data_dir: &Path) -> Self {
         let license_dir = persistent_license_dir(data_dir);
-        let snapshot = match migrate_legacy_license_if_needed(data_dir, &license_dir) {
-            Ok(()) => inspect_saved_license(&license_dir),
-            Err(_) => invalid_snapshot("license_state_unavailable"),
+        let (snapshot, binding) = match migrate_legacy_license_if_needed(data_dir, &license_dir) {
+            Ok(()) => match load_saved_license(&license_dir) {
+                Ok(Some(binding)) => (activated_snapshot(), Some(binding)),
+                Ok(None) => (not_activated_snapshot(), None),
+                Err(reason) => (invalid_snapshot(reason), None),
+            },
+            Err(_) => (invalid_snapshot("license_state_unavailable"), None),
         };
         Self {
             license_dir,
             snapshot,
+            binding,
         }
     }
 
     pub fn snapshot(&self) -> LicenseSnapshot {
         self.snapshot.clone()
+    }
+
+    pub fn status_binding(&self) -> Option<LicenseBinding> {
+        self.binding.clone().filter(|_| self.snapshot.is_active())
+    }
+
+    /// Drops the saved license after the service signed its revocation. The
+    /// device identity stays, so a restored code re-activates this same device.
+    pub fn revoke(&mut self, revoked: &LicenseBinding) -> LicenseSnapshot {
+        if self.binding.as_ref() != Some(revoked) {
+            return self.snapshot();
+        }
+        // A failed delete still stops this launch; the next launch asks again.
+        let _ = remove_saved_license(&self.license_dir);
+        self.binding = None;
+        self.snapshot = LicenseSnapshot {
+            status: LicenseStatus::NotActivated,
+            reason_code: Some(LICENSE_REVOKED_REASON.to_string()),
+        };
+        self.snapshot()
     }
 
     pub async fn activate(&mut self, raw_code: &str) -> DesktopResult<LicenseSnapshot> {
@@ -128,64 +212,108 @@ impl LicenseManager {
         persist_signed_license(&self.license_dir, &success.license)
             .map_err(|_| license_store_failed())?;
 
-        self.snapshot = LicenseSnapshot {
-            status: LicenseStatus::Activated,
-            reason_code: None,
-        };
+        self.binding = Some(LicenseBinding {
+            license_id: success.license.license_id,
+            device_id: identity.device_id,
+        });
+        self.snapshot = activated_snapshot();
         Ok(self.snapshot())
     }
 }
 
-fn inspect_saved_license(license_dir: &Path) -> LicenseSnapshot {
+/// Asks the license service whether `binding` is still active. Every failure
+/// answers `None`: the check must never lock out a buyer who is offline.
+pub(crate) async fn fetch_license_status(binding: &LicenseBinding) -> Option<RemoteLicenseState> {
+    let verifying_key = production_verifying_key().ok()?;
+    let nonce = generate_status_nonce().ok()?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(LICENSE_STATUS_TIMEOUT)
+        .build()
+        .ok()?;
+    let response = client
+        .post(LICENSE_STATUS_URL)
+        .json(&LicenseStatusRequest {
+            license_id: &binding.license_id,
+            device_id: &binding.device_id,
+            nonce: &nonce,
+        })
+        .send()
+        .await
+        .ok()?;
+    if response.status() != reqwest::StatusCode::OK {
+        return None;
+    }
+    let bytes = read_bounded_response(response).await.ok()?;
+    parse_license_status(&bytes, binding, &nonce, &verifying_key)
+}
+
+fn parse_license_status(
+    body: &[u8],
+    binding: &LicenseBinding,
+    nonce: &str,
+    verifying_key: &[u8; 32],
+) -> Option<RemoteLicenseState> {
+    let success = serde_json::from_slice::<LicenseStatusSuccess>(body).ok()?;
+    verify_license_status(&success.status, binding, nonce, verifying_key).ok()
+}
+
+/// Reads the saved license: `None` when this device was never activated,
+/// the binding when it verifies, otherwise the reason it cannot be trusted.
+fn load_saved_license(license_dir: &Path) -> Result<Option<LicenseBinding>, &'static str> {
     let dir_metadata = match fs::symlink_metadata(&license_dir) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return not_activated_snapshot();
-        }
-        Err(_) => return invalid_snapshot("license_state_unavailable"),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("license_state_unavailable"),
     };
     if !dir_metadata.is_dir() {
-        return invalid_snapshot("license_state_invalid");
+        return Err("license_state_invalid");
     }
 
-    let identity = match load_identity(&license_dir) {
-        Ok(identity) => identity,
-        Err(reason) => return invalid_snapshot(reason),
-    };
+    let identity = load_identity(&license_dir)?;
     let license_path = license_dir.join(LICENSE_FILE_NAME);
     let license_metadata = match fs::symlink_metadata(&license_path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return not_activated_snapshot();
-        }
-        Err(_) => return invalid_snapshot("license_state_unavailable"),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("license_state_unavailable"),
     };
     if !license_metadata.is_file() || license_metadata.len() > LICENSE_FILE_MAX_BYTES {
-        return invalid_snapshot("license_file_invalid");
+        return Err("license_file_invalid");
     }
     let Some(identity) = identity else {
-        return invalid_snapshot("device_identity_missing");
+        return Err("device_identity_missing");
     };
 
-    let bytes = match read_bounded_file(&license_path, LICENSE_FILE_MAX_BYTES) {
-        Ok(bytes) => bytes,
-        Err(_) => return invalid_snapshot("license_file_invalid"),
-    };
-    let signed = match serde_json::from_slice::<SignedLicense>(&bytes) {
-        Ok(signed) => signed,
-        Err(_) => return invalid_snapshot("license_file_invalid"),
-    };
-    let verifying_key = match production_verifying_key() {
-        Ok(key) => key,
-        Err(_) => return invalid_snapshot("license_verifier_unavailable"),
-    };
-    if verify_signed_license(&signed, &identity.device_id, &verifying_key).is_ok() {
-        LicenseSnapshot {
-            status: LicenseStatus::Activated,
-            reason_code: None,
-        }
-    } else {
-        invalid_snapshot("license_invalid")
+    let bytes = read_bounded_file(&license_path, LICENSE_FILE_MAX_BYTES)
+        .map_err(|_| "license_file_invalid")?;
+    let signed =
+        serde_json::from_slice::<SignedLicense>(&bytes).map_err(|_| "license_file_invalid")?;
+    let verifying_key = production_verifying_key().map_err(|_| "license_verifier_unavailable")?;
+    verify_signed_license(&signed, &identity.device_id, &verifying_key)
+        .map_err(|_| "license_invalid")?;
+    Ok(Some(LicenseBinding {
+        license_id: signed.license_id,
+        device_id: identity.device_id,
+    }))
+}
+
+fn remove_saved_license(license_dir: &Path) -> io::Result<()> {
+    let path = license_dir.join(LICENSE_FILE_NAME);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => fs::remove_file(&path),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "license destination is not a regular file",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn activated_snapshot() -> LicenseSnapshot {
+    LicenseSnapshot {
+        status: LicenseStatus::Activated,
+        reason_code: None,
     }
 }
 
@@ -237,6 +365,58 @@ fn license_signing_message(signed: &SignedLicense) -> Result<Vec<u8>, ()> {
         product: &signed.product,
     })
     .map_err(|_| ())
+}
+
+fn verify_license_status(
+    status: &SignedLicenseStatus,
+    binding: &LicenseBinding,
+    nonce: &str,
+    verifying_key: &[u8; 32],
+) -> Result<RemoteLicenseState, ()> {
+    let state = match status.state.as_str() {
+        "active" => RemoteLicenseState::Active,
+        "revoked" => RemoteLicenseState::Revoked,
+        _ => return Err(()),
+    };
+    if status.purpose != LICENSE_STATUS_PURPOSE
+        || status.status_version != LICENSE_STATUS_VERSION
+        || status.license_id != binding.license_id
+        || status.device_id != binding.device_id
+        || status.nonce != nonce
+        || status.checked_at.is_empty()
+        || status.checked_at.len() > 128
+        || !status.checked_at.is_ascii()
+    {
+        return Err(());
+    }
+    let signature = URL_SAFE_NO_PAD
+        .decode(status.signature.as_bytes())
+        .map_err(|_| ())?;
+    UnparsedPublicKey::new(&ED25519, verifying_key)
+        .verify(&license_status_signing_message(status)?, &signature)
+        .map_err(|_| ())?;
+    Ok(state)
+}
+
+fn license_status_signing_message(status: &SignedLicenseStatus) -> Result<Vec<u8>, ()> {
+    serde_json::to_vec(&LicenseStatusSigningPayload {
+        checked_at: &status.checked_at,
+        device_id: &status.device_id,
+        license_id: &status.license_id,
+        nonce: &status.nonce,
+        purpose: &status.purpose,
+        state: &status.state,
+        status_version: status.status_version,
+    })
+    .map_err(|_| ())
+}
+
+fn generate_status_nonce() -> Result<String, ()> {
+    let mut bytes = [0u8; LICENSE_STATUS_NONCE_BYTES];
+    ring::rand::SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| ())?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
 fn bounded_identifier(value: &str, max_len: usize) -> bool {
@@ -571,6 +751,11 @@ fn activation_failure(code: &str) -> DesktopError {
             "This activation code is already bound to another device",
             "Use the device that was first activated, or purchase a new license for another device.",
         ),
+        "activation_code_stopped" => DesktopError::new(
+            "activation_code_stopped",
+            "This activation code has been stopped",
+            "Contact support@syzdq.xyz if you have questions about this license.",
+        ),
         "license_rate_limited" => DesktopError::new(
             "license_rate_limited",
             "Too many activation attempts were made",
@@ -736,6 +921,7 @@ mod tests {
         for code in [
             "activation_code_invalid",
             "activation_code_bound_elsewhere",
+            "activation_code_stopped",
             "license_rate_limited",
             "license_service_unavailable",
         ] {
@@ -854,5 +1040,227 @@ mod tests {
         signed.signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
         let public_key: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
         assert!(verify_signed_license(&signed, "wcd-device-a", &public_key).is_err());
+    }
+
+    // Signed by license-service `sign_license_status` with a throwaway test key
+    // (seed 0x07 * 32), so these pin the wire format both sides agree on.
+    const STATUS_TEST_PUBLIC_KEY: &str = "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw";
+    const STATUS_TEST_NONCE: &str = "nonce-fixture-0123456789";
+    const SERVER_ACTIVE_REPLY: &str = r#"{"ok":true,"status":{"purpose":"license_status","status_version":1,"license_id":"11111111-2222-3333-4444-555555555555","device_id":"wcd-abababababababababababababababababababababababababababababababab","nonce":"nonce-fixture-0123456789","state":"active","checked_at":"2026-09-29T08:00:00Z","signature":"WicIb4l2iKxbRh_PG7p6NhX5wxfDfC9RgkEx4I2uxhym8SVsT_rTBrwo8H4FRW5bj5AH27ZWdHQJXpvKhCyLDw"}}"#;
+    const SERVER_REVOKED_REPLY: &str = r#"{"ok":true,"status":{"purpose":"license_status","status_version":1,"license_id":"11111111-2222-3333-4444-555555555555","device_id":"wcd-abababababababababababababababababababababababababababababababab","nonce":"nonce-fixture-0123456789","state":"revoked","checked_at":"2026-09-29T08:00:00Z","signature":"L_DaHUrgg8wszV6tFUePRRZRlWJ7zivFEU2t6Axqi5-ycrv9SPQj0OlJepygYUJz9jmvyBiw3y1i_4bZoZ5mDQ"}}"#;
+
+    fn status_test_key() -> [u8; 32] {
+        URL_SAFE_NO_PAD
+            .decode(STATUS_TEST_PUBLIC_KEY)
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+
+    fn status_test_binding() -> LicenseBinding {
+        LicenseBinding {
+            license_id: "11111111-2222-3333-4444-555555555555".into(),
+            device_id: format!("wcd-{}", "ab".repeat(32)),
+        }
+    }
+
+    fn server_status(reply: &str) -> SignedLicenseStatus {
+        serde_json::from_str::<LicenseStatusSuccess>(reply)
+            .unwrap()
+            .status
+    }
+
+    #[test]
+    fn status_signing_message_matches_server_canonical_payload() {
+        assert_eq!(
+            String::from_utf8(
+                license_status_signing_message(&server_status(SERVER_REVOKED_REPLY)).unwrap()
+            )
+            .unwrap(),
+            r#"{"checked_at":"2026-09-29T08:00:00Z","device_id":"wcd-abababababababababababababababababababababababababababababababab","license_id":"11111111-2222-3333-4444-555555555555","nonce":"nonce-fixture-0123456789","purpose":"license_status","state":"revoked","status_version":1}"#
+        );
+    }
+
+    #[test]
+    fn server_signed_status_replies_verify() {
+        let key = status_test_key();
+        let binding = status_test_binding();
+        assert_eq!(
+            parse_license_status(
+                SERVER_ACTIVE_REPLY.as_bytes(),
+                &binding,
+                STATUS_TEST_NONCE,
+                &key
+            ),
+            Some(RemoteLicenseState::Active)
+        );
+        assert_eq!(
+            parse_license_status(
+                SERVER_REVOKED_REPLY.as_bytes(),
+                &binding,
+                STATUS_TEST_NONCE,
+                &key
+            ),
+            Some(RemoteLicenseState::Revoked)
+        );
+    }
+
+    #[test]
+    fn status_reply_must_answer_this_request() {
+        let key = status_test_key();
+        let binding = status_test_binding();
+        let reply = SERVER_REVOKED_REPLY.as_bytes();
+
+        assert_eq!(
+            parse_license_status(reply, &binding, "another-nonce-0123456789", &key),
+            None
+        );
+        let other_license = LicenseBinding {
+            license_id: "99999999-2222-3333-4444-555555555555".into(),
+            ..binding.clone()
+        };
+        assert_eq!(
+            parse_license_status(reply, &other_license, STATUS_TEST_NONCE, &key),
+            None
+        );
+        let other_device = LicenseBinding {
+            device_id: format!("wcd-{}", "cd".repeat(32)),
+            ..binding.clone()
+        };
+        assert_eq!(
+            parse_license_status(reply, &other_device, STATUS_TEST_NONCE, &key),
+            None
+        );
+        let production = production_verifying_key().unwrap();
+        assert_eq!(
+            parse_license_status(reply, &binding, STATUS_TEST_NONCE, &production),
+            None
+        );
+    }
+
+    #[test]
+    fn tampered_or_foreign_status_documents_are_ignored() {
+        let key = status_test_key();
+        let binding = status_test_binding();
+        let flipped = SERVER_ACTIVE_REPLY.replace(r#""state":"active""#, r#""state":"revoked""#);
+        assert_eq!(
+            parse_license_status(flipped.as_bytes(), &binding, STATUS_TEST_NONCE, &key),
+            None
+        );
+
+        let mut status = server_status(SERVER_REVOKED_REPLY);
+        status.purpose = "license".into();
+        assert!(verify_license_status(&status, &binding, STATUS_TEST_NONCE, &key).is_err());
+        let mut status = server_status(SERVER_REVOKED_REPLY);
+        status.status_version = 2;
+        assert!(verify_license_status(&status, &binding, STATUS_TEST_NONCE, &key).is_err());
+        let mut status = server_status(SERVER_REVOKED_REPLY);
+        status.state = "suspended".into();
+        assert!(verify_license_status(&status, &binding, STATUS_TEST_NONCE, &key).is_err());
+
+        let extra_field = SERVER_REVOKED_REPLY
+            .replace(r#""state":"revoked""#, r#""state":"revoked","reason":"x""#);
+        assert_eq!(
+            parse_license_status(extra_field.as_bytes(), &binding, STATUS_TEST_NONCE, &key),
+            None
+        );
+        let license =
+            serde_json::to_string(&signed_license(&signing_key(), &binding.device_id)).unwrap();
+        let license_as_status = format!(r#"{{"ok":true,"status":{license}}}"#);
+        assert_eq!(
+            parse_license_status(
+                license_as_status.as_bytes(),
+                &binding,
+                STATUS_TEST_NONCE,
+                &key
+            ),
+            None
+        );
+        let unknown = r#"{"ok":false,"error":"license_unknown"}"#;
+        assert_eq!(
+            parse_license_status(unknown.as_bytes(), &binding, STATUS_TEST_NONCE, &key),
+            None
+        );
+    }
+
+    #[test]
+    fn status_nonce_is_fresh_and_matches_server_shape() {
+        let first = generate_status_nonce().unwrap();
+        let second = generate_status_nonce().unwrap();
+        assert_ne!(first, second);
+        for nonce in [first, second] {
+            assert_eq!(nonce.len(), 43);
+            assert!(nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')));
+        }
+    }
+
+    fn revocation_fixture(name: &str) -> (PathBuf, LicenseManager) {
+        let license_dir = std::env::temp_dir().join(format!(
+            "codexlink-license-revoke-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&license_dir).unwrap();
+        fs::write(
+            license_dir.join(DEVICE_IDENTITY_FILE_NAME),
+            b"device-identity",
+        )
+        .unwrap();
+        fs::write(license_dir.join(LICENSE_FILE_NAME), b"signed-license").unwrap();
+        let manager = LicenseManager {
+            license_dir: license_dir.clone(),
+            snapshot: activated_snapshot(),
+            binding: Some(status_test_binding()),
+        };
+        (license_dir, manager)
+    }
+
+    #[test]
+    fn revocation_deletes_only_the_license_and_reports_why() {
+        let (license_dir, mut manager) = revocation_fixture("match");
+        assert_eq!(manager.status_binding(), Some(status_test_binding()));
+
+        let snapshot = manager.revoke(&status_test_binding());
+        assert_eq!(snapshot.status, LicenseStatus::NotActivated);
+        assert_eq!(snapshot.reason_code.as_deref(), Some("license_revoked"));
+        assert_eq!(manager.snapshot(), snapshot);
+        assert_eq!(manager.status_binding(), None);
+        assert!(!license_dir.join(LICENSE_FILE_NAME).exists());
+        assert_eq!(
+            fs::read(license_dir.join(DEVICE_IDENTITY_FILE_NAME)).unwrap(),
+            b"device-identity"
+        );
+
+        fs::remove_dir_all(license_dir).unwrap();
+    }
+
+    #[test]
+    fn revocation_for_another_license_changes_nothing() {
+        let (license_dir, mut manager) = revocation_fixture("mismatch");
+        let other = LicenseBinding {
+            license_id: "99999999-2222-3333-4444-555555555555".into(),
+            ..status_test_binding()
+        };
+
+        assert!(manager.revoke(&other).is_active());
+        assert_eq!(manager.status_binding(), Some(status_test_binding()));
+        assert!(license_dir.join(LICENSE_FILE_NAME).is_file());
+
+        fs::remove_dir_all(license_dir).unwrap();
+    }
+
+    #[test]
+    fn inactive_license_is_never_status_checked() {
+        let manager = LicenseManager {
+            license_dir: PathBuf::from("unused"),
+            snapshot: invalid_snapshot("license_invalid"),
+            binding: Some(status_test_binding()),
+        };
+        assert_eq!(manager.status_binding(), None);
     }
 }

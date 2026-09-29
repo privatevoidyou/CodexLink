@@ -6,6 +6,7 @@ import { LocaleProvider } from "./i18n/locale";
 
 const api = vi.hoisted(() => ({
   getState: vi.fn(),
+  checkLicenseStatus: vi.fn(),
   activateLicense: vi.fn(),
   updateTunnelConfig: vi.fn(),
   openPowerShellInstallGuide: vi.fn(),
@@ -239,6 +240,7 @@ describe("semantic Desktop UI", () => {
       },
     );
     api.activity.mockResolvedValue([]);
+    api.checkLicenseStatus.mockResolvedValue({ status: "activated" });
     api.getLaunchAtLogin.mockResolvedValue(false);
     api.openPowerShellInstallGuide.mockResolvedValue(undefined);
     api.openProductLink.mockResolvedValue(undefined);
@@ -569,6 +571,49 @@ describe("semantic Desktop UI", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("此激活码已绑定到另一台设备");
     expect(screen.queryByText(/Use the device that was first activated/i)).not.toBeInTheDocument();
+  });
+
+  it("explains a stopped activation code instead of showing backend English", async () => {
+    api.getState.mockResolvedValue({ ...firstRunState, license: { status: "not_activated" } });
+    api.activateLicense.mockRejectedValue({
+      code: "activation_code_stopped",
+      message: "This activation code has been stopped",
+      next_action: "Contact support@syzdq.xyz if you have questions about this license.",
+    });
+
+    renderApp();
+    const input = await screen.findByLabelText("销售激活码");
+    fireEvent.change(input, { target: { value: "MYWS-ABCDE-12345-FGHIJ-67890" } });
+    fireEvent.click(screen.getByRole("button", { name: "激活 CodexLink" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("此激活码已停用，如有疑问请联系 support@syzdq.xyz。");
+    expect(screen.queryByText(/has been stopped/i)).not.toBeInTheDocument();
+  });
+
+  it("stops a revoked license before resuming anything at launch", async () => {
+    api.getState.mockResolvedValue(firstRunState);
+    api.checkLicenseStatus.mockResolvedValue({ status: "not_activated", reason_code: "license_revoked" });
+
+    renderApp();
+
+    await screen.findByRole("heading", { name: "授权已停用", level: 1 });
+    expect(screen.getByText("此设备上的 CodexLink 授权已停用，如有疑问请联系 support@syzdq.xyz。")).toBeInTheDocument();
+    expect(screen.getByLabelText("销售激活码")).toBeEnabled();
+    expect(api.checkLicenseStatus).toHaveBeenCalledTimes(1);
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+  });
+
+  it("resumes the runtime only after this launch's license check passes", async () => {
+    let passCheck: (license: { status: "activated" }) => void = () => undefined;
+    api.getState.mockResolvedValue(firstRunState);
+    api.checkLicenseStatus.mockReturnValue(new Promise((resolve) => { passCheck = resolve; }));
+
+    renderApp();
+
+    await waitFor(() => expect(api.checkLicenseStatus).toHaveBeenCalledTimes(1));
+    expect(api.resumeSavedRuntime).not.toHaveBeenCalled();
+    await act(async () => passCheck({ status: "activated" }));
+    await waitFor(() => expect(api.resumeSavedRuntime).toHaveBeenCalledTimes(1));
   });
 
   it("shows customer-level recovery without exposing licensing internals", async () => {

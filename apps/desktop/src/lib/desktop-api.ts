@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivityEntry,
   DesktopState,
+  LicenseSnapshot,
   ProjectSelection,
   TunnelProxyMode,
 } from "../models/topology";
@@ -14,6 +15,7 @@ export const desktopApi = {
   updateTunnelConfig: (request: { action: "save"; tunnelId: string; apiKey: string | null } | { action: "use_environment" }) =>
     invoke<DesktopState>("update_tunnel_config", { request }),
   getState: () => invoke<DesktopState>("get_desktop_state"),
+  checkLicenseStatus: () => invoke<LicenseSnapshot>("check_license_status"),
   openPowerShellInstallGuide: () => invoke<void>("open_powershell_install_guide"),
   openProductLink: (target: ProductLinkTarget) =>
     invoke<void>("open_product_link", { request: { target } }),

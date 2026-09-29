@@ -129,13 +129,22 @@ CodexLink Desktop
 - `device_id` 派生；
 - 客户端只包含公钥验证材料，不包含私有签名 key；
 - 未激活时 runtime-creating operation fail closed；
-- 已激活设备可离线验证 License；
+- 已激活设备在本地验证 License；每次启动另向授权服务查询一次停用状态（v1.1.0 起，见 5.1）；
 - 历史 RC5 `license.json + device_identity.dpapi` 与当前 LicenseManager 兼容。
 - 当前工作树已把设备激活目标目录迁到 `%LOCALAPPDATA%\CodexLinkSecretKey\`，并增加跨旧目录迁移与“删除普通 app data 后设备资格仍存在”的自动化回归；
 - Activation error 由 `error.code` 映射到当前 UI locale，后端英文 `next_action` 不再直接暴露给中文用户；
 - Signed License 内部 `product: "webcodex-deployment"` 暂时作为签名协议字段保留，不能客户端单边改名；未来如迁移必须同时升级服务端签发端和客户端验证端。
 
 实现 checkpoint：`733b7b54 — CodexLink: restore RC5 device activation`。
+
+### 5.1 启动时停用检查（v1.1.0）
+
+- 每次启动只查一次：`POST https://deploy.syzdq.xyz/api/license/status`，请求体为 `license_id`、`device_id` 和本次随机 `nonce`；
+- 服务端用签发 License 的同一 key 签名 `purpose: "license_status"` 回复；客户端校验 purpose、`status_version`、license / device / nonce 与签名，任何一项不符都视为没有结果；
+- 回复为 `revoked` 时只删除 `license.json`，保留 `device_identity.dpapi`，并显示“授权已停用”；该码恢复后可在同一设备重新激活；
+- 网络失败、超时（8 秒）、非 200 或签名不符时授权照常可用（fail-open），下次启动再查；
+- 这次查询结束前，需要授权的操作（包括 runtime 自动恢复）等待其结果；
+- 服务端记录 license id、device id 和最近一次启动时间，不记录 IP。
 
 ---
 
@@ -173,7 +182,7 @@ Deployment Center 完成后可以把上述人工流程自动化为“验证购�
 - 销售码不写入 Operator 配置或本地历史；
 - `issue` 是非幂等操作，Operator **绝不自动重试签发请求**；
 - stdout 已收到有效 `MYWS-...` 时，即使 SSH 收尾异常也必须认定本次已经签发，不能再次自动 issue；
-- 当前服务端没有销售码专用 `revoke` / `list` / `inspect`，v1 不伪造这些能力。
+- 查码、停用 / 恢复和批量签发由商业仓库的本机运营工作台（`workbench/`）通过服务端固定命令 `myws-license-admin` 完成；本 Operator 仍只做 issue。
 
 实现与运维合同见 [`CODEXLINK_LICENSE_OPERATOR.md`](CODEXLINK_LICENSE_OPERATOR.md)。
 
@@ -223,7 +232,7 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 
 首版不提供授权转移：换设备需另购。重装 Windows 或更换 Windows 用户会丢失原有 CurrentUser DPAPI 设备身份，按新设备处理；普通卸载/重装只要保留设备资格目录，仍可在原身份下使用。售前说明必须明确这个区别。
 
-未激活码在退款例外中可以由授权服务阻止首次激活。已签发的永久离线 License 无法由服务器在设备离线时强制撤销；激活后的退款按人工例外处理，不对外承诺即时远程停用。具体售后条款仍须符合适用规则。
+未激活码退款前先停用该码，授权服务随后拒绝其首次激活（`activation_code_stopped`）。已激活 License 被停用后，客户端在下一次联网启动时删除本机 License；设备一直离线时仍可继续使用，因此不对外承诺即时停用。具体售后条款仍须符合适用规则。
 
 ---
 
@@ -246,7 +255,7 @@ Server、Runner、端口、enrollment、tunnel-client path、health URL 等全�
 1. 用户通过当前首批分发渠道可以取得正确 installer、版本、SHA256、激活码和图文教程；
 2. 新机器安装后，未激活时 Server / Runner / Tunnel 不偷跑；
 3. 有效销售激活码可以完成 Desktop 设备激活；无效码给出明确 customer-level 错误；
-4. 激活成功后重启可离线验证，不要求每次联网；
+4. 激活成功后重启在本地验证；启动时的停用检查联网失败不影响使用；
 5. 激活码不出现在普通 state、日志、activity、diagnostics；
 6. 激活成功后首次用户进入两步 onboarding；已有配置用户可跳过，跳过不伪造 readiness；
 7. upgrade / uninstall / reinstall 不删除 `%LOCALAPPDATA%\CodexLinkSecretKey\` 设备资格；即使普通 app data 被清理，同设备仍能恢复已激活状态；

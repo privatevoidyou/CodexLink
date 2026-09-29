@@ -44,6 +44,8 @@ myws_license.cli:main
 
 当前管理员能力已知有 `issue`、`public-key`、`verify-license`、`init`；当前没有销售码专用 `revoke`、`list`、`inspect`。因此 Operator v1 **只做 issue**，不在客户端伪造不存在的管理能力。
 
+> v1.1.0 更新：服务端已增加 `myws-license-admin` 运营命令（查码、停用 / 恢复、批量签发、批次统计、操作记录、备份），由商业仓库的本机运营工作台调用。本 Operator 不变，仍只做 issue。
+
 ## 3. 非幂等安全规则
 
 `issue` 是非幂等操作：每次调用都会创建一枚新的销售激活码。
@@ -129,7 +131,7 @@ stderr 用于故障说明，但不能覆盖已经收到的有效销售码。当�
 未来如果确实需要销售运营后台，再单独设计服务端管理能力，例如：
 
 - list / inspect；
-- revoke / disable；
+- revoke / disable（v1.1.0 已由运营工作台实现，见第 2 节）；
 - 销售订单备注或外部订单号；
 - 设备绑定状态查询；
 - 换机 / 解绑支持流程。

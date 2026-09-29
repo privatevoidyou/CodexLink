@@ -1,7 +1,7 @@
 use crate::activity::ActivityEntry;
 use crate::desktop_shell;
 use crate::error::DesktopError;
-use crate::models::{DesktopStateSnapshot, ProjectSelection, TunnelProxyMode};
+use crate::models::{DesktopStateSnapshot, LicenseSnapshot, ProjectSelection, TunnelProxyMode};
 use crate::state::AppState;
 use crate::tray;
 use serde::Deserialize;
@@ -113,6 +113,17 @@ pub async fn activate_license(
     state: State<'_, AppState>,
 ) -> Result<DesktopStateSnapshot, DesktopError> {
     project_state_result(&app, state.activate_license(&request.activation_code).await)
+}
+
+#[tauri::command]
+pub async fn check_license_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LicenseSnapshot, DesktopError> {
+    state.check_license_status().await;
+    let snapshot = state.get_state();
+    tray::refresh_from_snapshot(&app, &snapshot);
+    Ok(snapshot.license)
 }
 
 #[tauri::command]

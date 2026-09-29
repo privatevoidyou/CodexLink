@@ -372,7 +372,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         engine_version = engine_package["version"]
         self.assertEqual(engine_cargo["workspace"]["package"]["version"], engine_version)
-        self.assertEqual(product_version, "1.0.0")
+        self.assertEqual(product_version, "1.1.0")
         self.assertEqual(engine_version, "0.4.1")
 
     def test_ci_native_lane_conditions_are_classifier_driven(self) -> None:

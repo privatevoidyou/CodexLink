@@ -1,7 +1,7 @@
 use crate::activity::{ActivityEventKind, ActivityLevel, ActivityLog};
 use crate::deadline::Deadline;
 use crate::error::{DesktopError, DesktopResult};
-use crate::license::LicenseManager;
+use crate::license::{LicenseManager, RemoteLicenseState};
 use crate::models::{
     aggregate_readiness, ChatGptActivitySnapshot, DesktopOperationKind, DesktopStateSnapshot,
     Enrollment, Experience, Exposure, ExposureReadiness, LicenseSnapshot, ProjectReadiness,
@@ -72,6 +72,7 @@ pub struct AppState {
     shutdown_started: AtomicBool,
     license: Mutex<LicenseManager>,
     license_snapshot: Arc<RwLock<LicenseSnapshot>>,
+    license_check: tokio::sync::OnceCell<bool>,
 }
 
 impl AppState {
@@ -92,6 +93,7 @@ impl AppState {
             shutdown_started: AtomicBool::new(false),
             license: Mutex::new(license),
             license_snapshot,
+            license_check: tokio::sync::OnceCell::new(),
         })
     }
 
@@ -193,6 +195,33 @@ impl AppState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone_from(&snapshot);
         Ok(self.get_state())
+    }
+
+    /// Asks the license service once per launch whether a refund revoked the
+    /// saved license; concurrent callers share that one check. Returns whether
+    /// it revoked the license. Any failure keeps the license working.
+    pub async fn check_license_status(&self) -> bool {
+        *self
+            .license_check
+            .get_or_init(|| self.run_license_status_check())
+            .await
+    }
+
+    async fn run_license_status_check(&self) -> bool {
+        let Some(binding) = self.license.lock().await.status_binding() else {
+            return false;
+        };
+        if crate::license::fetch_license_status(&binding).await != Some(RemoteLicenseState::Revoked)
+        {
+            return false;
+        }
+        let snapshot = self.license.lock().await.revoke(&binding);
+        let revoked = !snapshot.is_active();
+        self.license_snapshot
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone_from(&snapshot);
+        revoked
     }
 
     pub fn activity(&self) -> Vec<crate::activity::ActivityEntry> {
@@ -446,14 +475,17 @@ impl AppState {
         if self.shutdown_signal.is_cancelled() {
             return Err(cancelled_error());
         }
-        if operation_requires_license(kind)
-            && !self
+        if operation_requires_license(kind) {
+            // Nothing licensed starts before this launch's status check settles.
+            self.check_license_status().await;
+            if !self
                 .license_snapshot
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .is_active()
-        {
-            return Err(crate::license::license_required_error());
+            {
+                return Err(crate::license::license_required_error());
+            }
         }
         let operation = self.operations.admit(kind, cancellable)?;
         let cancellation =
