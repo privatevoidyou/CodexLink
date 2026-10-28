@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WebCodex Desktop",
-  "mainBinaryName": "WebCodex",
-  "version": "0.4.1",
-  "identifier": "dev.webcodex.desktop",
+  "productName": "CodexLink",
+  "mainBinaryName": "CodexLink",
+  "version": "1.1.0",
+  "identifier": "dev.codexlink.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "WebCodex",
+        "title": "CodexLink",
         "width": 1180,
         "height": 760,
         "minWidth": 960,
@@ -41,4 +41,3 @@
     }
   }
 }
-

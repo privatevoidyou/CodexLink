@@ -327,7 +327,7 @@ export default function App() {
       <main className="splash">
         <img className="brand-mark" src={brandIcon} alt="" />
         {error ? (
-          <section className="startup-error" aria-label="WebCodex">
+          <section className="startup-error" aria-label="CodexLink">
             <AppError error={error} />
             <button
               className="primary-button"
@@ -353,7 +353,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><img className="brand-mark" src={brandIcon} alt="" /><div><strong>WebCodex</strong><span>Desktop</span></div></div>
+        <div className="brand"><img className="brand-mark" src={brandIcon} alt="" /><div><strong>CodexLink</strong><span>Desktop</span></div></div>
         <nav aria-label={t("nav.main")}>
           {NAVIGATION.map((item, index) => (
             <button

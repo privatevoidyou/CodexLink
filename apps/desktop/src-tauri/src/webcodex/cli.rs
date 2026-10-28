@@ -79,8 +79,8 @@ impl ResolvedBinaries {
                     .unwrap_or_else(|| "<Desktop resource directory>/webcodex-runtime".to_string());
                 return Err(DesktopError::new(
                     "bundled_runtime_missing",
-                    format!("The installed WebCodex runtime is missing: {expected}"),
-                    "Reinstall WebCodex Desktop from the matching release installer.",
+                    format!("The installed CodexLink runtime is missing: {expected}"),
+                    "Reinstall CodexLink Desktop from the matching release installer.",
                 ));
             } else if let Some(value) = std::env::var_os("WEBCODEX_DESKTOP_BIN_DIR") {
                 let directory = PathBuf::from(value);
@@ -88,7 +88,7 @@ impl ResolvedBinaries {
                     return Err(DesktopError::new(
                         "binary_directory_invalid",
                         "WEBCODEX_DESKTOP_BIN_DIR is empty",
-                        "Set it to the directory containing the source-matched WebCodex binaries.",
+                        "Set it to the directory containing the source-matched CodexLink binaries.",
                     ));
                 }
                 (directory, ResolvedBinarySource::Environment)
@@ -101,7 +101,7 @@ impl ResolvedBinaries {
                     .ok_or_else(|| {
                         DesktopError::new(
                             "binary_directory_invalid",
-                            "Could not derive the WebCodex source root",
+                            "Could not derive the CodexLink source root",
                             "Set WEBCODEX_DESKTOP_BIN_DIR explicitly.",
                         )
                     })?;
@@ -112,7 +112,7 @@ impl ResolvedBinaries {
             };
         let missing_directory_action = match source {
             ResolvedBinarySource::Bundled => {
-                "Reinstall WebCodex Desktop from the matching release installer."
+                "Reinstall CodexLink Desktop from the matching release installer."
             }
             ResolvedBinarySource::Environment | ResolvedBinarySource::SourceDogfoodTarget => {
                 "Build `cargo build --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner` from this source baseline or set WEBCODEX_DESKTOP_BIN_DIR."
@@ -122,7 +122,7 @@ impl ResolvedBinaries {
             DesktopError::new(
                 "binary_directory_missing",
                 format!(
-                    "WebCodex binary directory does not exist: {}",
+                    "CodexLink binary directory does not exist: {}",
                     directory.display()
                 ),
                 missing_directory_action,
@@ -135,14 +135,14 @@ impl ResolvedBinaries {
             if !path.is_file() {
                 return Err(DesktopError::new(
                     "binary_missing",
-                    format!("Required WebCodex binary is missing: {}", path.display()),
+                    format!("Required CodexLink binary is missing: {}", path.display()),
                     match source {
                         ResolvedBinarySource::Bundled => {
-                            "Reinstall WebCodex Desktop from the matching release installer."
+                            "Reinstall CodexLink Desktop from the matching release installer."
                         }
                         ResolvedBinarySource::Environment
                         | ResolvedBinarySource::SourceDogfoodTarget => {
-                            "Build all WebCodex dogfood binaries from the current source baseline."
+                            "Build all CodexLink dogfood binaries from the current source baseline."
                         }
                     },
                 ));
@@ -160,14 +160,14 @@ impl ResolvedBinaries {
             return Err(DesktopError::new(
                 "binary_version_mismatch",
                 "CLI, Server, and Runner were built from different baselines",
-                "Rebuild all dogfood binaries from one WebCodex checkout.",
+                "Rebuild all dogfood binaries from one CodexLink checkout.",
             ));
         }
         if cli_version.git_commit == "unknown" {
             return Err(DesktopError::new(
                 "binary_version_unverifiable",
-                "WebCodex binaries do not carry a source revision",
-                "Rebuild dogfood binaries with normal WebCodex build metadata enabled.",
+                "CodexLink binaries do not carry a source revision",
+                "Rebuild dogfood binaries with normal CodexLink build metadata enabled.",
             ));
         }
         Ok(Self {
@@ -215,14 +215,14 @@ async fn binary_version(
         return Err(DesktopError::new(
             "binary_probe_failed",
             format!("Could not read build identity from {}", path.display()),
-            "Rebuild the WebCodex dogfood binaries.",
+            "Rebuild the CodexLink dogfood binaries.",
         ));
     }
     parse_version_line(&output.stdout).ok_or_else(|| {
         DesktopError::new(
             "binary_probe_failed",
             format!("{} returned an invalid version identity", path.display()),
-            "Rebuild the WebCodex dogfood binaries from a compatible source baseline.",
+            "Rebuild the CodexLink dogfood binaries from a compatible source baseline.",
         )
     })
 }
@@ -303,7 +303,7 @@ pub async fn run_project_activation_json<T: DeserializeOwned>(
         };
         return Err(DesktopError::new(
             code,
-            "WebCodex could not activate the selected project on the current Runner",
+            "CodexLink could not activate the selected project on the current Runner",
             next_action,
         )
         .with_details(serde_json::json!({ "exit_code": output.exit_code })));
@@ -311,8 +311,8 @@ pub async fn run_project_activation_json<T: DeserializeOwned>(
     serde_json::from_slice(&output.stdout).map_err(|_| {
         DesktopError::new(
             "webcodex_contract_invalid",
-            "WebCodex returned invalid project activation output",
-            "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+            "CodexLink returned invalid project activation output",
+            "Verify that Desktop and CodexLink binaries come from the same source baseline.",
         )
     })
 }
@@ -337,7 +337,7 @@ pub async fn run_json_until<T: DeserializeOwned>(
     if output.exit_code != Some(0) {
         return Err(DesktopError::new(
             "webcodex_command_failed",
-            "WebCodex did not complete the requested operation",
+            "CodexLink did not complete the requested operation",
             "Open Activity for safe diagnostics, correct the configuration, and retry.",
         )
         .with_details(serde_json::json!({ "exit_code": output.exit_code })));
@@ -345,8 +345,8 @@ pub async fn run_json_until<T: DeserializeOwned>(
     serde_json::from_slice(&output.stdout).map_err(|_| {
         DesktopError::new(
             "webcodex_contract_invalid",
-            "WebCodex returned invalid machine-readable output",
-            "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+            "CodexLink returned invalid machine-readable output",
+            "Verify that Desktop and CodexLink binaries come from the same source baseline.",
         )
     })
 }
@@ -394,7 +394,7 @@ async fn run_bounded_until(
     if stdin_payload.is_some_and(|payload| payload.len() > CLI_INPUT_BYTES) {
         return Err(DesktopError::new(
             "webcodex_command_input_failed",
-            "Protected WebCodex command input exceeds the Desktop safety limit",
+            "Protected CodexLink command input exceeds the Desktop safety limit",
             "Retry with a valid bounded Desktop input.",
         ));
     }
@@ -411,7 +411,7 @@ async fn run_bounded_until(
             .map_err(|error| {
                 DesktopError::new(
                     "webcodex_command_start_failed",
-                    "Could not start a safely owned WebCodex command",
+                    "Could not start a safely owned CodexLink command",
                     "Check the Desktop binary directory and execution permissions.",
                 )
                 .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
@@ -423,7 +423,7 @@ async fn run_bounded_until(
             cleanup_child_only(&mut child, deadline).await;
             return Err(DesktopError::new(
                 "webcodex_command_start_failed",
-                "Could not capture WebCodex output",
+                "Could not capture CodexLink output",
                 "Retry the operation.",
             ));
         }
@@ -434,7 +434,7 @@ async fn run_bounded_until(
             cleanup_child_only(&mut child, deadline).await;
             return Err(DesktopError::new(
                 "webcodex_command_start_failed",
-                "Could not capture WebCodex diagnostics",
+                "Could not capture CodexLink diagnostics",
                 "Retry the operation.",
             ));
         }
@@ -455,7 +455,7 @@ async fn run_bounded_until(
             .await;
             return Err(DesktopError::new(
                 "webcodex_command_input_failed",
-                "Could not open protected input for the WebCodex command",
+                "Could not open protected input for the CodexLink command",
                 "Retry the operation.",
             ));
         };
@@ -476,7 +476,7 @@ async fn run_bounded_until(
                 .await;
                 return Err(DesktopError::new(
                     "webcodex_command_input_failed",
-                    "Could not pass protected input to WebCodex",
+                    "Could not pass protected input to CodexLink",
                     "Retry the operation.",
                 ));
             }
@@ -518,7 +518,7 @@ async fn run_bounded_until(
             .await;
             return Err(DesktopError::new(
                 "webcodex_command_wait_failed",
-                "Could not observe the WebCodex command result",
+                "Could not observe the CodexLink command result",
                 "Retry the operation.",
             ));
         }
@@ -588,7 +588,7 @@ async fn run_bounded_until(
             .await;
             return Err(DesktopError::new(
                 "webcodex_command_wait_failed",
-                "Could not verify that the Desktop-owned WebCodex process tree exited",
+                "Could not verify that the Desktop-owned CodexLink process tree exited",
                 "Retry the operation after checking Activity.",
             ));
         }
@@ -829,7 +829,7 @@ async fn finish_task<T>(task: &mut Option<JoinHandle<T>>, deadline: Instant) {
 fn timeout_error() -> DesktopError {
     DesktopError::new(
         "webcodex_command_timeout",
-        "WebCodex did not finish within the Desktop command timeout",
+        "CodexLink did not finish within the Desktop command timeout",
         "Check Server reachability and retry.",
     )
 }

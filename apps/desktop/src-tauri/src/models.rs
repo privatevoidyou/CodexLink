@@ -180,8 +180,8 @@ pub fn aggregate_readiness(
         (
             ReadinessSummaryKind::ServiceNeedsAttention,
             Some(ReadinessNextActionKind::StartOrReconnectService),
-            "WebCodex Service needs attention".to_string(),
-            Some("Start or reconnect the WebCodex Service.".to_string()),
+            "CodexLink Service needs attention".to_string(),
+            Some("Start or reconnect the CodexLink Service.".to_string()),
         )
     } else if !matches!(runner, RunnerReadiness::Ready) {
         (

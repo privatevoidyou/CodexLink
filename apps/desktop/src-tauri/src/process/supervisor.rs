@@ -263,7 +263,7 @@ impl ProcessSupervisor {
             DesktopError::new(
                 "process_start_failed",
                 format!("Could not start the {kind:?} process"),
-                "Check the configured WebCodex binaries and retry.",
+                "Check the configured CodexLink binaries and retry.",
             )
             .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
         })?;

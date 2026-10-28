@@ -167,7 +167,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = build_menu(app, &projection)?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .tooltip("WebCodex Desktop")
+        .tooltip("CodexLink Desktop")
         .icon_as_template(cfg!(target_os = "macos"))
         .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
@@ -231,7 +231,7 @@ pub fn refresh_from_snapshot(app: &AppHandle, snapshot: &DesktopStateSnapshot) {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .replace(projection);
         }
-        Err(error) => eprintln!("WebCodex tray refresh failed: {error}"),
+        Err(error) => eprintln!("CodexLink tray refresh failed: {error}"),
     }
 }
 
@@ -275,7 +275,7 @@ fn build_menu(app: &AppHandle, projection: &TrayProjection) -> tauri::Result<Men
         None::<&str>,
     )?;
     let status_separator = PredefinedMenuItem::separator(app)?;
-    let open = MenuItem::with_id(app, OPEN_ID, "Open WebCodex", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, OPEN_ID, "Open CodexLink", true, None::<&str>)?;
     let activity = MenuItem::with_id(app, ACTIVITY_ID, "Activity…", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, None::<&str>)?;
     menu.append_items(&[
@@ -350,7 +350,7 @@ fn build_menu(app: &AppHandle, projection: &TrayProjection) -> tauri::Result<Men
         None::<&str>,
     )?;
     let quit_separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit WebCodex", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "Quit CodexLink", true, None::<&str>)?;
     menu.append_items(&[
         &preferences_separator,
         &launch_at_login,
@@ -431,7 +431,7 @@ fn spawn_state_action(app: &AppHandle, action: TrayStateAction) {
         match result {
             Ok(snapshot) => refresh_from_snapshot(&app, &snapshot),
             Err(error) => {
-                eprintln!("WebCodex tray action failed: {}", error.code);
+                eprintln!("CodexLink tray action failed: {}", error.code);
                 let snapshot = state.get_state();
                 refresh_from_snapshot(&app, &snapshot);
                 let _ = desktop_shell::navigate(&app, NavigationTarget::Activity);

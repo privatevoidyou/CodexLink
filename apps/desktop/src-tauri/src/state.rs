@@ -1086,7 +1086,7 @@ impl DesktopCore {
                         DesktopError::new(
                             "default_project_unavailable",
                             "Desktop could not prepare its default management project",
-                            "Check that the WebCodex Desktop install directory is writable, or choose another project from Change runtime mode.",
+                            "Check that the CodexLink Desktop install directory is writable, or choose another project from Change runtime mode.",
                         )
                         .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
                     })?;
@@ -1109,7 +1109,7 @@ impl DesktopCore {
             ActivityEventKind::LocalSetupPreparing,
             "desktop",
             ActivityLevel::Info,
-            "Preparing WebCodex on this computer",
+            "Preparing CodexLink on this computer",
         );
         self.snapshot.topology = Some(RuntimeTopology {
             experience: Experience::Full,
@@ -1176,7 +1176,7 @@ impl DesktopCore {
             if server_deadline.is_elapsed() {
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -1448,7 +1448,7 @@ impl DesktopCore {
             ActivityEventKind::LocalRuntimeReady,
             "desktop",
             ActivityLevel::Info,
-            "Local WebCodex runtime is ready",
+            "Local CodexLink runtime is ready",
         );
         self.get_state().await
     }
@@ -1501,7 +1501,7 @@ impl DesktopCore {
             ActivityEventKind::RemoteConnecting,
             "desktop",
             ActivityLevel::Info,
-            "Connecting this computer to the existing WebCodex Server",
+            "Connecting this computer to the existing CodexLink Server",
         );
         self.publish_snapshot();
 
@@ -1529,7 +1529,7 @@ impl DesktopCore {
                 if !pairing_code.starts_with("wc_pair_") {
                     return Err(DesktopError::new(
                             "pairing_code_invalid",
-                            "The saved Runner identity is not reusable and no new WebCodex pairing code was provided",
+                            "The saved Runner identity is not reusable and no new CodexLink pairing code was provided",
                             "Refresh this Runner connection with a new wc_pair_… code.",
                         ));
                 }
@@ -1582,7 +1582,7 @@ impl DesktopCore {
                 if server_deadline.is_elapsed() {
                     return Err(readiness_timeout_error(
                         "server_unreachable",
-                        "The existing WebCodex Server did not respond before the readiness deadline",
+                        "The existing CodexLink Server did not respond before the readiness deadline",
                         "Check the Server URL and network path, then retry.",
                     ));
                 }
@@ -1593,7 +1593,7 @@ impl DesktopCore {
         if !server_status.http_reachable {
             return Err(DesktopError::new(
                 "server_unreachable",
-                "The existing WebCodex Server is not reachable",
+                "The existing CodexLink Server is not reachable",
                 "Check the Server URL and network path, then retry.",
             ));
         }
@@ -1699,7 +1699,7 @@ impl DesktopCore {
             ActivityEventKind::RemoteConnected,
             "desktop",
             ActivityLevel::Info,
-            "This computer is connected to the existing WebCodex Server",
+            "This computer is connected to the existing CodexLink Server",
         );
         self.get_state().await
     }
@@ -1837,7 +1837,7 @@ impl DesktopCore {
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
                     "Quick Share returned an invalid readiness event",
-                    "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+                    "Verify that Desktop and CodexLink binaries come from the same source baseline.",
                 ));
             }
         };
@@ -1851,7 +1851,7 @@ impl DesktopCore {
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
                 "Quick Share readiness identity is incomplete",
-                "Update Desktop and WebCodex together.",
+                "Update Desktop and CodexLink together.",
             ));
         }
         cancellation.check()?;
@@ -1931,7 +1931,7 @@ impl DesktopCore {
             DesktopError::new(
                 "runtime_not_ready",
                 "Local Full Runtime has not been configured",
-                "Set up WebCodex on this computer before starting the secure tunnel.",
+                "Set up CodexLink on this computer before starting the secure tunnel.",
             )
         })?;
         if topology.experience != Experience::Full
@@ -1939,7 +1939,7 @@ impl DesktopCore {
         {
             return Err(DesktopError::new(
                 "unsupported_topology",
-                "Regular OpenAI Secure Tunnel is only started for a local WebCodex Server",
+                "Regular OpenAI Secure Tunnel is only started for a local CodexLink Server",
                 "Manage external exposure on the remote Server instead.",
             ));
         }
@@ -1971,7 +1971,7 @@ impl DesktopCore {
         if !current.readiness.runtime_ready {
             return Err(DesktopError::new(
                 "runtime_not_ready",
-                "Local WebCodex runtime is not ready",
+                "Local CodexLink runtime is not ready",
                 "Restore the Server and Runner readiness before starting the secure tunnel.",
             ));
         }
@@ -2104,7 +2104,7 @@ impl DesktopCore {
                 return Err(DesktopError::new(
                     "webcodex_contract_invalid",
                     "Regular Tunnel returned an invalid readiness event",
-                    "Verify that Desktop and WebCodex binaries come from the same source baseline.",
+                    "Verify that Desktop and CodexLink binaries come from the same source baseline.",
                 ));
             }
         };
@@ -2119,7 +2119,7 @@ impl DesktopCore {
             return Err(DesktopError::new(
                 "webcodex_contract_invalid",
                 "Regular Tunnel readiness identity is incomplete",
-                "Update Desktop and WebCodex together.",
+                "Update Desktop and CodexLink together.",
             ));
         }
         cancellation.check()?;
@@ -2269,7 +2269,7 @@ impl DesktopCore {
                 .await;
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -2283,7 +2283,7 @@ impl DesktopCore {
                     .await;
                     return Err(DesktopError::new(
                         "server_start_failed",
-                        "The Desktop-owned WebCodex Server exited during startup",
+                        "The Desktop-owned CodexLink Server exited during startup",
                         "Open Activity for safe diagnostics and retry.",
                     ));
                 }
@@ -2312,7 +2312,7 @@ impl DesktopCore {
                 .await;
                 return Err(readiness_timeout_error(
                     "server_unreachable",
-                    "WebCodex Service did not become ready",
+                    "CodexLink Service did not become ready",
                     "Check the local Service diagnostics and retry.",
                 ));
             }
@@ -2884,7 +2884,7 @@ fn desktop_state_corrupt() -> DesktopError {
     DesktopError::new(
         "desktop_state_corrupt",
         "Desktop saved state is corrupt and no valid recovery snapshot is available",
-        "Restore or remove the Desktop state files explicitly, then restart WebCodex Desktop.",
+        "Restore or remove the Desktop state files explicitly, then restart CodexLink Desktop.",
     )
     .with_details(serde_json::json!({ "category": "state_corrupt" }))
 }
@@ -2901,7 +2901,7 @@ fn reserve_loopback_address() -> DesktopResult<String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| {
         DesktopError::new(
             "local_port_unavailable",
-            "Desktop could not reserve a loopback port for WebCodex",
+            "Desktop could not reserve a loopback port for CodexLink",
             "Check local networking and retry.",
         )
     })?;
@@ -3150,7 +3150,7 @@ mod tests {
     #[test]
     fn default_management_project_uses_safe_platform_location() {
         let data = PathBuf::from(r"C:\Users\test\AppData\Local\WebCodex");
-        let resources = PathBuf::from(r"D:\Apps\WebCodex Desktop");
+        let resources = PathBuf::from(r"D:\Apps\CodexLink Desktop");
         let project = default_management_project_dir(&data, &resources);
         #[cfg(windows)]
         assert_eq!(project, resources);

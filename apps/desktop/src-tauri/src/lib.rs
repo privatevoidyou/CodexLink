@@ -67,7 +67,7 @@ pub fn run() {
             commands::get_bounded_activity,
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build WebCodex Desktop");
+        .expect("failed to build CodexLink Desktop");
 
     app.run(|app_handle, event| match event {
         tauri::RunEvent::WindowEvent {
